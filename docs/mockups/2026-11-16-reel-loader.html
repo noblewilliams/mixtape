@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reel loader</title>
+<style>
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1280px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:56px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+p{max-width:840px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:840px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:840px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.rec{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;color:#a7d8b4;border:1px solid rgba(112,151,120,.6);margin-left:6px;vertical-align:1px}
+.was{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;color:#cfc5d1;border:1px solid #5a5560;margin-left:6px;vertical-align:1px}
+.frames{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+figure{margin:0}
+figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+figcaption b{color:#fff;font-weight:600;display:block}
+
+/* ---------- Product language (from the 2026-09-17 / 2026-11-13 boards) ---------- */
+.phone{width:390px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+.phone.tall{height:844px}
+.slice{width:390px;max-width:100%;border-radius:26px;padding:8px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet));
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.slice .screen{border-radius:20px;padding:14px 18px}
+.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.large .screen{font-size:26px;line-height:1.25}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif}
+.large-title{flex:none;padding:30px 20px 8px}
+.large-title h1{margin:0;font:800 1.75em/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.starting{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 36px 300px}
+.starting .t{font:700 1.3em -apple-system,sans-serif;margin-top:12px}
+.starting .h{color:var(--muted);font-size:.9em;margin-top:10px}
+.bpanel{position:absolute;left:0;right:0;bottom:0;padding:8px 14px 120px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);box-shadow:0 -1px 0 rgba(255,255,255,.12) inset}
+.grab{width:36px;height:5px;border-radius:3px;background:rgba(127,120,130,.45);margin:2px auto 12px}
+.composer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 40px;align-items:center;gap:6px;min-height:52px;padding:6px 6px 6px 16px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px}
+.composer::after{content:"";position:absolute;left:18px;right:18px;bottom:-1px;height:2px;border-radius:2px;background:var(--prism)}
+.composer .field{color:var(--text);font-size:.95em;line-height:1.3}
+.stop{width:40px;height:40px;display:grid;place-items:center}
+.stop i{width:28px;height:28px;display:grid;place-items:center;border-radius:8px 8px 10px 10px;background:rgba(255,255,255,.12)}
+.stop i::after{content:"";width:11px;height:11px;border-radius:2.5px;background:var(--plum)}
+.dock{position:absolute;left:24px;right:24px;bottom:26px;height:70px;border-radius:35px;background:rgba(80,70,120,.55);display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font:600 12px -apple-system,sans-serif;color:#f2eef1}
+.dock span:first-child{background:rgba(255,255,255,.12);margin:6px;border-radius:30px;padding:14px 0}
+/* Mixes row */
+.row{display:grid;grid-template-columns:68px minmax(0,1fr) auto;gap:14px;align-items:center;min-height:72px;padding:6px 0;position:relative}
+.row+.row::before{content:"";position:absolute;left:82px;right:0;top:0;height:1px;background:var(--hair)}
+.row .art{width:68px;height:44px;display:grid;place-items:center}
+.row strong{display:block;font-weight:600;font-size:1em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.large .row strong{white-space:normal}
+.row small{display:block;color:var(--muted);font-size:.82em}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--plum)}
+/* Chat working line */
+.user{text-align:right;color:var(--smoke);font-size:.95em;margin:4px 0 16px 60px}
+.working{display:flex;align-items:center;gap:10px;min-height:44px}
+.working .cap{color:var(--muted);font:500 13px -apple-system,sans-serif}
+.large .working .cap{font-size:22px}
+.tilt{transform:rotate(-4deg)}
+
+/* ---------- The artwork ---------- */
+.tile svg{display:block;width:100%;height:100%}
+.reel,.tile{flex:none}
+.reel{display:block;overflow:hidden;border-radius:23%;box-shadow:0 2px 6px rgba(23,22,26,.35)}
+.reel.round{border-radius:50%}
+.reel.wide{border-radius:5px}
+.reel svg{display:block;width:100%;height:100%}
+.spin .hubL{animation:hub 1.05s linear infinite}
+.spin .hubR{animation:hub 1.05s linear infinite reverse}
+.hubL{transform-origin:61px 61px}.hubR{transform-origin:139px 61px}
+@keyframes hub{to{transform:rotate(360deg)}}
+.still .hubL,.still .hubR{animation:none!important}
+@media (prefers-reduced-motion:reduce){.hubL,.hubR{animation:none!important}}
+.meas{font:12px ui-monospace,Menlo,monospace;color:#a79fab;margin-top:6px}
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px;max-width:1000px;margin-top:14px}
+.cell{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:16px}
+.cell .row3{display:flex;gap:22px;align-items:center;margin:8px 0}
+</style>
+<body>
+<main>
+<p class="kicker">Mobile · iOS · board for approval · 2026-11-16</p>
+<h1>Reel loader: zoom in on the turning hub</h1>
+<p class="note">Founder note on 1.1.0 (8): the working cassette's hubs do turn, but at these sizes they are 7–19 pt wide, so people see an illustration, not something loading. This board zooms in on one hub, the way the app icon does, so the turning is the main thing you see. It covers the three places the DJ works: Home's "Making your mix", a Mixes row, and the chat's working line.</p>
+
+<div class="callout"><strong>What you are approving</strong>
+<ul class="tight">
+<li>The reel, variant A: the app icon's crop on Home and in chat, and a wider close-up of the same hub in Mixes rows (revised 2026-11-16 after founder review).</li>
+<li>Where it replaces the working cassette: Home starting state, a working Mixes row, the chat working line.</li>
+<li>Sizes: 112 pt icon tile on Home, 34 pt icon tile in chat (tilted like today's cassette), and in a Mixes row a closer crop at the cassette's own 68 × 44 size. Same speed as today, one turn every 1.05 s.</li>
+<li>Covers light and dark mode, reduced motion and large text. Copy and announcements stay as they are.</li>
+</ul>
+<strong>Not changing:</strong> the full cassette stays wherever nothing is loading (empty states, version markers, a finished Mixes row, sign-in, first-run welcome). First run's "making" screen keeps its large 176 pt cassette, since it is the only thing on the screen.<br>
+<strong>Stop is already shipped:</strong> the stop key on Home's composer and in chat is in 1.1.0 (9) from this morning, so it appears below as it already is.</div>
+
+<h2>Why it gets missed</h2>
+<p class="note">The hub's width at each place it spins today, compared with the reel. At 1.05 s per turn, an 11 pt hub with 8 small teeth is hard to see moving out of the corner of your eye.</p>
+<div class="compare" id="why"></div>
+
+<h2>The reel: two ways to crop</h2>
+<p class="note">Both are drawn from the same cassette (<code>CassettePainter</code>, viewBox 200 × 128), cropped instead of shrunk. Nothing new is drawn by hand.</p>
+<div class="compare">
+  <div class="cell"><b>A · The icon, turning</b><span class="rec">Recommended</span>
+    <div class="row3" id="varA"></div>
+    <p class="note">On Home and in chat: exactly the app icon's crop (<code>assets/brand/app-icon.svg</code>, viewBox 108 22 78 78) in the icon's rounded square. In a Mixes row: a wider close-up of the same hub (viewBox 96 29 100 64) at the cassette's own 200 × 128 proportions. It reads as Mixtape at once, keeps the prism stripes and the mix's case colour along the bottom edge, and the hub takes up almost half the tile.</p>
+  </div>
+  <div class="cell"><b>B · Hub in a circle</b>
+    <div class="row3" id="varB"></div>
+    <p class="note">The hub centred in a circle with a ring of window and stock around it. It looks more like a spinner, but less like the app, and a round shape in a Mixes row clashes with the rectangular cassettes next to it. <b>Why it lost:</b> it is generic, and the brand moment is the point.</p>
+  </div>
+</div>
+
+<h2>Home · Making your mix</h2>
+<div class="frames">
+  <figure><div class="phone tall dark"><div class="screen" id="homeBefore"></div></div>
+    <figcaption><b>Today <span class="was">1.1.0 (8)</span></b>A 120 pt cassette whose hubs are 19 pt wide. It looks like a still picture.</figcaption></figure>
+  <figure><div class="phone tall dark"><div class="screen" id="homeAfter"></div></div>
+    <figcaption><b>Proposed <span class="rec">A</span></b>A 112 pt reel tile with a 46 pt turning hub, in the same spot and with the same lines under it. The stop key replaces send while the mix is being made (already in 1.1.0 (9)). VoiceOver still says "Making your mix" once.</figcaption></figure>
+</div>
+
+<h2>Mixes · a row while the DJ works</h2>
+<div class="frames">
+  <figure><div class="slice dark"><div class="screen" id="rowsBefore"></div></div>
+    <figcaption><b>Today</b>The 68 pt tile's 11 pt hubs turn, but you can barely see it.</figcaption></figure>
+  <figure><div class="slice dark"><div class="screen" id="rowsAfter"></div></div>
+    <figcaption><b>Proposed, dark</b>While the DJ works, the row's tape zooms in on its right hub: still 68 × 44 like every other tape in the list, still in the mix's own case colour, but the hub is 24 pt instead of 11. It's a close-up, not the app icon, so the row doesn't change height or shape. When the reply lands it goes back to the full cassette and the ready dot appears.</figcaption></figure>
+  <figure><div class="slice"><div class="screen" id="rowsLight"></div></div>
+    <figcaption><b>Proposed, light</b>Same row in light mode. The subtitle "The DJ is on it…" still says it in words, so the state never depends on motion alone.</figcaption></figure>
+</div>
+
+<h2>Chat · the DJ's working line</h2>
+<div class="frames">
+  <figure><div class="slice"><div class="screen" id="chatBefore"></div></div>
+    <figcaption><b>Today</b>A 44 pt tilted cassette with 7 pt hubs next to the caption.</figcaption></figure>
+  <figure><div class="slice"><div class="screen" id="chatAfter"></div></div>
+    <figcaption><b>Proposed</b>A 34 pt reel, tilted by the same 4° as today's cassette, with the same rotating captions. The line stays 44 pt tall, so nothing shifts when the reply replaces it.</figcaption></figure>
+  <figure><div class="slice dark"><div class="screen" id="chatDark"></div></div>
+    <figcaption><b>Proposed, dark</b>The same tile in dark mode. Its own colours don't change with the theme, as the cassette's don't, so it stands out against both backgrounds.</figcaption></figure>
+</div>
+
+<h2>Reduced motion and large text</h2>
+<div class="frames">
+  <figure><div class="slice dark"><div class="screen still" id="rmHome"></div></div>
+    <figcaption><b>Reduced motion</b>The hub stands still (the tile already stops its controller when the system asks for less motion). The words carry the state: "Making your mix", "The DJ is on it…", the caption.</figcaption></figure>
+  <figure><div class="slice large"><div class="screen" id="ltChat"></div></div>
+    <figcaption><b>Large text (200%)</b>The reel keeps its 34 pt size, lined up with the caption's first line. A long caption wraps beside it rather than under it.</figcaption></figure>
+  <figure><div class="slice dark large"><div class="screen" id="ltRow"></div></div>
+    <figcaption><b>Large text row</b>The title wraps, and the close-up stays at 68 × 44, centred in the art slot.</figcaption></figure>
+</div>
+
+<h2>Implementation notes</h2>
+<ul class="tight note">
+<li>A new <code>ReelTile</code> reuses <code>CassettePainter</code>: translate and scale the canvas to a crop rectangle, and clip it. There are two crops: <code>icon</code> (108 22 78 78, 23% continuous corners) and <code>row</code> (96 29 100 64, the cassette's own corner radius). Chat wraps it in the same −0.07 rad tilt the cassette has today. It has one hub controller, stops for reduced motion as <code>CassetteTile</code> does, and is excluded from semantics because the live regions around it already announce the state.</li>
+<li>Replaced in: <code>home_screen.dart</code> <code>_StartingState</code>, <code>mix_home_row.dart</code> <code>_tile</code> when <code>working</code>, and <code>lyric_turn.dart</code> <code>WorkingCassette</code>. <code>CassetteTile(spinning:)</code> stays for first run and the gallery.</li>
+<li>Switching between reel and cassette in a row is an instant swap, so a list scroll never animates layout.</li>
+</ul>
+</main>
+
+<script>
+const PRISM=['#c9687f','#d18a65','#d2c76f','#709778','#688fa8'];
+function hub(cls,x){
+  let teeth='';for(let i=0;i<8;i++)teeth+=`<rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(${i*45})"/>`;
+  return `<g class="${cls}"><g transform="translate(${x} 61)"><circle r="16" fill="#dedbd6" stroke="#28262a" stroke-width="4"/><g fill="#28262a">${teeth}</g><circle r="5" fill="#f4f1ec"/></g></g>`;
+}
+function tape(caseColor,vb){
+  const stripes=PRISM.map((c,i)=>`<rect x="14" y="${39+i*5}" width="172" height="5" fill="${c}"/>`).join('');
+  return `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <rect x="1" y="1" width="198" height="126" rx="9" fill="${caseColor}" stroke="#252328" stroke-width="2"/>
+  <rect x="3" y="3" width="194" height="122" rx="7" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="2"/>
+  <rect x="14" y="12" width="172" height="73" rx="5" fill="#f2ede2"/>
+  <line x1="22" y1="31" x2="178" y2="31" stroke="rgba(75,66,71,.34)"/>
+  ${stripes}
+  <rect x="42" y="42" width="116" height="39" rx="7" fill="#17161a" stroke="#28262a" stroke-width="2"/>
+  <rect x="72" y="55" width="56" height="12" rx="2" fill="#493638"/>
+  ${hub('hubL',61)}${hub('hubR',139)}
+  <path d="M48 89h104l12 30H36z" fill="#17161a" stroke="#28262a" stroke-width="2"/>
+  <circle cx="58" cy="105" r="6" fill="#f2f0eb" stroke="#544e52" stroke-width="2"/><circle cx="142" cy="105" r="6" fill="#f2f0eb" stroke="#544e52" stroke-width="2"/>
+  <rect x="75" y="100" width="8" height="13" rx="2" fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5"/><rect x="117" y="100" width="8" height="13" rx="2" fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5"/>
+  <circle cx="100" cy="108" r="4" fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5"/>
+  </svg>`;
+}
+const cassette=(w,c='#3f4851',spin=true,extra='')=>`<span class="tile ${spin?'spin':''} ${extra}" style="display:block;width:${w}px;height:${w*128/200}px">${tape(c,'0 0 200 128')}</span>`;
+const wide=(w,c='#45596d',spin=true)=>`<span class="reel wide ${spin?'spin':''}" style="width:${w}px;height:${w*128/200}px">${tape(c,'96 29 100 64')}</span>`;
+const tilted=(html)=>`<span class="tilt" style="display:inline-block">${html}</span>`;
+const reel=(w,c='#544451',variant='A',spin=true)=>`<span class="reel ${variant==='B'?'round':''} ${spin?'spin':''}" style="width:${w}px;height:${w}px">${tape(c,variant==='B'?'103 25 72 72':'108 22 78 78')}</span>`;
+
+// Why
+document.getElementById('why').innerHTML=[
+ ['Home',cassette(120),reel(112),'hub 19 pt → 46 pt'],
+ ['Mixes row',cassette(68,'#45596d'),wide(68),'hub 11 pt → 24 pt'],
+ ['Chat',tilted(cassette(44)),tilted(reel(34,'#3f4851')),'hub 7 pt → 14 pt'],
+].map(([n,a,b,m])=>`<div class="cell"><b>${n}</b><div class="row3">${a}<span style="color:#857e86">→</span>${b}</div><div class="meas">${m}</div></div>`).join('');
+document.getElementById('varA').innerHTML=reel(112)+wide(68)+tilted(reel(34,'#3f4851'));
+document.getElementById('varB').innerHTML=reel(112,'#544451','B')+reel(44,'#45596d','B')+tilted(reel(34,'#544451','B'));
+
+const status=`<div class="statusbar"><span>09:24</span><span>●●● 69</span></div>`;
+const dock=`<div class="dock"><span>Home</span><span>Mixes</span><span>Library</span><span>You</span></div>`;
+const panel=(stop)=>`<div class="bpanel"><div class="grab"></div><div class="composer"><div class="field">lofi Afro house slow living great instrumentals</div>${stop?'<span class="stop" title="Stop"><i></i></span>':'<span></span>'}</div></div>`;
+const starting=(art)=>`${status}<div class="large-title"><h1>Home</h1></div><div class="starting">${art}<div class="t">Making your mix</div><div class="h">Usually under a minute. You can leave this tab; it will be waiting in Mixes.</div></div>`;
+document.getElementById('homeBefore').innerHTML=starting(cassette(120))+panel(false)+dock;
+document.getElementById('homeAfter').innerHTML=starting(reel(112))+panel(true)+dock;
+
+const row=(art,title,sub,dot)=>`<div class="row"><span class="art">${art}</span><span><strong>${title}</strong><small>${sub}</small></span>${dot?'<span class="dot" title="Ready"></span>':'<span></span>'}</div>`;
+const rows=(working)=>row(working,'Slow-living Afro house','The DJ is on it…')+row(cassette(68,'#6f5a4d',false),'Deep Focus Runner’s Flow','Ready · 2 min ago',true)+row(cassette(68,'#3f4851',false),'Sunday kitchen soul','Yesterday');
+document.getElementById('rowsBefore').innerHTML=rows(cassette(68,'#45596d'));
+document.getElementById('rowsAfter').innerHTML=rows(wide(68));
+document.getElementById('rowsLight').innerHTML=rows(wide(68));
+
+const chat=(art,cap='Digging through the crates…')=>`<div class="user">swap the hip-hop for rock and dream pop, same pace</div><div class="working">${art}<span class="cap">${cap}</span></div>`;
+document.getElementById('chatBefore').innerHTML=chat(`<span class="tilt">${cassette(44,'#3f4851')}</span>`);
+document.getElementById('chatAfter').innerHTML=chat(tilted(reel(34,'#3f4851')));
+document.getElementById('chatDark').innerHTML=chat(tilted(reel(34,'#3f4851')),'Pulling records that fit…');
+
+document.getElementById('rmHome').innerHTML=`<div style="display:flex;gap:16px;align-items:center">${reel(72,'#544451','A',false)}<div><div style="font-weight:700">Making your mix</div><div style="color:var(--muted);font-size:.85em">Usually under a minute.</div></div></div>`;
+document.getElementById('ltChat').innerHTML=`<div class="working" style="align-items:flex-start">${tilted(reel(34,'#3f4851'))}<span class="cap">Pulling that playlist off the shelf…</span></div>`;
+document.getElementById('ltRow').innerHTML=row(wide(68),'Slow-living Afro house','The DJ is on it…');
+</script>
+</body>
+</html>

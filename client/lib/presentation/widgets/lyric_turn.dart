@@ -690,9 +690,9 @@ class WorkingCassette extends StatelessWidget {
   static const Key cassetteKey = Key('working-cassette');
   static const Key captionKey = WorkingIndicator.captionKey;
 
-  /// Down from the board's 56, which read too large beside one line of
-  /// caption (device smoke, 2026-11-13).
-  static const double cassetteWidth = 44;
+  /// The reel loader's icon crop (2026-11-16): a 14 pt hub where the whole
+  /// 44 pt cassette had 7 pt ones.
+  static const double cassetteWidth = 34;
 
   static const String announcement = WorkingIndicator.announcement;
   static const String caption = 'The DJ is listening…';
@@ -719,6 +719,7 @@ class WorkingCassette extends StatelessWidget {
                 child: CassetteTile(
                   key: WorkingCassette.cassetteKey,
                   width: WorkingCassette.cassetteWidth,
+                  crop: CassetteCrop.icon,
                   caseColor: caseColor ?? CassetteTile.caseColors.first,
                   spinning: true,
                   shadow: true,

@@ -623,7 +623,7 @@ void main() {
     });
   });
 
-  testWidgets('working: a 44 pt cassette in the tape colour, announced', (
+  testWidgets('working: a 34 pt tilted reel in the tape colour, announced', (
     tester,
   ) async {
     final handle = tester.ensureSemantics();
@@ -632,8 +632,17 @@ void main() {
     final cassette = tester.widget<CassetteTile>(
       find.byKey(WorkingCassette.cassetteKey),
     );
-    // Device smoke 2026-11-13: down from 56, which read too large.
-    expect(cassette.width, 44);
+    // Reel loader 2026-11-16: the app icon's crop, so the hub reads as
+    // turning (the 44 pt whole cassette's hubs were 7 pt).
+    expect(cassette.width, 34);
+    expect(cassette.crop, CassetteCrop.icon);
+    final tilt = tester.widget<Transform>(
+      find.ancestor(
+        of: find.byKey(WorkingCassette.cassetteKey),
+        matching: find.byType(Transform),
+      ).first,
+    );
+    expect(tilt.transform.getRotation().entry(1, 0), closeTo(-0.07, 0.001));
     expect(cassette.caseColor, denim);
     expect(cassette.spinning, isTrue);
     expect(

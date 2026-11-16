@@ -215,6 +215,9 @@ class _MixHomeRowState extends State<MixHomeRow> {
     caseColor: tapeColor(widget.session.caseColor),
     shadow: true,
     spinning: widget.working,
+    // Reel loader: while the DJ works, a close-up of the hub at the same
+    // size, so the turning is what you see.
+    crop: widget.working ? CassetteCrop.row : CassetteCrop.whole,
   );
 
   /// The unread dot: plum, the app's own ink, and named for VoiceOver.

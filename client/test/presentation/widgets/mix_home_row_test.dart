@@ -119,7 +119,11 @@ void main() {
       tester,
     ) async {
       await pump(tester, working: true);
-      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isTrue);
+      final tile = tester.widget<CassetteTile>(find.byType(CassetteTile));
+      expect(tile.spinning, isTrue);
+      // Reel loader: zoomed on a hub, at every tape's own width.
+      expect(tile.crop, CassetteCrop.row);
+      expect(tile.width, MixHomeRow.artSize);
       expect(find.text(MixHomeRow.workingSubtitle), findsOneWidget);
       expect(find.byKey(MixHomeRow.readyKey('one')), findsNothing);
     });
@@ -135,7 +139,9 @@ void main() {
 
     testWidgets('a quiet mix shows neither', (tester) async {
       await pump(tester);
-      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isFalse);
+      final tile = tester.widget<CassetteTile>(find.byType(CassetteTile));
+      expect(tile.spinning, isFalse);
+      expect(tile.crop, CassetteCrop.whole);
       expect(find.byKey(MixHomeRow.readyKey('one')), findsNothing);
       expect(find.text(MixHomeRow.workingSubtitle), findsNothing);
     });
