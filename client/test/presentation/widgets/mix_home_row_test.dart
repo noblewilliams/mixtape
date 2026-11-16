@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/widgets/foundation/shimmer.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
@@ -125,6 +126,15 @@ void main() {
       expect(tile.crop, CassetteCrop.row);
       expect(tile.width, MixHomeRow.artSize);
       expect(find.text(MixHomeRow.workingSubtitle), findsOneWidget);
+      // Loader polish (2026-11-16): no ellipsis; it shimmers instead.
+      expect(MixHomeRow.workingSubtitle, 'The DJ is on it');
+      expect(
+        find.ancestor(
+          of: find.text(MixHomeRow.workingSubtitle),
+          matching: find.byType(Shimmer),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(MixHomeRow.readyKey('one')), findsNothing);
     });
 
