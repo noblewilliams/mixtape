@@ -593,7 +593,29 @@ function normalizeError(e: unknown): DjError {
     return err
   }
   if (e instanceof QueueVersionConflict) return new DjError('conflict', CONFLICT_APOLOGY)
-  return new DjError('internal', INTERNAL_APOLOGY)
+  const err = new DjError('internal', INTERNAL_APOLOGY)
+  err.detail = internalDetail(e)
+  return err
+}
+
+/**
+ * A content-free cause for an unexpected error, for the turn log: the error's
+ * class, a Postgres SQLSTATE code when there is one, and the names of the
+ * first few functions on its stack. Never the message, which can carry SQL
+ * values or listener text. An internal error used to log no cause at all
+ * (propose-first G2, 2026-11-16).
+ */
+export function internalDetail(e: unknown): string {
+  if (!(e instanceof Error)) return typeof e
+  const code = (e as { code?: unknown }).code
+  const sqlState = typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) ? code : null
+  const frames = (e.stack ?? '')
+    .split('\n')
+    .slice(1)
+    .map((line) => /^\s*at (?:async )?([A-Za-z_$][\w$.]*) \(/.exec(line)?.[1])
+    .filter((name): name is string => !!name)
+    .slice(0, 4)
+  return [e.name, sqlState, frames.length > 0 ? frames.join('<') : null].filter(Boolean).join(' ').slice(0, 200)
 }
 
 // Counts curate() invocations across a single attemptTurn call and throws
