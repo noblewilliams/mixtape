@@ -607,6 +607,11 @@ function normalizeError(e: unknown): DjError {
 // every DjError, this one included.
 class CurationBudget {
   private spent = 0
+  // Curations still allowed this turn: a step that may go without one (an
+  // edit's outside proposals) checks this rather than tripping the cap.
+  remaining(): number {
+    return Math.max(0, MAX_CURATIONS_PER_TURN - this.spent)
+  }
   consume(): void {
     this.spent += 1
     if (this.spent > MAX_CURATIONS_PER_TURN) {
@@ -1499,8 +1504,10 @@ async function verifyRound(
 export const EDIT_SPARES = 2
 
 // One swap or extend request's songs from outside the listener's music: a
-// proposal call for `want` plus EDIT_SPARES, verified on Apple (`want` at
-// most) inside the turn's VERIFY_MAX, deadline and curation budget. `keys`
+// proposal call for `want` plus EDIT_SPARES, all of them verified on Apple
+// inside the turn's VERIFY_MAX, deadline and curation budget, so a song the
+// caller then drops (already in the queue or batch, or failing the sound
+// check) falls back to a spare. The caller keeps `want` at most. `keys`
 // holds an artist scope: only proposals, and Apple hits, crediting one of
 // those artists count. Null when no search is left to verify with. Shared by
 // a corpus listener's proposed edits (NEVER_REFUSE) and a personal
@@ -1522,7 +1529,8 @@ async function proposeEditSongs(
   if (!proposals) return null
   const keys = req.keys
   const credited = (artist: string) => !keys || creditedKeys(artist).some((k) => keys.includes(k))
-  const result = await verifyRound(db, fill, ctx, { intent: req.intent, want: req.want }, proposals.filter((p) => credited(p.artist)), tracker, deps.step)
+  const result = await verifyRound(db, fill, ctx, { intent: req.intent, want: req.want + EDIT_SPARES },
+    proposals.filter((p) => credited(p.artist)), tracker, deps.step)
   return result.verified.filter((v) => credited(v.artist))
 }
 
@@ -2511,10 +2519,26 @@ async function executeEditQueue(
   // up from songs proposed for that request and verified on Apple, as a
   // corpus listener's edits are. Songs that land are new to them, marked
   // like outside picks; what is still short is said (editOutsideShortNotice).
+  //
+  // The curation cap (MAX_CURATIONS_PER_TURN) is never tripped by it: a
+  // request proposes only while the budget keeps one curation for each
+  // request after it (outsideRoom); with no room it is short as today.
+  // Shortfalls are kept per scope (editShort, keyed by the artists' label,
+  // '' for an unscoped request) so each is said for what it was.
   let topArtists: string[] | undefined
+  let requestTotal: number | undefined
   const editProposed: string[] = []
-  let editShort = 0
-  const editShortArtists = new Set<string>()
+  const editShort = new Map<string, { names: string[]; missing: number }>()
+  // Songs this batch has handed back (songKey), and as a list for the
+  // proposal calls' exclude: another release of one is the same song.
+  const batchSongs = new Set<string>()
+  const batchSongList: ProposedSong[] = []
+  const noteSong = (song: { title: string; artist: string }) => {
+    const key = songKey(song)
+    if (batchSongs.has(key)) return
+    batchSongs.add(key)
+    batchSongList.push({ title: song.title, artist: song.artist })
+  }
 
   // Resolves a swap/extend's replacement picks. `opIntent` is whatever the
   // model put on that specific op (may be absent). With no op intent, this
@@ -2538,6 +2562,7 @@ async function executeEditQueue(
     const callIndex = providerCalls
     providerCalls += 1
     const genreAtStart = genreDropped
+    const genreFailedAtStart = genreFailed
     // Each request's picking names the artists its own op names, never
     // those of this turn's generate it may fall back to.
     deps.step?.brief(opIntent && { onlyArtist: resolveOnlyArtist(opIntent)?.name, namedArtists: opIntent.namedArtists })
@@ -2583,24 +2608,42 @@ async function executeEditQueue(
     // model chose (never the weak fallback, as for outside picks), and never
     // for an own-music brief or allowOutside false (ownMusicBrief).
     const reachOutside = proposedFill === undefined && artistMode === 'personal' && proposeFirstActive(deps) &&
-      !weakIntent && !ownMusicBrief(fullIntent)
+      !weakIntent && !ownMusicBrief(fullIntent) && turn.remake !== true
+    // Room to propose: the curation budget keeps one curation for every
+    // request after this one, so their library curations never trip the cap.
+    requestTotal ??= planOps(activeQueue.map((t) => ({ id: t.trackId, trackId: t.trackId, reason: t.reason })), ops).requests.length
+    const outsideRoom = () => budget.remaining() > requestTotal! - (callIndex + 1)
+    // Verified songs not already in the queue or handed back by this batch,
+    // by track and by song (another release of the same song is the same).
+    const inQueue = new Set(activeQueue.map((t) => t.trackId))
+    const queueSongs = new Set(activeQueue.map(songKey))
+    const unseen = (found: VerifiedProposal[]) => found.filter((v) =>
+      !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId) && !queueSongs.has(songKey(v)) && !batchSongs.has(songKey(v)))
     // Up to `want` songs from outside for this request, beside `chosen` (the
-    // library's own picks for it, already in returnedThisBatch). Never
-    // throws but for the turn's own budget: a failed call is a shortfall.
+    // library's own picks for it, already in returnedThisBatch). Every slot
+    // the library left is handed here, so the library's sound-check drops for
+    // this request are superseded: what is still short is either the
+    // proposals' own sound-check drops (genreCheckNotice) or not found
+    // (editOutsideShortNotice), never both. Never throws but for the turn's
+    // own budget or a stopped turn: a failed call is a shortfall.
     const fromOutside = async (want: number, chosen: ProposedSong[], artists?: EditScope): Promise<Array<{ trackId: string; reason: string }>> => {
       let landed: VerifiedProposal[] = []
+      let gaps = 0
+      let checkFailed = false
       try {
         proposeCtx ??= await proposeContext(db, deps.fill!, session, userText, sessionContext)
         topArtists ??= await topLibraryArtists(db, session.userId)
-        const exclude = [...activeQueue.map((t) => ({ title: t.title, artist: t.artist })), ...(await removedSongs(db, session.id)), ...chosen]
+        const exclude = [...activeQueue.map((t) => ({ title: t.title, artist: t.artist })), ...(await removedSongs(db, session.id)), ...chosen, ...batchSongList]
         const intent: Intent = artists
           ? { ...fullIntent, targetCount: want, themes: `${fullIntent.themes} (only songs by ${artists.names.join(' or ')})` }
           : { ...fullIntent, targetCount: want }
         const found = await proposeEditSongs(db, deps, deps.fill!, proposeCtx,
           { intent, want, exclude, keys: artists?.keys, listener: 'personal', topArtists }, budget, turn.tracker)
-        const inQueue = new Set(activeQueue.map((t) => t.trackId))
-        const fresh = (found ?? []).filter((v) => !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId))
-        landed = (await genreFilter(deps, turn.tracker, fullIntent.genres, fresh, proposalCandidate)).kept.slice(0, want)
+        const candidates = unseen(found ?? [])
+        const checked = await genreFilter(deps, turn.tracker, fullIntent.genres, candidates, proposalCandidate)
+        landed = checked.kept.slice(0, want)
+        gaps = Math.max(0, Math.min(candidates.length, want) - landed.length)
+        checkFailed = checked.failed
         turn.tracker.spend!.log.verified += landed.length
         await fillProposalFeatures(db, deps.fill, turn.tracker, landed, deps.turnStopped)
       } catch (e) {
@@ -2609,14 +2652,18 @@ async function executeEditQueue(
       }
       for (const v of landed) {
         returnedThisBatch.add(v.trackId)
+        noteSong(v)
         editProposed.push(v.trackId)
       }
-      // The library's songs the sound check dropped for this request are no
-      // gap once a proposal took their place.
-      genreDropped -= Math.min(landed.length, genreDropped - genreAtStart)
-      if (landed.length < want) {
-        editShort += want - landed.length
-        for (const name of artists?.names ?? []) editShortArtists.add(name)
+      genreDropped = genreAtStart + gaps
+      genreFailed = genreFailedAtStart || (gaps > 0 && checkFailed)
+      if (gaps > 0) for (const g of fullIntent.genres ?? []) editGenres.add(g)
+      const missing = want - landed.length - gaps
+      if (missing > 0) {
+        const label = artists ? artists.names.join(' or ') : ''
+        const entry = editShort.get(label) ?? { names: artists?.names ?? [], missing: 0 }
+        entry.missing += missing
+        editShort.set(label, entry)
       }
       return landed.map((v) => ({ trackId: v.trackId, reason: v.reason }))
     }
@@ -2643,7 +2690,7 @@ async function executeEditQueue(
       const label = scope.names.join(' or ')
       // None of the artist's songs to draw on: from outside, else the
       // original track(s) stay and the result says why.
-      if (pool.length === 0 && reachOutside) return fromOutside(count, [], scope)
+      if (pool.length === 0 && reachOutside && outsideRoom()) return fromOutside(count, [], scope)
       if (pool.length === 0 && scope.kind === 'named') {
         namedMissing.add(label)
         return []
@@ -2663,13 +2710,14 @@ async function executeEditQueue(
       for (const p of picks) returnedThisBatch.add(p.trackId)
       artistLanded.push(...picks.map((p) => p.trackId))
       const own = picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
+      const chosen = picks.flatMap((p) => {
+        const t = byId.get(p.trackId)
+        return t ? [{ title: t.title, artist: t.artist }] : []
+      })
+      for (const c of chosen) noteSong(c)
       // Fewer than asked: the rest from outside, which says what is still
       // short itself.
-      if (reachOutside && picks.length < count) {
-        const chosen = picks.flatMap((p) => {
-          const t = byId.get(p.trackId)
-          return t ? [{ title: t.title, artist: t.artist }] : []
-        })
+      if (reachOutside && picks.length < count && outsideRoom()) {
         return [...own, ...await fromOutside(count - picks.length, chosen, scope)]
       }
       // Why fewer landed than asked: none fit, fewer fit than the artist
@@ -2684,19 +2732,29 @@ async function executeEditQueue(
       // per request (EDIT_SPARES), so one miss on Apple does not leave the
       // original song.
       proposeCtx ??= await proposeContext(db, proposedFill, session, userText, sessionContext)
-      const exclude = [...activeQueue.map((t) => ({ title: t.title, artist: t.artist })), ...(await removedSongs(db, session.id))]
+      const exclude = [...activeQueue.map((t) => ({ title: t.title, artist: t.artist })), ...(await removedSongs(db, session.id)), ...batchSongList]
       const found = await proposeEditSongs(db, deps, proposedFill, proposeCtx, { intent: fullIntent, want: count, exclude },
         budget, turn.tracker)
       if (!found) return [] // nothing left to verify with: the original track(s) stay
-      const inQueue = new Set(activeQueue.map((t) => t.trackId))
-      const fresh = await checkEditGenres(
-        found.filter((v) => !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId)).slice(0, count),
-        proposalCandidate)
+      // Spares stand in for songs the sound check drops; the places left
+      // empty are what the notice counts.
+      const candidates = unseen(found)
+      const checked = await genreFilter(deps, turn.tracker, fullIntent.genres, candidates, proposalCandidate)
+      const fresh = checked.kept.slice(0, count)
+      const gaps = Math.max(0, Math.min(candidates.length, count) - fresh.length)
+      if (gaps > 0) {
+        genreDropped += gaps
+        genreFailed ||= checked.failed
+        for (const g of fullIntent.genres ?? []) editGenres.add(g)
+      }
       turn.tracker.spend!.log.verified += fresh.length
       // Per request, as applyOps asks for them; the turn's one time box and
       // allowance bound the lot (fillProposalFeatures).
       await fillProposalFeatures(db, proposedFill, turn.tracker, fresh, deps.turnStopped)
-      for (const v of fresh) returnedThisBatch.add(v.trackId)
+      for (const v of fresh) {
+        returnedThisBatch.add(v.trackId)
+        noteSong(v)
+      }
       if (fresh.length > 0) proposedPicksLanded = true
       return fresh.map((v) => ({ trackId: v.trackId, reason: v.reason }))
     }
@@ -2727,7 +2785,7 @@ async function executeEditQueue(
     const pool = await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId),
       { mode: poolMode, playlistSeed: selectedSeed, outsideCap: cap })
     if (pool.length === 0) {
-      if (reachOutside) return fromOutside(count, [])
+      if (reachOutside && outsideRoom()) return fromOutside(count, [])
       return [] // shortfall — queue-store leaves the original track(s) in place
     }
     budget.consume()
@@ -2747,13 +2805,20 @@ async function executeEditQueue(
       })
     }
     for (const p of picks) returnedThisBatch.add(p.trackId)
-    const own = picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
+    const poolById = new Map(pool.map((t) => [t.trackId, t]))
+    for (const p of fresh) {
+      const t = poolById.get(p.trackId)
+      if (t) noteSong(t)
+    }
+    // Going outside, only the batch's fresh library picks are handed back:
+    // the store places replacements by index, so a repeat ahead of a
+    // proposal would push that proposal off the end. Otherwise as today.
+    const own = (reachOutside ? fresh : picks).map((p) => ({ trackId: p.trackId, reason: p.reason }))
     // The library curated fewer than asked (nothing in it fits the genre or
     // mood): the rest from outside.
-    if (reachOutside && fresh.length < count) {
-      const byId = new Map(pool.map((t) => [t.trackId, t]))
-      const chosen = picks.flatMap((p) => {
-        const t = byId.get(p.trackId)
+    if (reachOutside && fresh.length < count && outsideRoom()) {
+      const chosen = fresh.flatMap((p) => {
+        const t = poolById.get(p.trackId)
         return t ? [{ title: t.title, artist: t.artist }] : []
       })
       return [...own, ...await fromOutside(count - fresh.length, chosen)]
@@ -2794,7 +2859,7 @@ async function executeEditQueue(
         ...[...artistNoneFit].map((name) => artistNoneFitNotice(name, 'edit')),
         ...[...artistFewerFit].map(artistFewerFitNotice),
         ...[...artistShort].map(onlyArtistExhaustedNotice),
-        ...(editShort > 0 ? [editOutsideShortNotice(editShort, [...editShortArtists])] : []),
+        ...[...editShort.values()].map((e) => editOutsideShortNotice(e.missing, e.names)),
         ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
         'Updated queue (positions are 0-based):',
@@ -3189,7 +3254,7 @@ async function attemptTurn(
           }
         } else if (call.name === 'edit_queue') {
           deps.step?.({ step: 'editing' })
-          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
+          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web', ...(options.remake ? { remake: true } : {}) }, options.energyArc)
           resultText = outcome.resultText
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
           recordChange(changes, outcome, false)

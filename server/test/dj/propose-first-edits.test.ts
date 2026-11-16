@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
+import { eq } from 'drizzle-orm'
 import { djSessions, trackFeatures, trackMeanings, tracks, user, userTracks } from '../../src/db/schema'
 import {
   runDjTurn,
   editOutsideShortNotice,
+  genreCheckNotice,
   namedArtistsNotFoundNotice,
   outsidePicksNotice,
   type DjDeps,
@@ -40,11 +42,14 @@ type Proposed = { title: string; artist: string; reason: string }
 const kendrick = (n: number): Proposed[] => Array.from({ length: n }, (_, i) => ({ title: `K Song ${i}`, artist: 'Kendrick Lamar', reason: `k ${i}` }))
 const jazz = (n: number): Proposed[] => Array.from({ length: n }, (_, i) => ({ title: `Jazz ${i}`, artist: ['Miles Davis', 'Bill Evans'][i % 2], reason: `j ${i}` }))
 
-// Apple confirms every song in `confirmed`, labelled Jazz; finds no artists.
-function fakeApple(confirmed: Proposed[]) {
+// Apple confirms every song in `confirmed`, labelled Jazz unless `opts.genre`
+// says otherwise; finds no artists. `opts.freshIds` gives every search its
+// own Apple id, as another release of the same song would.
+function fakeApple(confirmed: Proposed[], opts: { genre?: (title: string) => string; freshIds?: boolean } = {}) {
   const searches: string[] = []
   const songs = new Map(confirmed.map((s, i) => [`${s.title} ${s.artist}`, {
-    appleId: `v-${i}`, isrc: null, title: s.title, artist: s.artist, album: 'Album', artwork: null, durationMs: 200_000, genre: 'Jazz', releaseYear: 1990, explicit: false,
+    appleId: `v-${i}`, isrc: null, title: s.title, artist: s.artist, album: 'Album', artwork: null, durationMs: 200_000,
+    genre: opts.genre?.(s.title) ?? 'Jazz', releaseYear: 1990, explicit: false,
   } satisfies CatalogSong]))
   const fill: FillDeps = {
     catalog: {
@@ -53,7 +58,8 @@ function fakeApple(confirmed: Proposed[]) {
       async searchSongs(_sf, term) {
         searches.push(term)
         const hit = songs.get(term)
-        return hit ? [hit] : []
+        if (!hit) return []
+        return [opts.freshIds ? { ...hit, appleId: `${hit.appleId}-${searches.length}` } : hit]
       },
     },
     defaultStorefront: 'us',
@@ -120,11 +126,14 @@ async function standingMix() {
 const swapKendrick = (extra: Record<string, unknown> = {}) =>
   ({ name: 'edit_queue', input: { ops: [{ op: 'swap', position: 1, intent: { themes: 'kendrick', namedArtists: ['Kendrick Lamar'], ...extra } }] } })
 
-async function editTurn(db: TestDb, sessionId: string, call: { name: string; input: unknown }, opts: { proposed: Proposed[]; confirmed: Proposed[]; deps?: Partial<DjDeps>; brief?: string }) {
-  const { fill, searches } = fakeApple(opts.confirmed)
+async function editTurn(db: TestDb, sessionId: string, call: { name: string; input: unknown }, opts: {
+  proposed: Proposed[]; confirmed: Proposed[]; deps?: Partial<DjDeps>; brief?: string
+  apple?: Parameters<typeof fakeApple>[1]; turn?: Parameters<typeof runDjTurn>[4]
+}) {
+  const { fill, searches } = fakeApple(opts.confirmed, opts.apple)
   const { llm, requests } = scriptedLlm([call], opts.proposed)
   const deps: DjDeps = { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true, ...opts.deps }
-  const result = await runDjTurn(db, deps, { id: sessionId, userId: 'u1' }, opts.brief ?? 'swap in some Kendrick')
+  const result = await runDjTurn(db, deps, { id: sessionId, userId: 'u1' }, opts.brief ?? 'swap in some Kendrick', opts.turn)
   return { result, requests, searches, text: toolResults(requests)[0] }
 }
 
@@ -179,7 +188,8 @@ describe('propose first: edits reach songs they do not own', () => {
 
     expect(result.queue[1].title).toBe(round[1].title)
     expect(result.queue[1].newToYou).toBe(true)
-    expect(searches).toHaveLength(2)
+    // The song needed and its spares, searched together.
+    expect(searches).toHaveLength(3)
     expect(text).not.toMatch(/could not be found in their music/)
   })
 
@@ -244,5 +254,104 @@ describe('propose first edits: flag off is today', () => {
     expect(proposalRequests(off.requests)).toHaveLength(0)
     expect(off.result.queue.map((t) => t.trackId)).toEqual(off.before.map((t) => t.trackId))
     expect(off.text).toContain(namedArtistsNotFoundNotice(['Kendrick Lamar']))
+  })
+})
+
+const titleCompleteNone = (async () => '[]') as unknown as DjDeps['titleComplete']
+const jazzier = { themes: 'jazzier', genres: ['jazz'] }
+
+describe('propose first edits: budget, spares and dedupe', () => {
+  it('several short requests stay inside the curation cap: some land, the rest are short, the turn never fails', async () => {
+    const { db, session, before } = await standingMix()
+    const call = { name: 'edit_queue', input: { ops: [2, 4, 6, 8].map((position) => ({ op: 'swap', position, intent: jazzier })) } }
+    const { result, requests, text } = await editTurn(db, session.id, call,
+      { proposed: jazz(6), confirmed: jazz(6), deps: { titleComplete: titleCompleteNone }, brief: 'swap songs 2, 4, 6 and 8 for something jazzier' })
+
+    // Six curations at most: four library curations, two proposal calls.
+    expect(requests.filter((r) => r.tools.length === 0).length).toBeLessThanOrEqual(6)
+    expect(proposalRequests(requests)).toHaveLength(2)
+    const swapped = [2, 4, 6, 8].filter((i) => result.queue[i].trackId !== before[i].trackId)
+    expect(swapped).toHaveLength(2)
+    for (const i of swapped) expect(result.queue[i].title).toMatch(/^Jazz /)
+    // Two distinct songs: the second request did not repeat the first's.
+    expect(new Set(swapped.map((i) => result.queue[i].title)).size).toBe(2)
+    // The two left unswapped are the library's genre-check drops.
+    expect(text).toContain(genreCheckNotice({ dropped: 2, genres: ['jazz'], failed: false }))
+    expect(text).not.toMatch(/could not be found in their music/)
+  })
+
+  it('a proposal the sound check drops falls back to a spare', async () => {
+    const { db, session } = await standingMix()
+    const round = jazz(3)
+    const call = { name: 'edit_queue', input: { ops: [{ op: 'extend', count: 1, intent: jazzier }] } }
+    const { result, text } = await editTurn(db, session.id, call, {
+      proposed: round, confirmed: round, deps: { titleComplete: titleCompleteNone },
+      apple: { genre: (title) => (title === round[0].title ? 'Pop' : 'Jazz') },
+    })
+    expect(result.queue).toHaveLength(11)
+    expect(result.queue[10].title).toBe(round[1].title)
+    expect(text).not.toMatch(/failed the jazz check/)
+    expect(text).not.toMatch(/could not be found in their music/)
+  })
+
+  it('a proposal by another artist is never searched for a named edit; a spare lands', async () => {
+    const { db, session } = await standingMix()
+    const round = [{ title: 'Other Song', artist: 'Drake', reason: 'x' }, ...kendrick(2)]
+    const { result, searches } = await editTurn(db, session.id, swapKendrick(), { proposed: round, confirmed: round })
+    expect(result.queue[1].artist).toBe('Kendrick Lamar')
+    expect(searches.some((s) => s.includes('Drake'))).toBe(false)
+  })
+
+  it('two requests in one batch both land their own outside songs', async () => {
+    const { db, session } = await standingMix()
+    const call = { name: 'edit_queue', input: { ops: [1, 3].map((position) => ({ op: 'swap', position, intent: { themes: 'kendrick', namedArtists: ['Kendrick Lamar'] } })) } }
+    const { result, text } = await editTurn(db, session.id, call, { proposed: kendrick(4), confirmed: kendrick(4) })
+    expect(result.queue[1].artist).toBe('Kendrick Lamar')
+    expect(result.queue[3].artist).toBe('Kendrick Lamar')
+    expect(result.queue[1].title).not.toBe(result.queue[3].title)
+    expect(text).toContain(outsidePicksNotice([1, 3]))
+  })
+
+  it('another release of a song this batch already landed is not landed twice', async () => {
+    const { db, session } = await standingMix()
+    const call = { name: 'edit_queue', input: { ops: [1, 3].map((position) => ({ op: 'swap', position, intent: { themes: 'kendrick', namedArtists: ['Kendrick Lamar'] } })) } }
+    const { result } = await editTurn(db, session.id, call, { proposed: kendrick(4), confirmed: kendrick(4), apple: { freshIds: true } })
+    const titles = result.queue.map((t) => t.title)
+    expect(new Set(titles).size).toBe(titles.length)
+    expect(result.queue[1].artist).toBe('Kendrick Lamar')
+    expect(result.queue[3].artist).toBe('Kendrick Lamar')
+  })
+
+  it('a scoped and an unscoped shortfall are each said for what they were', async () => {
+    const { db, session } = await standingMix()
+    const call = { name: 'edit_queue', input: { ops: [
+      { op: 'swap', position: 1, intent: { themes: 'kendrick', namedArtists: ['Kendrick Lamar'] } },
+      { op: 'extend', count: 2, intent: jazzier },
+    ] } }
+    const { text } = await editTurn(db, session.id, call, { proposed: jazz(4), confirmed: [], deps: { titleComplete: titleCompleteNone } })
+    expect(text).toContain(editOutsideShortNotice(1, ['Kendrick Lamar']))
+    expect(text).toContain(editOutsideShortNotice(2, []))
+    expect(text).not.toContain(editOutsideShortNotice(3, ['Kendrick Lamar']))
+    // One gap, one notice: the library's genre drops were handed on.
+    expect(text).not.toMatch(/failed the jazz check/)
+  })
+
+  it('outside songs the sound check drops are said as failing it, not as not found', async () => {
+    const { db, session } = await standingMix()
+    const call = { name: 'edit_queue', input: { ops: [{ op: 'extend', count: 1, intent: jazzier }] } }
+    const { result, text } = await editTurn(db, session.id, call, {
+      proposed: jazz(3), confirmed: jazz(3), deps: { titleComplete: titleCompleteNone }, apple: { genre: () => 'Pop' },
+    })
+    expect(result.queue).toHaveLength(10)
+    expect(text).toContain(genreCheckNotice({ dropped: 1, genres: ['jazz'], failed: false }))
+    expect(text).not.toMatch(/could not be found in their music/)
+  })
+
+  it('a remake turn\'s edit never goes outside', async () => {
+    const { db, session } = await standingMix()
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    const { requests, searches } = await editTurn(db, session.id, swapKendrick(), { proposed: kendrick(3), confirmed: kendrick(3), turn: { remake: true } })
+    expect(proposalRequests(requests)).toHaveLength(0)
+    expect(searches).toHaveLength(0)
   })
 })

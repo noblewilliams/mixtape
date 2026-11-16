@@ -220,16 +220,25 @@ their music only when it cannot be covered from it: a named or artist-only
 scope with no songs to draw on (after the existing catalogue and Apple
 top-songs fill), or a curation that returns fewer than asked (nothing fits
 the genre or mood). Then one proposal call per request asks for the songs
-still needed plus `EDIT_SPARES` (2), verified on Apple (stopping at the
-songs needed) inside the turn's `VERIFY_MAX`, deadline and curation budget,
-and `fillProposalFeatures` runs on what lands. A scoped request keeps only
-proposals and Apple hits crediting its artists. Same gates as the blend:
-propose first active, an intent the model chose (never the weak fallback
-from the listener's words), never `ownMusicBrief` or `allowOutside: false`.
-Landed songs are marked new (`outsidePicksNotice`); what is still short is
-said by `editOutsideShortNotice`, and a swap with nothing confirmed keeps
-its original song. The machinery is shared with the corpus (NEVER_REFUSE)
-edit path (`proposeEditSongs`), which now asks for 2 spares too.
+still needed plus `EDIT_SPARES` (2), all verified on Apple inside the
+turn's `VERIFY_MAX` and deadline, so a song dropped afterwards (already in
+the queue or batch, by track or by song, or failing the sound check) falls
+back to a spare; `fillProposalFeatures` runs on what lands. A request
+proposes only while the curation budget keeps one curation for each later
+request in the batch, so the cap (6) is never tripped; with no room it is
+short as before. A scoped request keeps only proposals and Apple hits
+crediting its artists. Same gates as the blend: propose first active, an
+intent the model chose (never the weak fallback from the listener's
+words), never `ownMusicBrief`, `allowOutside: false` or a remake turn.
+Landed songs are marked new (`outsidePicksNotice`). What is still short is
+said once: proposals the sound check dropped by `genreCheckNotice`, the
+rest by `editOutsideShortNotice`, one per scope (named artists, or none);
+a swap with nothing confirmed keeps its original song. The machinery is
+shared with the corpus (NEVER_REFUSE) edit path (`proposeEditSongs`),
+which now asks for 2 spares too. Known limit: a saved "only my own music"
+preference reaches an edit only through the op's own intent
+(`allowOutside: false` set by the model), as for outside picks; an edit
+with no intent of its own never goes outside.
 
 ## Step 3: sequencing uses the new features (server)
 

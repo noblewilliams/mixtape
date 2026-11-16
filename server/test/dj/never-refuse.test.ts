@@ -679,6 +679,20 @@ describe('never refuse: edits on a proposed mix', () => {
     expect(ask).toContain(`- ${round[2].title} by ${round[2].artist}`)
   })
 
+  it('a swap whose first proposal misses on Apple lands a spare', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const { fill } = fakeApple((term) => (term.startsWith('Miss ') ? [] : echo(term)))
+    const round = await proposedMix(db, session.id, fill)
+    const { llm } = editLlm([{ op: 'swap', position: 2 }], [
+      { title: 'Miss', artist: 'Asake', reason: 'x' }, { title: 'Spare In', artist: 'Asake', reason: 'y' },
+    ])
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'swap the third one')
+    const titles = (await queueTitles(db, session.id)).map((r) => r.title)
+    expect(titles).toEqual([round[0].title, round[1].title, 'Spare In', round[3].title, round[4].title])
+  })
+
   it('extend by 3 appends three verified songs', async () => {
     const db = await createTestDb()
     await seedUser(db)
