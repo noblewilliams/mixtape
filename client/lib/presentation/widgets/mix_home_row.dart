@@ -12,6 +12,7 @@ import 'foundation/mixtape_menu.dart';
 import 'foundation/swipe_actions.dart';
 import 'tape_palette.dart';
 import 'tape_settings_dialog.dart';
+import 'foundation/shimmer.dart';
 
 /// Home owns canonical session state; this row only owns an unsaved name.
 class MixHomeRow extends StatefulWidget {
@@ -38,7 +39,24 @@ class MixHomeRow extends StatefulWidget {
   /// trailing edge until the conversation is opened.
   final bool ready;
 
-  static const String workingSubtitle = 'The DJ is on it…';
+  /// No ellipsis: [workingLine] shimmers it instead (founder, 2026-11-16).
+  static const String workingSubtitle = 'The DJ is on it';
+
+  /// The working subtitle, in [FlushRow]'s subtitle type, with a [Shimmer]
+  /// sweeping it so the row reads as loading (plain under reduced motion).
+  static Widget workingLine(BuildContext context) {
+    final tokens = context.tokens;
+    return Shimmer(
+      base: tokens.muted,
+      highlight: Shimmer.highlightFor(tokens.muted),
+      child: Text(
+        workingSubtitle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: tokens.meta.copyWith(fontSize: 12.5, color: tokens.muted),
+      ),
+    );
+  }
 
   /// The dot, for tests.
   static Key readyKey(String id) => ValueKey('mix-ready-$id');
@@ -177,6 +195,9 @@ class _MixHomeRowState extends State<MixHomeRow> {
           showChevron: false,
           title: widget.session.title,
           subtitle: _subtitle,
+          subtitleWidget: widget.working
+              ? MixHomeRow.workingLine(context)
+              : null,
           isFirst: true,
           onTap: () {},
         ),
@@ -215,6 +236,9 @@ class _MixHomeRowState extends State<MixHomeRow> {
     caseColor: tapeColor(widget.session.caseColor),
     shadow: true,
     spinning: widget.working,
+    // Reel loader: while the DJ works, a close-up of the hub at the same
+    // size, so the turning is what you see.
+    crop: widget.working ? CassetteCrop.row : CassetteCrop.whole,
   );
 
   /// The unread dot: plum, the app's own ink, and named for VoiceOver.
@@ -317,6 +341,7 @@ class _MixHomeRowState extends State<MixHomeRow> {
         showChevron: false,
         title: widget.session.title,
         subtitle: _subtitle,
+        subtitleWidget: widget.working ? MixHomeRow.workingLine(context) : null,
         isFirst: widget.isFirst,
         onTap: _busy ? null : widget.onOpen,
         trailing: widget.ready && !widget.working

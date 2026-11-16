@@ -21,6 +21,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/api/api_client.dart';
 import '../../../data/dj/dj_api.dart';
 import '../../../data/listening/listening_models.dart';
+import '../../format/network_copy.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/dj_providers.dart';
 import '../../providers/first_run_flags_provider.dart';
@@ -181,15 +182,14 @@ void _popAddMusic(BuildContext context) {
 
 /// Copy for the failures the flow can show. No em dashes on these pages.
 abstract final class FirstRunErrors {
-  static const String offline =
-      "Couldn't reach the DJ. Check your connection and try again.";
   static const String generic = 'Something went wrong on our end. Try again.';
   static const String seeds = "Couldn't save those artists. Try again.";
 }
 
 String firstRunErrorFor(Object error) => switch (error) {
-  NetworkException() => FirstRunErrors.offline,
+  NetworkException() => sentenceNetworkMessage(error),
   DjApiException(:final message) => message,
+  ApiException(statusCode: 502 || 503 || 504) => NetworkCopy.unreachable,
   _ => FirstRunErrors.generic,
 };
 

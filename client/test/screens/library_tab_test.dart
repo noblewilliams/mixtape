@@ -8,12 +8,16 @@
 // The tab hosts Your music and the playlist browser unchanged; both are
 // pushed, and this file asserts by pushed type.
 import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/screens/first_run/choose_service_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/first_run_flow.dart';
+import 'package:mixtape/data/api/api_client.dart' show NetworkException;
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/onboarding/funnel_once_store.dart';
@@ -535,6 +539,31 @@ void main() {
         tester.widget(find.byKey(LibraryTab.sourcesRetryKey)),
         isA<TapeButton>(),
       );
+    });
+
+    testWidgets('offline, it says so, and Try again shows it is working', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi();
+      listening.onGetOnboarding = () async => throw NetworkException(
+        const SocketException('Failed host lookup: api.example.com'),
+      );
+      await _pump(tester, _container(listening: listening));
+
+      expect(find.text(LoadErrorState.offlineBody), findsOneWidget);
+
+      final answer = Completer<OnboardingState>();
+      listening.onGetOnboarding = () => answer.future;
+      await tester.tap(find.byKey(LibraryTab.sourcesRetryKey));
+      await tester.pump();
+
+      expect(find.byType(CupertinoActivityIndicator), findsOneWidget);
+      expect(find.text(LoadErrorState.busyLabel), findsOneWidget);
+
+      answer.complete(onboardingState());
+      await tester.pump(LoadErrorState.minBusy);
+      await tester.pump();
+      expect(find.byType(LoadErrorState), findsNothing);
     });
   });
 

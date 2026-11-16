@@ -9,6 +9,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
+import 'package:http/http.dart' as http;
+import 'package:mixtape/presentation/widgets/foundation/empty_state.dart'
+    show LoadErrorState;
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/playback/listening_meter.dart' show PlayerSample;
@@ -1013,7 +1016,7 @@ void main() {
       final gate = Completer<void>();
       api.onApplyQueueOps = (id, ops, expectedVersion) async {
         await gate.future;
-        throw NetworkException('offline');
+        throw NetworkException(http.ClientException('Network is unreachable'));
       };
       final container = _makeContainer(api);
       await _pump(tester, container);
@@ -2200,7 +2203,11 @@ void main() {
       final api = FakeDjApi();
       var offline = true;
       api.onGetSession = (_) async {
-        if (offline) throw Exception('offline');
+        if (offline) {
+          throw NetworkException(
+            http.ClientException('Network is unreachable'),
+          );
+        }
         return SessionDetail(
           session: _session(),
           messages: [],
@@ -2210,12 +2217,7 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       expect(find.text("Couldn't load this tape"), findsOneWidget);
-      expect(
-        find.text(
-          'Check your connection and try again. The mix itself is safe.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text(LoadErrorState.offlineBody), findsOneWidget);
 
       offline = false;
       await tester.tap(find.byKey(const Key('queue-retry')));

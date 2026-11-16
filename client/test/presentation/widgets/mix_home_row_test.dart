@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/widgets/foundation/shimmer.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
@@ -119,8 +120,21 @@ void main() {
       tester,
     ) async {
       await pump(tester, working: true);
-      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isTrue);
+      final tile = tester.widget<CassetteTile>(find.byType(CassetteTile));
+      expect(tile.spinning, isTrue);
+      // Reel loader: zoomed on a hub, at every tape's own width.
+      expect(tile.crop, CassetteCrop.row);
+      expect(tile.width, MixHomeRow.artSize);
       expect(find.text(MixHomeRow.workingSubtitle), findsOneWidget);
+      // Loader polish (2026-11-16): no ellipsis; it shimmers instead.
+      expect(MixHomeRow.workingSubtitle, 'The DJ is on it');
+      expect(
+        find.ancestor(
+          of: find.text(MixHomeRow.workingSubtitle),
+          matching: find.byType(Shimmer),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(MixHomeRow.readyKey('one')), findsNothing);
     });
 
@@ -135,7 +149,9 @@ void main() {
 
     testWidgets('a quiet mix shows neither', (tester) async {
       await pump(tester);
-      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isFalse);
+      final tile = tester.widget<CassetteTile>(find.byType(CassetteTile));
+      expect(tile.spinning, isFalse);
+      expect(tile.crop, CassetteCrop.whole);
       expect(find.byKey(MixHomeRow.readyKey('one')), findsNothing);
       expect(find.text(MixHomeRow.workingSubtitle), findsNothing);
     });

@@ -11,6 +11,7 @@ import 'package:flutter/semantics.dart'
     show CustomSemanticsAction, SemanticsData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/widgets/foundation/shimmer.dart';
 import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/data/api/api_client.dart';
@@ -375,16 +376,21 @@ void main() {
         tester.getTopLeft(find.byKey(MixesScreen.pendingKey)).dy,
         lessThan(tester.getTopLeft(find.byKey(const Key('session-a'))).dy),
       );
+      final pendingTile = tester.widget<CassetteTile>(
+        find.descendant(
+          of: find.byKey(MixesScreen.pendingKey),
+          matching: find.byType(CassetteTile),
+        ),
+      );
+      expect(pendingTile.spinning, isTrue);
+      // Reel loader: the pending mix is a close-up too, like a working row.
+      expect(pendingTile.crop, CassetteCrop.row);
       expect(
-        tester
-            .widget<CassetteTile>(
-              find.descendant(
-                of: find.byKey(MixesScreen.pendingKey),
-                matching: find.byType(CassetteTile),
-              ),
-            )
-            .spinning,
-        isTrue,
+        find.descendant(
+          of: find.byKey(MixesScreen.pendingKey),
+          matching: find.byType(Shimmer),
+        ),
+        findsOneWidget,
       );
       // It is being made on Home: that is where a tap goes.
       await tester.tap(find.byKey(MixesScreen.pendingKey));

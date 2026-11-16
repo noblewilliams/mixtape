@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart' show kDebugMode, kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/config.dart';
+import 'data/api/api_client.dart' show ApiClient;
+import 'data/api/reachability.dart' show probeInternet;
 import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
 import 'presentation/providers/incoming_link_provider.dart';
@@ -29,6 +31,7 @@ const bool storeScreenshots = bool.fromEnvironment('MIXTAPE_STORE_SHOTS');
 const String debugPreview = String.fromEnvironment('MIXTAPE_PREVIEW');
 
 void main() {
+  ApiClient.reachabilityProbe = probeInternet;
   // Fail fast: a store build missing its production define must not ship.
   final problem = releaseConfigProblem(
     AppConfig.apiBaseUrl,

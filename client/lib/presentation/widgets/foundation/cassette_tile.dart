@@ -5,6 +5,30 @@ import 'package:flutter/material.dart';
 import '../../theme/mixtape_theme.dart';
 import '../tape_palette.dart';
 
+/// Which part of the cassette a [CassetteTile] shows (reel loader,
+/// `docs/mockups/approved/2026-11-16-reel-loader.md`): the whole tape, or a
+/// close-up of its right hub, so a working tape's turning reads at a glance.
+enum CassetteCrop {
+  /// The whole cassette, 200 × 128.
+  whole(Rect.fromLTWH(0, 0, 200, 128), 9),
+
+  /// The app icon's crop (`assets/brand/app-icon.svg`), square, with the
+  /// icon's rounded corners.
+  icon(Rect.fromLTWH(108, 22, 78, 78), 78 * 0.23),
+
+  /// A close-up of the same hub at the cassette's own 200 × 128 proportions,
+  /// so it takes a tape's place in a list without changing its size.
+  row(Rect.fromLTWH(96, 29, 100, 64), 4.5);
+
+  const CassetteCrop(this.viewport, this.radius);
+
+  /// The part of the 200 × 128 viewBox shown.
+  final Rect viewport;
+
+  /// The corner radius, in viewBox units.
+  final double radius;
+}
+
 /// The cassette, painted from `web/public/tape.svg` (viewBox 200 × 128).
 ///
 /// The one decorative motif in the approved shell
@@ -20,9 +44,11 @@ class CassetteTile extends StatefulWidget {
     this.spinning = false,
     this.title,
     this.shadow = false,
+    this.crop = CassetteCrop.whole,
   });
 
-  /// The painted width; height follows the 200 × 128 viewBox.
+  /// The painted width; height follows [crop]'s proportions (the 200 × 128
+  /// viewBox for the whole tape).
   final double width;
   final String? title;
   final bool shadow;
@@ -35,6 +61,9 @@ class CassetteTile extends StatefulWidget {
 
   /// Turns the hubs, unless the platform asks for reduced motion.
   final bool spinning;
+
+  /// The part of the cassette shown.
+  final CassetteCrop crop;
 
   /// One turn of the hubs, matching the board's `hub` keyframes.
   static const Duration hubPeriod = Duration(milliseconds: 1050);
@@ -115,7 +144,11 @@ class CassetteTileState extends State<CassetteTile>
     final caseColor =
         widget.caseColor ?? CassetteTile.caseColorFor(widget.seedId);
     final stripes = tokens.prism.take(5).toList(growable: false);
-    final size = Size(widget.width, widget.width * 128 / 200);
+    final viewport = widget.crop.viewport;
+    final size = Size(
+      widget.width,
+      widget.width * viewport.height / viewport.width,
+    );
 
     return SizedBox.fromSize(
       size: size,
@@ -130,6 +163,7 @@ class CassetteTileState extends State<CassetteTile>
             turn: _hubs.value,
             title: widget.title,
             shadow: widget.shadow,
+            crop: widget.crop,
           ),
         ),
       ),
@@ -145,6 +179,7 @@ class CassettePainter extends CustomPainter {
     this.turn = 0,
     this.title,
     this.shadow = false,
+    this.crop = CassetteCrop.whole,
   });
 
   final Color caseColor;
@@ -156,6 +191,16 @@ class CassettePainter extends CustomPainter {
 
   /// Hub rotation, 0–1 of a full turn.
   final double turn;
+
+  /// The part of the cassette painted, scaled to fill the size.
+  final CassetteCrop crop;
+
+  /// [crop]'s viewport, in viewBox units.
+  Rect get viewport => crop.viewport;
+
+  /// Whether the handwritten label is painted: a close-up would show only
+  /// the foot of its letters along its top edge.
+  bool get paintsLabel => title != null && crop == CassetteCrop.whole;
 
   static const Color _caseEdge = Color(0xFF252328);
   static const Color _stock = Color(0xFFF2EDE2);
@@ -184,11 +229,29 @@ class CassettePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
-    canvas.scale(size.width / 200);
+    canvas.scale(size.width / viewport.width);
+    canvas.translate(-viewport.left, -viewport.top);
+
+    // A close-up: its own rounded edge, shadowed in the tape's place.
+    if (crop != CassetteCrop.whole) {
+      final frame = RRect.fromRectAndRadius(
+        viewport,
+        Radius.circular(crop.radius),
+      );
+      if (shadow) {
+        canvas.drawShadow(
+          Path()..addRRect(frame),
+          const Color(0x5517161A),
+          5 * viewport.width / 200,
+          false,
+        );
+      }
+      canvas.clipRRect(frame);
+    }
 
     // Case and its inner edge.
     final shell = RRect.fromLTRBR(1, 1, 199, 127, const Radius.circular(9));
-    if (shadow) {
+    if (shadow && crop == CassetteCrop.whole) {
       canvas.drawShadow(
         Path()..addRRect(shell),
         const Color(0x5517161A),
@@ -214,7 +277,7 @@ class CassettePainter extends CustomPainter {
         _stroke(_rule, 1),
       );
 
-    if (title != null) {
+    if (paintsLabel) {
       final label = TextPainter(
         text: TextSpan(
           text: title,
@@ -333,6 +396,7 @@ class CassettePainter extends CustomPainter {
       oldDelegate.title != title ||
       oldDelegate.shadow != shadow ||
       oldDelegate.turn != turn ||
+      oldDelegate.crop != crop ||
       !_sameStripes(oldDelegate.stripes, stripes);
 
   static bool _sameStripes(List<Color> a, List<Color> b) {

@@ -47,10 +47,9 @@ import 'import_sheet.dart';
 import 'shell/shell_route_observer.dart';
 import 'interview_screen.dart';
 import 'spotify_request_screen.dart';
+import '../format/network_copy.dart';
 
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
-const _offlineStartErrorMessage =
-    "couldn't reach the DJ — check your connection and try again";
 
 /// The Home tab (`docs/mockups/approved/2026-09-17-mobile-shell.md` → Home;
 /// `docs/mockups/approved/2026-09-17-mobile-home-states.md`; plan task 3.1).
@@ -83,8 +82,9 @@ class HomeScreen extends ConsumerStatefulWidget {
       'Usually under a minute. You can leave this tab; it will be waiting in '
       'Mixes.';
 
-  /// The starting state's cassette.
-  static const double startingCassetteWidth = 120;
+  /// The starting state's reel: the icon crop (reel loader, 2026-11-16),
+  /// a 46 pt turning hub.
+  static const double startingCassetteWidth = 112;
 
   /// With a playlist attached the pills refine it instead of proposing a
   /// moment; the third one flips the exclude flag rather than filling the
@@ -543,9 +543,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       // mapped to the same generic message as a plain ApiException.
       if (!mounted) return;
       setState(() => _error = _genericStartErrorMessage);
-    } on NetworkException {
+    } on NetworkException catch (e) {
       if (!mounted) return;
-      setState(() => _error = _offlineStartErrorMessage);
+      setState(() => _error = djNetworkMessage(e));
     } on ApiException {
       if (!mounted) return;
       setState(() => _error = _genericStartErrorMessage);
@@ -925,7 +925,9 @@ class _StartingState extends StatelessWidget {
           children: [
             const CassetteTile(
               width: HomeScreen.startingCassetteWidth,
+              crop: CassetteCrop.icon,
               spinning: true,
+              shadow: true,
             ),
             const SizedBox(height: 10),
             Text(HomeScreen.startingTitle, style: tokens.section),

@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../auth/token_store.dart';
+import 'reachability.dart';
+
+export 'reachability.dart' show ReachabilityProbe;
 
 class ApiException implements Exception {
   ApiException(this.statusCode, this.body);
@@ -18,11 +21,51 @@ class ApiException implements Exception {
 /// Thrown for transport-level failures (no response from the server at all).
 /// Retryable, unlike [ApiException] which represents a terminal server response.
 class NetworkException implements Exception {
-  NetworkException(this.cause);
+  NetworkException(this.cause, {this.offline});
   final Object cause;
+
+  /// The reachability probe's verdict, when [ApiClient] ran one for an
+  /// [isAmbiguous] failure; null when nothing was checked.
+  final bool? offline;
+
   @override
   String toString() => 'NetworkException: $cause';
+
+  /// The device has no route to the internet at all, as opposed to a slow or
+  /// refusing server. The probe's verdict wins; without one, the message
+  /// decides (the http client rethrows socket failures as a ClientException
+  /// carrying the same message, so this reads the message, not the type).
+  bool get isOffline =>
+      offline ?? (_says(_offlineSignals) || _says(_lookupSignals));
+
+  /// A timeout or a DNS failure: either can mean no internet or a server
+  /// that is down, and only a probe of somewhere else can tell which.
+  bool get isAmbiguous => cause is TimeoutException || _says(_lookupSignals);
+
+  bool _says(List<String> signals) {
+    if (cause is! SocketException && cause is! http.ClientException) {
+      return false;
+    }
+    final text = cause.toString().toLowerCase();
+    return signals.any(text.contains);
+  }
+
+  /// Only an interface with no route out says these.
+  static const _offlineSignals = [
+    'network is unreachable',
+    'network is down',
+    'no route to host',
+    'not connected to the internet',
+    'appears to be offline',
+  ];
+
+  /// Offline more often than not, but also a DNS outage on a live network.
+  static const _lookupSignals = ['failed host lookup', 'no address associated'];
 }
+
+/// Whether [error] is a request that failed because the device is offline.
+bool isOfflineError(Object? error) =>
+    error is NetworkException && error.isOffline;
 
 /// `403 {error: 'ai_consent_required'}`: the server enforces AI consent
 /// (`AI_CONSENT=enforce`) and this listener has not agreed. The caller shows
@@ -105,6 +148,25 @@ class ApiClient {
 
   static const String _signInPrefix = '/api/auth/sign-in/';
 
+  /// Asks somewhere other than Mixtape whether the internet answers, to
+  /// settle a timeout or DNS failure into offline or server-unreachable.
+  /// Set once at startup (`main.dart`); null in tests, where the failure's
+  /// message decides.
+  static ReachabilityProbe? reachabilityProbe;
+
+  /// [failure] with the probe's verdict, when it is ambiguous and there is a
+  /// probe to ask. A probe that fails leaves the message to decide.
+  static Future<NetworkException> _settle(NetworkException failure) async {
+    final probe = reachabilityProbe;
+    if (probe == null || !failure.isAmbiguous) return failure;
+    try {
+      final online = await probe();
+      return NetworkException(failure.cause, offline: !online);
+    } catch (_) {
+      return failure;
+    }
+  }
+
   Future<Map<String, String>> _headers() async {
     final token = await tokenStore.read();
     return {if (token != null) 'Authorization': 'Bearer $token'};
@@ -155,11 +217,11 @@ class ApiClient {
               },
             ));
     } on http.ClientException catch (e) {
-      throw NetworkException(e);
+      throw await _settle(NetworkException(e));
     } on SocketException catch (e) {
-      throw NetworkException(e);
+      throw await _settle(NetworkException(e));
     } on TimeoutException catch (e) {
-      throw NetworkException(e);
+      throw await _settle(NetworkException(e));
     }
   }
 

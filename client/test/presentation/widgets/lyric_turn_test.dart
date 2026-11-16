@@ -8,6 +8,7 @@ import 'package:mixtape/data/dj/dj_api.dart' show TurnStep;
 import 'package:mixtape/presentation/providers/working_step.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/foundation/shimmer.dart';
 import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/version_marker.dart';
 
@@ -50,6 +51,7 @@ class _Following extends StatelessWidget {
 }
 
 void main() {
+  _shimmerTests();
   testWidgets('no bubbles: DJ lines are large ink, yours smaller smoke', (
     tester,
   ) async {
@@ -135,7 +137,7 @@ void main() {
       await _pump(tester, const WorkingCassette(seed: 0));
       final phases = DjWorkingPhrases.mix.phases;
       expect(phases.first.lines.single, WorkingCassette.caption);
-      expect(find.text('The DJ is listening…'), findsOneWidget);
+      expect(find.text('The DJ is listening'), findsOneWidget);
 
       var elapsed = Duration.zero;
       for (final phase in phases.skip(1)) {
@@ -232,8 +234,8 @@ void main() {
   });
 
   group('the turn\'s own steps (turn steps 2026-11-13)', () {
-    const listening = 'The DJ is listening…';
-    const still = 'Still at the decks. Worth the wait…';
+    const listening = 'The DJ is listening';
+    const still = 'Still at the decks. Worth the wait';
     String line(TurnStep? step, {int seconds = 0, int seed = 0}) =>
         DjWorkingPhrases.stepLineAt(
           step,
@@ -253,38 +255,38 @@ void main() {
     test('each step says its own line, one picked per turn', () {
       final cases = {
         const TurnStep('playlists'): [
-          'Looking through your playlists…',
-          'Pulling that playlist off the shelf…',
+          'Looking through your playlists',
+          'Pulling that playlist off the shelf',
         ],
         const TurnStep('digging', scope: 'library'): [
-          'Flipping through your records…',
-          'Thumbing through your stacks…',
+          'Flipping through your records',
+          'Thumbing through your stacks',
         ],
         const TurnStep('digging', scope: 'catalogue'): [
-          'Digging through the crates…',
-          'Crate-digging for you…',
+          'Digging through the crates',
+          'Crate-digging for you',
         ],
         // A scope it does not know reads as the crates.
         const TurnStep('digging'): [
-          'Digging through the crates…',
-          'Crate-digging for you…',
+          'Digging through the crates',
+          'Crate-digging for you',
         ],
         const TurnStep('picking'): [
-          'Pulling records that fit…',
-          'Cueing up contenders…',
+          'Pulling records that fit',
+          'Cueing up contenders',
         ],
         const TurnStep('checking'): [
-          'Checking the pressings…',
-          'Giving it a sound check…',
+          'Checking the pressings',
+          'Giving it a sound check',
         ],
         const TurnStep('editing'): [
-          'Reworking the tracklist…',
-          'Swapping records…',
+          'Reworking the tracklist',
+          'Swapping records',
         ],
-        const TurnStep('pressing'): ['Pressing the tape…', 'Spooling it up…'],
-        const TurnStep('labelling'): ['Labelling the cassette…'],
-        const TurnStep('noting'): ['Jotting that on the sleeve…'],
-        const TurnStep('writing'): ['Writing the liner notes…'],
+        const TurnStep('pressing'): ['Pressing the tape', 'Spooling it up'],
+        const TurnStep('labelling'): ['Labelling the cassette'],
+        const TurnStep('noting'): ['Jotting that on the sleeve'],
+        const TurnStep('writing'): ['Writing the liner notes'],
       };
       for (final MapEntry(key: step, value: lines) in cases.entries) {
         final picked = {
@@ -305,7 +307,7 @@ void main() {
               seed: seed,
             ),
         },
-        {'Flipping through your Tems records…', 'Pulling your Tems records…'},
+        {'Flipping through your Tems records', 'Pulling your Tems records'},
       );
       expect(
         {
@@ -315,14 +317,14 @@ void main() {
               seed: seed,
             ),
         },
-        {'Digging for Tems…', 'Crate-digging for Tems…'},
+        {'Digging for Tems', 'Crate-digging for Tems'},
       );
       expect(
         {
           for (var seed = 0; seed < 4; seed++)
             line(const TurnStep('picking', artists: tems), seed: seed),
         },
-        {'Pulling records that sit with Tems…', 'Finding company for Tems…'},
+        {'Pulling records that sit with Tems', 'Finding company for Tems'},
       );
       // Two artists, three read as "and more"; at most two genres.
       expect(
@@ -335,8 +337,8 @@ void main() {
           seed: 0,
         ),
         isIn([
-          'Digging for Tems and Asake…',
-          'Crate-digging for Tems and Asake…',
+          'Digging for Tems and Asake',
+          'Crate-digging for Tems and Asake',
         ]),
       );
       expect(
@@ -348,38 +350,38 @@ void main() {
           ),
         ),
         isIn([
-          'Digging for Tems, Asake and more…',
-          'Crate-digging for Tems, Asake and more…',
+          'Digging for Tems, Asake and more',
+          'Crate-digging for Tems, Asake and more',
         ]),
       );
       expect(
         line(const TurnStep('checking', genres: ['Afrobeats'])),
-        'Running the Afrobeats sound check…',
+        'Running the Afrobeats sound check',
       );
       expect(
         line(const TurnStep('checking', genres: ['Jazz', 'Soul', 'Funk'])),
-        'Running the Jazz and Soul sound check…',
+        'Running the Jazz and Soul sound check',
       );
       expect(
         line(const TurnStep('playlists', playlist: 'Late nights')),
-        'Pulling “Late nights” off the shelf…',
+        'Pulling “Late nights” off the shelf',
       );
       expect(
         line(const TurnStep('labelling', title: 'Rainy Commute')),
-        'Labelling it “Rainy Commute”…',
+        'Labelling it “Rainy Commute”',
       );
       expect(
         line(const TurnStep('pressing', count: 24)),
-        'Pressing 24 songs to tape…',
+        'Pressing 24 songs to tape',
       );
       expect(
         line(const TurnStep('pressing', count: 1)),
-        'Pressing one song to tape…',
+        'Pressing one song to tape',
       );
     });
 
     test('a named line past 44 characters says the nameless one', () {
-      const nameless = ['Pulling records that fit…', 'Cueing up contenders…'];
+      const nameless = ['Pulling records that fit', 'Cueing up contenders'];
       const crowd = TurnStep(
         'picking',
         artists: ['Burna Boy', 'Asake', 'Tems'],
@@ -394,7 +396,7 @@ void main() {
             title: 'Slow Burn Sunday Morning Records',
           ),
         ),
-        'Labelling the cassette…',
+        'Labelling the cassette',
       );
       for (var seed = 0; seed < 4; seed++) {
         expect(
@@ -409,20 +411,20 @@ void main() {
 
     test('later lines take over every 12 s; any step past 30 s holds', () {
       const picking = TurnStep('picking', artists: ['Tems']);
-      expect(line(picking, seconds: 11), isNot('Sequencing the tracklist…'));
-      expect(line(picking, seconds: 12), 'Sequencing the tracklist…');
-      expect(line(picking, seconds: 24), 'Lining up the transitions…');
+      expect(line(picking, seconds: 11), isNot('Sequencing the tracklist'));
+      expect(line(picking, seconds: 12), 'Sequencing the tracklist');
+      expect(line(picking, seconds: 24), 'Lining up the transitions');
       expect(line(picking, seconds: 30), still);
       expect(line(picking, seconds: 600), still);
       const crates = TurnStep('digging', scope: 'catalogue');
-      expect(line(crates, seconds: 12), 'Deeper in the crates…');
+      expect(line(crates, seconds: 12), 'Deeper in the crates');
       expect(
         line(const TurnStep('digging', scope: 'library'), seconds: 12),
-        'Still flipping…',
+        'Still flipping',
       );
       expect(
         line(const TurnStep('labelling'), seconds: 12),
-        'Labelling the cassette…',
+        'Labelling the cassette',
       );
       expect(line(const TurnStep('labelling'), seconds: 30), still);
       expect(line(null, seconds: 29), listening);
@@ -516,7 +518,7 @@ void main() {
       expect(find.text(line(crates)), findsOneWidget);
       // The step's own clock keeps running through it.
       await tester.pump(const Duration(seconds: 9));
-      expect(find.text('Deeper in the crates…'), findsOneWidget);
+      expect(find.text('Deeper in the crates'), findsOneWidget);
     });
 
     testWidgets('a line holds 1.5 s; a step superseded meanwhile is skipped', (
@@ -534,7 +536,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 999));
       expect(find.text(listening), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 1));
-      expect(find.text('Labelling the cassette…'), findsOneWidget);
+      expect(find.text('Labelling the cassette'), findsOneWidget);
 
       // 0.2 s later a note, then 0.1 s later the reply: the note never shows.
       await tester.pump(const Duration(milliseconds: 200));
@@ -543,9 +545,9 @@ void main() {
       step.value = WorkingStep(const TurnStep('writing'), DateTime.now());
       for (var i = 0; i < 20; i++) {
         await tester.pump(const Duration(milliseconds: 100));
-        expect(find.text('Jotting that on the sleeve…'), findsNothing);
+        expect(find.text('Jotting that on the sleeve'), findsNothing);
       }
-      expect(find.text('Writing the liner notes…'), findsOneWidget);
+      expect(find.text('Writing the liner notes'), findsOneWidget);
     });
 
     testWidgets('within a step the line moves on at 12 s, and holds at 30 s', (
@@ -558,9 +560,9 @@ void main() {
       await _pump(tester, _Following(step: step), reducedMotion: true);
       expect(find.text(line(picking)), findsOneWidget);
       await tester.pump(const Duration(seconds: 12));
-      expect(find.text('Sequencing the tracklist…'), findsOneWidget);
+      expect(find.text('Sequencing the tracklist'), findsOneWidget);
       await tester.pump(const Duration(seconds: 12));
-      expect(find.text('Lining up the transitions…'), findsOneWidget);
+      expect(find.text('Lining up the transitions'), findsOneWidget);
       await tester.pump(const Duration(seconds: 6));
       expect(find.text(still), findsOneWidget);
       // A step that arrives anew (a replacement round names the artists)
@@ -587,7 +589,7 @@ void main() {
         ),
         reducedMotion: true,
       );
-      expect(find.text('Sequencing the tracklist…'), findsOneWidget);
+      expect(find.text('Sequencing the tracklist'), findsOneWidget);
     });
 
     testWidgets('one line, cut with an ellipsis; VoiceOver hears no names', (
@@ -611,7 +613,7 @@ void main() {
           matching: find.byType(Text),
         ),
       );
-      expect(caption.data, 'Pulling “Late nights” off the shelf…');
+      expect(caption.data, 'Pulling “Late nights” off the shelf');
       expect(caption.maxLines, 1);
       expect(caption.overflow, TextOverflow.ellipsis);
       expect(caption.softWrap, isFalse);
@@ -623,7 +625,7 @@ void main() {
     });
   });
 
-  testWidgets('working: a 44 pt cassette in the tape colour, announced', (
+  testWidgets('working: a 34 pt tilted reel in the tape colour, announced', (
     tester,
   ) async {
     final handle = tester.ensureSemantics();
@@ -632,8 +634,17 @@ void main() {
     final cassette = tester.widget<CassetteTile>(
       find.byKey(WorkingCassette.cassetteKey),
     );
-    // Device smoke 2026-11-13: down from 56, which read too large.
-    expect(cassette.width, 44);
+    // Reel loader 2026-11-16: the app icon's crop, so the hub reads as
+    // turning (the 44 pt whole cassette's hubs were 7 pt).
+    expect(cassette.width, 34);
+    expect(cassette.crop, CassetteCrop.icon);
+    final tilt = tester.widget<Transform>(
+      find.ancestor(
+        of: find.byKey(WorkingCassette.cassetteKey),
+        matching: find.byType(Transform),
+      ).first,
+    );
+    expect(tilt.transform.getRotation().entry(1, 0), closeTo(-0.07, 0.001));
     expect(cassette.caseColor, denim);
     expect(cassette.spinning, isTrue);
     expect(
@@ -642,7 +653,7 @@ void main() {
           .isSpinning,
       isTrue,
     );
-    expect(find.text('The DJ is listening…'), findsOneWidget);
+    expect(find.text('The DJ is listening'), findsOneWidget);
     final node = tester.getSemantics(find.byKey(WorkingCassette.indicatorKey));
     expect(node.label, 'The DJ is working');
     expect(node.flagsCollection.isLiveRegion, isTrue);
@@ -772,6 +783,82 @@ void main() {
         findsOneWidget,
       );
       handle.dispose();
+    });
+  });
+}
+
+/// Loader polish (founder, 2026-11-16): the working line drops its
+/// trailing ellipses and shimmers instead, so it reads as loading.
+void _shimmerTests() {
+  group('working line: no ellipses, a shimmer', () {
+    test('no working line ends with an ellipsis', () {
+      final lines = <String>[
+        for (final phrases in [DjWorkingPhrases.mix, DjWorkingPhrases.album])
+          for (final phase in phrases.phases) ...phase.lines,
+        DjWorkingPhrases.stillLine,
+        WorkingCassette.caption,
+        for (final step in const [
+          null,
+          TurnStep('listening'),
+          TurnStep('playlists', playlist: 'Run club'),
+          TurnStep('playlists'),
+          TurnStep('digging', scope: 'library', artists: ['Tems']),
+          TurnStep('digging', scope: 'library'),
+          TurnStep('digging', artists: ['Tems', 'Wizkid']),
+          TurnStep('digging'),
+          TurnStep('picking', artists: ['Tems']),
+          TurnStep('picking'),
+          TurnStep('checking', genres: ['afrobeats']),
+          TurnStep('checking'),
+          TurnStep('editing'),
+          TurnStep('pressing', count: 12),
+          TurnStep('pressing', count: 1),
+          TurnStep('pressing'),
+          TurnStep('labelling', title: 'Sunday'),
+          TurnStep('labelling'),
+          TurnStep('noting'),
+          TurnStep('writing'),
+        ])
+          for (final at in const [
+            Duration.zero,
+            Duration(seconds: 13),
+            Duration(seconds: 25),
+          ])
+            for (final seed in const [0, 1])
+              DjWorkingPhrases.stepLineAt(step, at, seed: seed),
+      ];
+      for (final line in lines) {
+        expect(line.endsWith('…'), isFalse, reason: line);
+        expect(line.endsWith('...'), isFalse, reason: line);
+      }
+    });
+
+    testWidgets('the line shimmers while the DJ works', (tester) async {
+      await _pump(tester, const WorkingCassette(seed: 0));
+      final shimmer = find.descendant(
+        of: find.byKey(WorkingCassette.captionKey),
+        matching: find.byType(Shimmer),
+      );
+      expect(shimmer, findsOneWidget);
+      expect(tester.state<ShimmerState>(shimmer).isShimmering, isTrue);
+      expect(
+        find.descendant(of: shimmer, matching: find.byType(ShaderMask)),
+        findsOneWidget,
+      );
+      expect(find.text('The DJ is listening'), findsOneWidget);
+    });
+
+    testWidgets('under reduced motion the line is plain', (tester) async {
+      await _pump(tester, const WorkingCassette(seed: 0), reducedMotion: true);
+      final shimmer = find.descendant(
+        of: find.byKey(WorkingCassette.captionKey),
+        matching: find.byType(Shimmer),
+      );
+      expect(tester.state<ShimmerState>(shimmer).isShimmering, isFalse);
+      expect(
+        find.descendant(of: shimmer, matching: find.byType(ShaderMask)),
+        findsNothing,
+      );
     });
   });
 }

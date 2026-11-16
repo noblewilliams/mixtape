@@ -26,6 +26,7 @@ import '../providers/working_step.dart';
 import '../theme/mixtape_theme.dart';
 import 'conversation_turn.dart' show ConversationTurn, ConversationTurnKind, WorkingIndicator;
 import 'foundation/cassette_tile.dart';
+import 'foundation/shimmer.dart';
 
 export 'conversation_turn.dart' show ConversationTurnKind;
 
@@ -236,29 +237,29 @@ class DjWorkingPhrases {
   final List<DjWorkingPhase> phases;
 
   static const DjWorkingPhrases mix = DjWorkingPhrases([
-    DjWorkingPhase(Duration.zero, ['The DJ is listening…']),
+    DjWorkingPhase(Duration.zero, ['The DJ is listening']),
     DjWorkingPhase(Duration(seconds: 4), [
-      'Digging through the crates…',
-      'Flipping through your records…',
-      'Thumbing through the stacks…',
+      'Digging through the crates',
+      'Flipping through your records',
+      'Thumbing through the stacks',
     ]),
     DjWorkingPhase(Duration(seconds: 11), [
-      'Pulling records that fit…',
-      'Checking the tempos…',
-      'Cueing up contenders…',
+      'Pulling records that fit',
+      'Checking the tempos',
+      'Cueing up contenders',
     ]),
     DjWorkingPhase(Duration(seconds: 20), [
-      'Sequencing the tracklist…',
-      'Working the crossfader…',
-      'Lining up the transitions…',
+      'Sequencing the tracklist',
+      'Working the crossfader',
+      'Lining up the transitions',
     ]),
     DjWorkingPhase(Duration(seconds: 32), [
-      'Pressing the tape…',
-      'Labelling the cassette…',
-      'Spooling it up…',
+      'Pressing the tape',
+      'Labelling the cassette',
+      'Spooling it up',
     ]),
     DjWorkingPhase(Duration(seconds: 50), [
-      'Still at the decks. Worth the wait…',
+      'Still at the decks. Worth the wait',
     ]),
   ]);
 
@@ -267,14 +268,14 @@ class DjWorkingPhrases {
   static const DjWorkingPhrases album = DjWorkingPhrases([
     DjWorkingPhase(Duration.zero, [WorkingIndicator.albumCaption]),
     DjWorkingPhase(Duration(seconds: 6), [
-      'Flipping through the record bins…',
-      'Pulling sleeves off the shelf…',
+      'Flipping through the record bins',
+      'Pulling sleeves off the shelf',
     ]),
     DjWorkingPhase(Duration(seconds: 16), [
-      'Reading the liner notes…',
-      'Checking the pressing…',
+      'Reading the liner notes',
+      'Checking the pressing',
     ]),
-    DjWorkingPhase(Duration(seconds: 30), ['Dropping the needle…']),
+    DjWorkingPhase(Duration(seconds: 30), ['Dropping the needle']),
   ]);
 
   int _phaseAt(Duration elapsed) {
@@ -308,7 +309,7 @@ class DjWorkingPhrases {
 
   /// A step this long says [stillLine], whatever it is.
   static const Duration stillAfter = Duration(seconds: 30);
-  static const String stillLine = 'Still at the decks. Worth the wait…';
+  static const String stillLine = 'Still at the decks. Worth the wait';
 
   /// The least time a line shows before another takes over, so a 50 ms
   /// step never flashes.
@@ -361,50 +362,50 @@ class DjWorkingPhrases {
     'playlists' => (
       1,
       const DjStepLines([
-        'Looking through your playlists…',
-        'Pulling that playlist off the shelf…',
+        'Looking through your playlists',
+        'Pulling that playlist off the shelf',
       ]),
     ),
     'digging' when step!.scope == 'library' => (
       2,
       const DjStepLines(
-        ['Flipping through your records…', 'Thumbing through your stacks…'],
-        ['Still flipping…'],
+        ['Flipping through your records', 'Thumbing through your stacks'],
+        ['Still flipping'],
       ),
     ),
     // The catalogue, and a scope this build does not know.
     'digging' => (
       3,
       const DjStepLines(
-        ['Digging through the crates…', 'Crate-digging for you…'],
-        ['Deeper in the crates…'],
+        ['Digging through the crates', 'Crate-digging for you'],
+        ['Deeper in the crates'],
       ),
     ),
     'picking' => (
       4,
       const DjStepLines(
-        ['Pulling records that fit…', 'Cueing up contenders…'],
-        ['Sequencing the tracklist…', 'Lining up the transitions…'],
+        ['Pulling records that fit', 'Cueing up contenders'],
+        ['Sequencing the tracklist', 'Lining up the transitions'],
       ),
     ),
     'checking' => (
       5,
       const DjStepLines([
-        'Checking the pressings…',
-        'Giving it a sound check…',
+        'Checking the pressings',
+        'Giving it a sound check',
       ]),
     ),
     'editing' => (
       6,
-      const DjStepLines(['Reworking the tracklist…', 'Swapping records…']),
+      const DjStepLines(['Reworking the tracklist', 'Swapping records']),
     ),
     'pressing' => (
       7,
-      const DjStepLines(['Pressing the tape…', 'Spooling it up…']),
+      const DjStepLines(['Pressing the tape', 'Spooling it up']),
     ),
-    'labelling' => (8, const DjStepLines(['Labelling the cassette…'])),
-    'noting' => (9, const DjStepLines(['Jotting that on the sleeve…'])),
-    'writing' => (10, const DjStepLines(['Writing the liner notes…'])),
+    'labelling' => (8, const DjStepLines(['Labelling the cassette'])),
+    'noting' => (9, const DjStepLines(['Jotting that on the sleeve'])),
+    'writing' => (10, const DjStepLines(['Writing the liner notes'])),
     _ => null,
   };
 
@@ -419,32 +420,32 @@ class DjWorkingPhrases {
         if (artists == null) return null;
         return step.scope == 'library'
             ? one([
-                'Flipping through your $artists records…',
-                'Pulling your $artists records…',
+                'Flipping through your $artists records',
+                'Pulling your $artists records',
               ])
-            : one(['Digging for $artists…', 'Crate-digging for $artists…']);
+            : one(['Digging for $artists', 'Crate-digging for $artists']);
       case 'picking':
         final artists = _list(step.artists, most: 3);
         if (artists == null) return null;
         return one([
-          'Pulling records that sit with $artists…',
-          'Finding company for $artists…',
+          'Pulling records that sit with $artists',
+          'Finding company for $artists',
         ]);
       case 'checking':
         final genres = _list(step.genres, most: 2);
-        return genres == null ? null : 'Running the $genres sound check…';
+        return genres == null ? null : 'Running the $genres sound check';
       case 'playlists':
         final playlist = step.playlist;
-        return playlist == null ? null : 'Pulling “$playlist” off the shelf…';
+        return playlist == null ? null : 'Pulling “$playlist” off the shelf';
       case 'labelling':
         final title = step.title;
-        return title == null ? null : 'Labelling it “$title”…';
+        return title == null ? null : 'Labelling it “$title”';
       case 'pressing':
         final count = step.count;
         if (count == null || count < 1) return null;
         return count == 1
-            ? 'Pressing one song to tape…'
-            : 'Pressing $count songs to tape…';
+            ? 'Pressing one song to tape'
+            : 'Pressing $count songs to tape';
     }
     return null;
   }
@@ -481,7 +482,9 @@ class DjStepLines {
 /// clock, and the still line past 30 s. Every line holds at least
 /// [DjWorkingPhrases.dwell]; a step that comes sooner waits, and one
 /// overtaken while it waits never shows. A step it has no words for keeps
-/// the line it has. One line, cut with an ellipsis at worst.
+/// the line it has. One line, cut with an ellipsis at worst. A [Shimmer]
+/// sweeps it while it shows (plain under reduced motion), so the lines
+/// need no trailing "…" to read as loading.
 ///
 /// Only timers move it on, never a tick, and only a mount reads the wall
 /// clock (to pick up a turn already under way from [startedAt] and the
@@ -630,7 +633,19 @@ class _DjWorkingLineState extends State<DjWorkingLine> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedSwitcher(
+  Widget build(BuildContext context) {
+    // A sweep of light across the line says it is still working; the
+    // lines carry no trailing ellipsis (founder, 2026-11-16).
+    final base =
+        widget.style.color ?? DefaultTextStyle.of(context).style.color!;
+    return Shimmer(
+      base: base,
+      highlight: Shimmer.highlightFor(base),
+      child: _line(context),
+    );
+  }
+
+  Widget _line(BuildContext context) => AnimatedSwitcher(
     duration: MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : const Duration(milliseconds: 280),
@@ -690,12 +705,12 @@ class WorkingCassette extends StatelessWidget {
   static const Key cassetteKey = Key('working-cassette');
   static const Key captionKey = WorkingIndicator.captionKey;
 
-  /// Down from the board's 56, which read too large beside one line of
-  /// caption (device smoke, 2026-11-13).
-  static const double cassetteWidth = 44;
+  /// The reel loader's icon crop (2026-11-16): a 14 pt hub where the whole
+  /// 44 pt cassette had 7 pt ones.
+  static const double cassetteWidth = 34;
 
   static const String announcement = WorkingIndicator.announcement;
-  static const String caption = 'The DJ is listening…';
+  static const String caption = 'The DJ is listening';
 
   /// An album session's first line (board A1): says the catalogue check too.
   static const String albumCaption = WorkingIndicator.albumCaption;
@@ -719,6 +734,7 @@ class WorkingCassette extends StatelessWidget {
                 child: CassetteTile(
                   key: WorkingCassette.cassetteKey,
                   width: WorkingCassette.cassetteWidth,
+                  crop: CassetteCrop.icon,
                   caseColor: caseColor ?? CassetteTile.caseColors.first,
                   spinning: true,
                   shadow: true,

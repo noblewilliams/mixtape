@@ -9,9 +9,14 @@
 /// height on the same screen.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
+
+import '../../../data/api/failure_kind.dart';
 
 import '../../theme/mixtape_theme.dart';
 import 'cassette_tile.dart';
@@ -81,37 +86,114 @@ class EmptyState extends StatelessWidget {
 /// Library's bare line and Mixes' outlined button were two designs for one
 /// thing). Put it in an [EmptyStateSliver] on a tab or list screen, or centre
 /// it on a pushed one.
-class LoadErrorState extends StatelessWidget {
+///
+/// A tap shows the retry is working: the button carries a spinner for as
+/// long as [onRetry]'s future runs, and at least [minBusy], so an instant
+/// failure still reads as a fresh attempt (founder smoke, 2026-11-15: the
+/// button gave no response, then the screen suddenly loaded). Given the
+/// failure as [error], the line under the title says which of offline,
+/// server-not-answering or something else it was ([FailureKind]).
+class LoadErrorState extends StatefulWidget {
   const LoadErrorState({
     super.key,
     required this.title,
     required this.onRetry,
-    this.body = defaultBody,
+    this.body,
+    this.error,
     this.actionLabel = 'Try again',
     this.retryKey,
   });
 
   /// What did not load, as a heading: "Couldn’t load your mixes".
   final String title;
-  final String body;
+
+  /// The line under the title when the failure is not one the state names
+  /// itself; [defaultBody] when null. An offline [error] shows [offlineBody]
+  /// and a server that did not answer [unreachableBody] instead, so a
+  /// screen's own line never claims a cause.
+  final String? body;
+
+  /// The failure being shown, when the screen has it.
+  final Object? error;
   final String actionLabel;
-  final VoidCallback onRetry;
+  final FutureOr<void> Function() onRetry;
 
   /// The button's key, for the screen's own tests.
   final Key? retryKey;
 
-  static const String defaultBody = 'Try again in a moment.';
+  static const String defaultBody =
+      'Something went wrong. Try again in a moment.';
+  static const String offlineBody =
+      'You’re offline. Check your connection and try again.';
+  static const String unreachableBody =
+      'Mixtape isn’t responding right now. Try again in a moment.';
+
+  /// The button's label while a retry runs.
+  static const String busyLabel = 'Trying again…';
+
+  /// The shortest time the spinner shows.
+  static const Duration minBusy = Duration(milliseconds: 600);
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    liveRegion: true,
-    child: EmptyState(
-      title: title,
-      body: body,
-      artwork: EmptyStateArtwork.connection,
-      action: TapeButton(key: retryKey, label: actionLabel, onPressed: onRetry),
-    ),
-  );
+  State<LoadErrorState> createState() => _LoadErrorStateState();
+}
+
+class _LoadErrorStateState extends State<LoadErrorState> {
+  bool _busy = false;
+
+  /// Holds the spinner for [LoadErrorState.minBusy]; cancelled on dispose,
+  /// since a retry that works usually replaces this state outright.
+  Timer? _floor;
+
+  Future<void> _retry() async {
+    if (_busy) return;
+    HapticFeedback.selectionClick();
+    setState(() => _busy = true);
+    final floor = Completer<void>();
+    _floor = Timer(LoadErrorState.minBusy, floor.complete);
+    try {
+      await Future<void>.sync(widget.onRetry);
+    } catch (_) {
+      // The screen owns the failure; this only ends the spinner.
+    }
+    if (!mounted) return;
+    await floor.future;
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  void dispose() {
+    _floor?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final body = switch (failureKindOf(widget.error)) {
+      FailureKind.offline => LoadErrorState.offlineBody,
+      FailureKind.unreachable => LoadErrorState.unreachableBody,
+      FailureKind.other => widget.body ?? LoadErrorState.defaultBody,
+    };
+    return Semantics(
+      liveRegion: true,
+      child: EmptyState(
+        title: widget.title,
+        body: body,
+        artwork: EmptyStateArtwork.connection,
+        action: TapeButton(
+          key: widget.retryKey,
+          label: _busy ? LoadErrorState.busyLabel : widget.actionLabel,
+          leading: _busy
+              ? CupertinoActivityIndicator(radius: 7, color: tokens.tapeInk)
+              : null,
+          // Swallowed while busy rather than disabled, so the button keeps
+          // full strength and the spinner reads clearly.
+          onPressed: _busy ? () {} : _retry,
+        ),
+      ),
+    );
+  }
 }
 
 /// The placement: the cassette centred in what the title chrome and the dock
