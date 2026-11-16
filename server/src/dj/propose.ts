@@ -162,6 +162,17 @@ function buildUserBlock(input: ProposeInput, count: number): string {
   const lines = [`Propose up to ${count} songs.`, `Storefront: ${input.storefront}`]
   const brief = sanitizeForPrompt(input.brief, 500)
   if (brief) lines.push(`Request: ${brief}`)
+  // A named genre restated in the user turn (the system prompts stay
+  // static, so cached): any one of them, never mood in its place.
+  const genres = (intent.genres ?? []).map((g) => sanitizeForPrompt(g)).filter((g) => g !== '')
+  if (genres.length === 1) {
+    lines.push(`Genre: every song must be ${genres[0]}. Mood and texture words in the request (slow, instrumental, ` +
+      'lofi as a sound) shape which songs of this genre you propose; they never replace the genre.')
+  } else if (genres.length > 1) {
+    lines.push(`Genres: every song must be one of these genres (any one of them is enough): ${genres.join(', ')}. ` +
+      'Mood and texture words in the request (slow, instrumental, lofi as a sound) shape which songs of these ' +
+      'genres you propose; they never replace the genre.')
+  }
   lines.push(arcInstruction(intent.energyArc), `Themes: ${sanitizeForPrompt(intent.themes, 500)}`)
   if (intent.tempoMin !== undefined || intent.tempoMax !== undefined) {
     lines.push(`Tempo: ${intent.tempoMin ?? '-'}–${intent.tempoMax ?? '-'} bpm`)

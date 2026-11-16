@@ -589,3 +589,33 @@ describe('verifyProposals', () => {
     expect(MIN_VERIFIED).toBe(8)
   })
 })
+
+// Genre-true proposals (2026-11-16, "lofi afro house slow living"): the
+// proposals drifted to ambient and electronica the sound check then
+// rejected. A named genre is restated in the user turn, so the cached
+// system prompt stays static.
+describe('genre briefs (2026-11-16)', () => {
+  it('a brief naming genres tells the call every song must be one of them, mood words shaping choices within', async () => {
+    const { llm, requests } = scripted(turn('[]'))
+    await proposeSongs(llm, { brief: 'lofi afro house slow living', intent: intent({ genres: ['afro house', 'lofi'] }), seeds: [], storefront: 'ng' })
+    const block = userBlock(requests[0])
+    expect(block).toContain('Genres: every song must be one of these genres (any one of them is enough): afro house, lofi.')
+    expect(block).toMatch(/mood and texture words in the request .* shape which songs of these genres you propose; they never replace the genre/i)
+    expect(block).not.toContain(EM)
+  })
+
+  it('one named genre reads as one', async () => {
+    const { llm, requests } = scripted(turn('[]'))
+    await proposeSongs(llm, { brief: 'soft jazz', intent: intent({ genres: ['jazz'] }), seeds: [], storefront: 'ng' })
+    expect(userBlock(requests[0])).toContain('Genre: every song must be jazz.')
+  })
+
+  it('no named genre adds no genre line, and the system prompts stay static', async () => {
+    const { llm, requests } = scripted(turn('[]'), turn('[]'))
+    await proposeSongs(llm, { brief: 'sunday', intent: intent(), seeds: [], storefront: 'ng' })
+    await proposeSongs(llm, { brief: 'sunday', intent: intent({ genres: ['jazz'] }), seeds: [], storefront: 'ng', listener: 'personal' })
+    expect(userBlock(requests[0])).not.toMatch(/^Genres?:/m)
+    expect(requests[0].system).toBe(PROPOSE_SYSTEM_PROMPT)
+    expect(requests[1].system).toBe(PROPOSE_SYSTEM_PROMPT_PERSONAL)
+  })
+})
