@@ -235,6 +235,45 @@ electronic releases on Apple); club, dub, radio mixes and remixes still
 are. An exact title wins, then an original mix over an extended one the
 proposal did not name.
 
+As built (genre floor, 2026-11-16): live, the founder's "lofi afro
+house slow living great instrumentals" proposed 15, verified 8 and came
+back 1 song. The proposals drifted to ambient and electronica (Nils Frahm,
+Floating Points), the sound check rightly rejected them, and the library
+holds almost no afro house. Three changes, all for a personal blend with
+propose first active unless noted:
+- **Genre-true proposals (every proposal call).** When `intent.genres` is
+  set, the user turn says every song must be one of the named genres (any
+  one is enough) and that mood and texture words ("slow", "instrumental",
+  "lofi" as a sound) shape choices within them, never replace them. In the
+  user turn, so both system prompts stay static and cached. This applies
+  to corpus, edit and flag-off proposal calls too; nothing else about them
+  changed.
+- **A larger, faster first pool.** The blend's proposal call runs with
+  thinking off (`ProposeInput.thinking`), as catalogue curation already
+  does. A genre brief asks for `genrePoolCount` (2 x `targetCount`, at most
+  `GENRE_POOL_MAX` 34); other briefs keep `proposalCount`. Such a turn sets
+  `FillTracker.wide`: `WIDE_VERIFY_MAX` 34 searches, `WIDE_VERIFY_DEADLINE_MS`
+  14 s and a `WIDE_TURN_APPLE_BUDGET` of 37 (34 searches plus the three
+  sound checks) for the rest of the turn, edits included. Every other turn
+  keeps 22, 10 s and 22. Worst case 37 + 26 + 66 = 129 subrequests, far
+  under 900. Reasons keep the `REASON_RULE` length; the gain is the
+  thinking tokens (the live call spent 35 s on 15 songs, mostly thinking).
+  Thirty songs without thinking is roughly 2k output tokens, expected to
+  finish inside the library curation it runs beside, so the pool's size
+  should not add to the turn; verification can add up to 4 s.
+- **A floor (amends decision 8 of `every-song-earns-its-place` for propose
+  first).** After every check and spare top-up, a personal genre blend
+  under `genreFloor` (min(`targetCount`, max(10, ceil(2/3 x
+  `targetCount`)))) is refilled from the songs the sound check rejected:
+  verified proposals first in the proposer's order, then the library picks
+  it dropped in the curator's order, never a duplicate by track or
+  `songKey`, never past the floor. A check that could not run rejected
+  nothing, so unchecked songs still never come back. The DJ is told how
+  many lean adjacent (`adjacentNotice`); the genre notice counts only songs
+  left out, and a mix the refill brought to the floor drops the short-mix
+  notice. One still under the floor keeps it. The turn log gains
+  `adjacent`. No new model call.
+
 As built (S8, edits): a personal listener's swap or extend goes outside
 their music only when it cannot be covered from it: a named or artist-only
 scope with no songs to draw on (after the existing catalogue and Apple

@@ -575,7 +575,7 @@ describe('remake and outside picks', () => {
 // electronica ones, and the library holds almost no afro house: 1 song. A
 // genre brief now asks for a larger, genre-true first pool, verifies more of
 // it, and refills to a floor from the closest songs the check rejected.
-describe('a genre brief gets a larger, faster first pool', () => {
+describe('a genre brief comes back full (floor)', () => {
   // The sound check passes the songs whose titles `passes` accepts.
   function checker(passes: (title: string) => boolean = () => false) {
     const prompts: string[] = []
@@ -641,6 +641,81 @@ describe('a genre brief gets a larger, faster first pool', () => {
     expect(askedFor(proposalRequests(requests)[0])).toBe(34)
     expect(searches.length).toBeGreaterThan(VERIFY_MAX)
     expect(searches.length).toBeLessThanOrEqual(34)
+  })
+
+  it('golden: library curates nothing, Apple confirms many, the check rejects most: the mix refills to the floor and says some lean adjacent', async () => {
+    const jazz = new Set(['Song 0', 'Song 1', 'Song 2'])
+    const { result, text, requests } = await genreTurn({ targetCount: 15, genreOf: (p) => (jazz.has(p.title) ? 'Jazz' : 'Pop') })
+    // floor = min(15, max(10, ceil(2/3 × 15))) = 10
+    expect(result.queue).toHaveLength(10)
+    expect(result.queue.filter((t) => t.title.startsWith('Library '))).toHaveLength(0)
+    for (const t of jazz) expect(result.queue.map((q) => q.title)).toContain(t)
+    expect(text).toContain('note: 7 of these songs lean adjacent to jazz (close in sound, not strictly the genre) so the mix could stay full. Say so in one line.')
+    expect(text).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
+    expect(proposalRequests(requests)).toHaveLength(1)
+    noDuplicates(result.queue)
+  })
+
+  it('refills from verified proposals first, then the library songs the check dropped, in curator order', async () => {
+    const jazz = new Set(['Song 0', 'Song 1', 'Song 2'])
+    // Apple confirms only five songs: three jazz, two not.
+    const { result, text } = await genreTurn({
+      targetCount: 15, confirmed: (_p, i) => i < 5, genreOf: (p) => (jazz.has(p.title) ? 'Jazz' : 'Pop'),
+    })
+    expect(result.queue).toHaveLength(10)
+    expect(result.queue.filter((t) => t.title.startsWith('Song '))).toHaveLength(5)
+    expect(result.queue.filter((t) => t.title.startsWith('Library '))).toHaveLength(5)
+    expect(text).toContain('note: 7 of these songs lean adjacent to jazz')
+    noDuplicates(result.queue)
+  })
+
+  it('a check that passes enough refills nothing and says nothing of adjacency', async () => {
+    const { result, text } = await genreTurn({ targetCount: 15, genreOf: () => 'Jazz' })
+    expect(result.queue).toHaveLength(15)
+    expect(text).not.toMatch(/lean adjacent/)
+    expect(text).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
+  })
+
+  it('a mix already at the floor without a refill is left as it is', async () => {
+    const jazz = new Set(Array.from({ length: 11 }, (_, i) => `Song ${i}`))
+    const { result, text } = await genreTurn({ targetCount: 15, confirmed: (_p, i) => i < 11, genreOf: (p) => (jazz.has(p.title) ? 'Jazz' : 'Pop') })
+    expect(result.queue).toHaveLength(11)
+    expect(text).not.toMatch(/lean adjacent/)
+    expect(text).toMatch(/this mix is 11 of the 15 songs asked for/)
+  })
+
+  it('nothing to refill: the short notice stands as before', async () => {
+    // Two library songs Apple labels Jazz, three verified jazz proposals: no rejects.
+    const { result, text } = await genreTurn({ targetCount: 15, library: 2, libraryGenre: 'Jazz', confirmed: (_p, i) => i < 3, genreOf: () => 'Jazz' })
+    expect(result.queue).toHaveLength(5)
+    expect(text).not.toMatch(/lean adjacent/)
+    expect(text).toMatch(/this mix is 5 of the 15 songs asked for/)
+  })
+
+  it('below the floor even after refilling everything: adjacency and the short notice both', async () => {
+    const { result, text } = await genreTurn({ targetCount: 15, library: 2, confirmed: (_p, i) => i < 3 })
+    expect(result.queue).toHaveLength(5)
+    expect(text).toContain('note: 5 of these songs lean adjacent to jazz')
+    expect(text).toMatch(/this mix is 5 of the 15 songs asked for/)
+  })
+
+  it('a check that cannot run refills nothing: no unchecked song is queued', async () => {
+    const jazz = new Set(['Song 0', 'Song 1', 'Song 2'])
+    const { result, text } = await genreTurn({ targetCount: 15, checkThrows: true, genreOf: (p) => (jazz.has(p.title) ? 'Jazz' : 'Pop') })
+    expect(result.queue.every((t) => jazz.has(t.title))).toBe(true)
+    expect(text).not.toMatch(/lean adjacent/)
+  })
+
+  it('never more than targetCount: a small mix refills to its own length', async () => {
+    const { result, text } = await genreTurn({ targetCount: 8 })
+    expect(result.queue).toHaveLength(8)
+    expect(text).toContain('note: 8 of these songs lean adjacent to jazz')
+    noDuplicates(result.queue)
+  })
+
+  it('several genres are named as alternatives in the notice', async () => {
+    const { text } = await genreTurn({ targetCount: 8, genres: ['afro house', 'lofi'] })
+    expect(text).toContain('lean adjacent to afro house or lofi')
   })
 
   it('flag off: a personal genre brief keeps the old limits, thinking and notices', async () => {

@@ -1070,7 +1070,8 @@ type FillLog = { inserted: number; enriched: number; subrequests: number; appleE
 // replacement round that failed and was let go.
 // `curationFailed`: the curation failed and the proposals filled the mix.
 // `features`: the per-turn feature chain's counts, when it ran.
-type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' | 'edit'; curationFailed?: true; features?: FeaturesChainResult }
+// `adjacent`: songs a genre blend's floor kept that the sound check rejected.
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' | 'edit'; curationFailed?: true; features?: FeaturesChainResult; adjacent?: number }
 
 // What one turn's proposals verified, kept so a conflict retry or a second
 // generate_queue reuses them instead of spending the searches again.
@@ -1278,7 +1279,9 @@ function searchRoom(tracker: FillTracker, intent: { genres?: string[] }): number
 // those Apple labels as a named genre stay, the rest go to one check call
 // on the fast model, and a check that cannot run keeps only the labelled
 // ones. No named genre is no check. The call is charged to the ledger.
-type GenreFiltered<T> = { kept: T[]; dropped: number; failed: boolean }
+// `rejected`: the songs the check itself turned down, in their order; none
+// when the check could not run (those songs went unchecked, never refilled).
+type GenreFiltered<T> = { kept: T[]; dropped: number; failed: boolean; rejected: T[] }
 
 // `prepaid`: the call's unit was charged up front (holdGenreUnit), so it
 // may run whatever the ledger holds now, and a check that needed no call
@@ -1294,7 +1297,7 @@ async function genreFilter<T extends { trackId: string }>(
   const refund = () => { if (prepaid) tracker.genreChecks = Math.max(0, (tracker.genreChecks ?? 0) - 1) }
   if (!genres || genres.length === 0 || picks.length === 0) {
     refund()
-    return { kept: picks, dropped: 0, failed: false }
+    return { kept: picks, dropped: 0, failed: false, rejected: [] }
   }
   // The checking step only when the check's model call actually goes out:
   // label matches, no fast model or no room in the turn make none.
@@ -1305,7 +1308,12 @@ async function genreFilter<T extends { trackId: string }>(
   } else {
     tracker.genreChecks = (tracker.genreChecks ?? 0) + result.calls
   }
-  return { kept: picks.filter((p) => result.kept.has(p.trackId)), dropped: result.dropped, failed: result.failed }
+  return {
+    kept: picks.filter((p) => result.kept.has(p.trackId)),
+    dropped: result.dropped,
+    failed: result.failed,
+    rejected: result.failed ? [] : picks.filter((p) => !result.kept.has(p.trackId)),
+  }
 }
 
 // Charges the curated songs' check before anything runs beside it. The
@@ -1338,6 +1346,23 @@ export function genreCheckNotice(g: { dropped: number; genres: string[]; failed:
       'out. If the mix is shorter, tell them plainly why.'
     : `note: ${songs} failed the ${genre} check (they do not sound like ${genre}) and were left out. If the mix is ` +
       'shorter, tell them plainly why.'
+}
+
+// A personal genre blend's floor (2026-11-16, amends decision 8 of spec
+// 2026-11-09 every-song-earns-its-place for propose first): a mix the
+// sound check left below this is refilled from the closest songs it
+// rejected. Two thirds of the mix, at least 10, never more than asked.
+export function genreFloor(targetCount: number): number {
+  return Math.min(targetCount, Math.max(10, Math.ceil((2 * targetCount) / 3)))
+}
+
+// Said when the floor refill kept songs the sound check rejected. `full`:
+// the refill reached the floor. Goes to the MODEL.
+export function adjacentNotice(count: number, genres: string[], full: boolean): string {
+  const genre = genres.map((n) => sanitizeForPrompt(n)).join(' or ')
+  const songs = count === 1 ? 'song leans' : 'songs lean'
+  return `note: ${count} of these ${songs} adjacent to ${genre} (close in sound, not strictly the genre) so the mix ` +
+    `could ${full ? 'stay full' : 'hold more songs'}. Say so in one line.`
 }
 
 // Once proposal searches have run this turn, a fill keeps its insertion
@@ -2271,7 +2296,7 @@ async function generateFromBrief(
   const blending = (poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined) || personalBlend
   const blendTarget = blending ? blendWant(intent, personalBlend, proposeFirst) : 0
   // A personal genre blend: the wider search allowance for the rest of the
-  // turn (FillTracker.wide).
+  // turn (FillTracker.wide), and a floor the sound check cannot take it under.
   const genreBlend = personalBlend && (intent.genres ?? []).length > 0
   if (genreBlend) turn.tracker.wide = true
   // The songs the listener owns that fit this brief, told to the blend's
@@ -2320,7 +2345,7 @@ async function generateFromBrief(
         personalBlend ? { listener: 'personal', owned } : undefined)
       : Promise.resolve([]),
   ])
-  const curated = curatedCheck.kept
+  const curated = [...curatedCheck.kept]
   // A proposal the catalogue curation also picked is one song, queued once:
   // the same track row, or another row of the same song by songKey (another
   // release, same title and artist; backlog 2026-11-10, "Gbona" twice).
@@ -2363,6 +2388,7 @@ async function generateFromBrief(
   // verified for the gap (with a named genre's spares) and checked once
   // more. No second proposal call; nothing when no spare or search is left.
   let sparesFailed = false
+  let sparesRejected: VerifiedProposal[] = []
   const gap = intent.targetCount - curated.length - proposed.length
   if (personalBlend && gap > 0) {
     const held = new Set([...curatedIds, ...checkedIds])
@@ -2370,13 +2396,45 @@ async function generateFromBrief(
     const spares = await topUpFromBlend(db, deps.fill!, intent, turn.tracker, gap + genreSpares(intent, gap), held, heldSongs, deps.step)
     const sparesCheck = await genreFilter(deps, turn.tracker, intent.genres, spares, proposalCandidate)
     sparesFailed = sparesCheck.failed
+    sparesRejected = sparesCheck.rejected
     proposed.push(...sparesCheck.kept.slice(0, gap))
     // The places the listener counts are the mix's, not the round's spares.
     proposedAimed = Math.min(proposedAimed, intent.targetCount - curated.length)
   }
+  // The floor: a personal genre blend still under genreFloor after every
+  // check and top-up keeps the closest songs the check rejected, verified
+  // proposals first in the proposer's order, then the library's own picks
+  // in the curator's order. Never a song already in the mix (by track or
+  // songKey), never past the floor, so never past targetCount. A check that
+  // could not run rejected nothing: unchecked songs never come back.
+  let adjacent = 0
+  const floor = genreBlend ? genreFloor(intent.targetCount) : 0
+  if (curated.length + proposed.length < floor) {
+    const inMix = new Set([...curated.map((p) => p.trackId), ...proposed.map((p) => p.trackId)])
+    const inMixSongs = new Set([...curated.flatMap((p) => {
+      const t = byId.get(p.trackId)
+      return t ? [songKey(t)] : []
+    }), ...proposed.map(songKey)])
+    const take = (trackId: string, key: string | undefined): boolean => {
+      if (curated.length + proposed.length >= floor || inMix.has(trackId) || (key !== undefined && inMixSongs.has(key))) return false
+      inMix.add(trackId)
+      if (key !== undefined) inMixSongs.add(key)
+      adjacent += 1
+      return true
+    }
+    for (const p of [...proposedCheck.rejected, ...sparesRejected]) {
+      if (take(p.trackId, songKey(p))) proposed.push(p)
+    }
+    for (const c of curatedCheck.rejected) {
+      const t = byId.get(c.trackId)
+      if (take(c.trackId, t ? songKey(t) : undefined)) curated.push(c)
+    }
+    if (adjacent > 0) proposeSpend(turn.tracker).log.adjacent = adjacent
+  }
   // Dropped as the listener would count it: the places left empty, not
-  // spares that failed with another in their place.
-  const genreDropped = curatedCheck.dropped + Math.max(0, proposedAimed - proposed.length)
+  // spares that failed with another in their place, nor songs the floor
+  // kept as adjacent.
+  const genreDropped = Math.max(0, curatedCheck.dropped + Math.max(0, proposedAimed - proposed.length) - adjacent)
   const genreLines = genreDropped > 0
     ? [genreCheckNotice({ dropped: genreDropped, genres: intent.genres ?? [], failed: curatedCheck.failed || proposedCheck.failed || sparesFailed })]
     : []
@@ -2443,7 +2501,10 @@ async function generateFromBrief(
       ...blendLines,
       ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
       ...genreLines,
-      ...(picks.length < intent.targetCount
+      ...(adjacent > 0 ? [adjacentNotice(adjacent, intent.genres ?? [], picks.length >= floor)] : []),
+      // A mix the floor refill brought to the floor is as full as a genre
+      // brief comes; only one still under it says it is short.
+      ...(picks.length < intent.targetCount && !(adjacent > 0 && picks.length >= floor)
         ? [shortMixNotice({ count: picks.length, asked: intent.targetCount, source, outside: outsideReason })]
         : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
