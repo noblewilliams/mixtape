@@ -1837,8 +1837,11 @@ and a phone on captive-portal or dead Wi-Fi still reports a network as up, so
 listener is sent) before it says "offline". The other failures need no probe.
 `connectivity_plus` was not adopted: it reports interfaces, not whether the
 internet answers. "Try again" shows a spinner for the retry, and for at least
-0.6 s, so a tap always gets a visible response (founder smoke, same day). The
-in-band streaming errors (the chat turn) and the first-run flow still map every
-network failure to "offline".
+0.6 s, so a tap always gets a visible response (founder smoke, same day).
+The chat (bubbles and queue edits), Home's start, the interview, playlist edits
+and the first-run flow use the same split (`client/lib/presentation/format/
+network_copy.dart`): "you're offline" only when the phone is, otherwise
+"couldn't reach the DJ — try again in a moment", and never "check your
+connection" for a server that didn't answer (2026-11-16).
 **Reopens if:** Apple's page is blocked somewhere listeners are, or a probe
 on every ambiguous failure shows up as a delay people notice.

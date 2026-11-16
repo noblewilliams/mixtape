@@ -6,6 +6,7 @@
 // panel that holds everything you can do. The mix list moved to Mixes (task
 // 2.3) and the menu's destinations to Library and You (task 2.2).
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
+import 'package:mixtape/presentation/format/network_copy.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -824,9 +825,7 @@ void main() {
 
         expect(find.byType(ChatScreen), findsNothing);
         expect(
-          find.text(
-            "couldn't reach the DJ — check your connection and try again",
-          ),
+          find.text(NetworkCopy.djUnreachable),
           findsOneWidget,
         );
         final field = tester.widget<TextField>(

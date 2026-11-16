@@ -47,10 +47,9 @@ import 'import_sheet.dart';
 import 'shell/shell_route_observer.dart';
 import 'interview_screen.dart';
 import 'spotify_request_screen.dart';
+import '../format/network_copy.dart';
 
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
-const _offlineStartErrorMessage =
-    "couldn't reach the DJ — check your connection and try again";
 
 /// The Home tab (`docs/mockups/approved/2026-09-17-mobile-shell.md` → Home;
 /// `docs/mockups/approved/2026-09-17-mobile-home-states.md`; plan task 3.1).
@@ -543,9 +542,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       // mapped to the same generic message as a plain ApiException.
       if (!mounted) return;
       setState(() => _error = _genericStartErrorMessage);
-    } on NetworkException {
+    } on NetworkException catch (e) {
       if (!mounted) return;
-      setState(() => _error = _offlineStartErrorMessage);
+      setState(() => _error = djNetworkMessage(e));
     } on ApiException {
       if (!mounted) return;
       setState(() => _error = _genericStartErrorMessage);

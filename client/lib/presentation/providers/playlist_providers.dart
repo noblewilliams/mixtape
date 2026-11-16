@@ -12,6 +12,7 @@ import '../../data/musickit/musickit_bridge.dart';
 import '../../data/musickit/playlist_apply_bridge.dart';
 import 'auth_provider.dart';
 import 'library_sync_provider.dart';
+import '../format/network_copy.dart';
 
 final playlistApiProvider = Provider<PlaylistApi>(
   (ref) => PlaylistApi(ref.watch(apiClientProvider)),
@@ -227,8 +228,6 @@ extension PlaylistApplyUiStatusState on PlaylistApplyUiStatus {
       this == PlaylistApplyUiStatus.applying;
 }
 
-const _offlineEditMessage =
-    "Couldn't reach the DJ. Check your connection and try again.";
 const _genericEditMessage =
     'Something went wrong while editing this playlist. Try again.';
 
@@ -334,8 +333,8 @@ class PlaylistEditThreadNotifier
           ),
         );
       }
-    } on NetworkException {
-      _appendError(_offlineEditMessage, text);
+    } on NetworkException catch (e) {
+      _appendError(sentenceNetworkMessage(e), text);
     } catch (_) {
       _appendError(_genericEditMessage, text);
     } finally {
