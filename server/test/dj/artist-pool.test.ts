@@ -556,7 +556,7 @@ describe('featured singers count as vocals', () => {
 
   it('gives the Apple lookups more room', async () => {
     const { ARTIST_CONCURRENCY, ARTIST_DEADLINE_MS } = await import('../../src/dj/artist-pool')
-    expect(ARTIST_CONCURRENCY).toBe(6)
+    expect(ARTIST_CONCURRENCY).toBe(4)
     expect(ARTIST_DEADLINE_MS).toBe(14_000)
   })
 })

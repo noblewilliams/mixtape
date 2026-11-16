@@ -36,7 +36,8 @@ export const ARTIST_TOP_SONGS_INSTRUMENTAL = 20
 // Songs any one artist may put in the pool, and so in the mix.
 export const ARTIST_PER_MIX = 3
 // Artists looked up at once (two Apple calls each, one after the other).
-export const ARTIST_CONCURRENCY = 6
+// 6 at once drew Apple's rate limit live (2026-11-16); 4 did not.
+export const ARTIST_CONCURRENCY = 4
 // Wall time for the Apple lookups, checked before each call.
 export const ARTIST_DEADLINE_MS = 14_000
 // Apple calls the pool may make: an artist search and a top-songs page per artist.
