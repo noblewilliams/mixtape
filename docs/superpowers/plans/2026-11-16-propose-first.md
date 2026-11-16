@@ -1,7 +1,9 @@
 # Propose first — plan
 
 **Status:** decisions taken 2026-11-16 (founder: "take all five", then
-zero-cost outside APIs; "Write the plan"). Nothing built yet.
+zero-cost outside APIs; "Write the plan"). S0–S9 done 2026-11-16, each
+reviewed with a fix round where the review found defects; S11 docs current.
+Next: G1 (apply 0052 and 0053, deploy with the flag off), then G2, S10, G3.
 - Spec: `../specs/2026-11-16-propose-first-design.md`.
 - Decision: `../../decisions.md` → 2026-11-16 Propose first.
 

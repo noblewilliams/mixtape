@@ -2,7 +2,10 @@
 
 Date: 2026-11-16. Status: decisions taken 2026-11-16 (founder: "take all
 five", then a zero-cost rule for outside APIs; recorded in
-`../../decisions.md`). Plan: `../plans/2026-11-16-propose-first.md`. Nothing is built yet.
+`../../decisions.md`). Plan: `../plans/2026-11-16-propose-first.md`. S0–S9 built, reviewed and
+committed on `feat/propose-first` 2026-11-16 (Gate 0 passed; report
+`../../testing/2026-11-16-propose-first-spike.md`). Not deployed: migrations
+0052 and 0053, G1, G2 (`PROPOSE_FIRST_USERS`), S10 and G3 are owed.
 
 Follows `2026-10-21-everyone-gets-a-mix-design.md` (step 4, as reshaped on
 2026-10-22) and `2026-11-09-every-song-earns-its-place-design.md`. Both made

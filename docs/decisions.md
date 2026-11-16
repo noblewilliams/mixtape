@@ -26,6 +26,18 @@ lyrics meaning, BPM, mood and genre. Spec
 **Reopens if:** measured energy covers under 60% of proposed songs and mixes
 audibly lose their shape, a free provider closes, or paying users arrive.
 
+Amended while building (2026-11-16):
+- **`comfort` mixes get no proposals.** `comfort` means the listener's
+  most-played songs, and the own-music rule (2026-11-09) already treats it as
+  library-only, so its 25% share does not apply. `mix` covers "mostly mine,
+  some new". Founder may revisit.
+- **"Remake with my music" never blends proposals**, generate or edit.
+- **Corpus swaps get 2 spare proposals** (not behind the flag): a swap that
+  misses on Apple now lands a spare, at up to 2 more Apple searches.
+- Spike (Gate 0): verify rate 88.7%, ReccoBeats energy on 69% of verified
+  proposals, model energy error 0.134; version words now catch "Dub" and
+  "Alt Version".
+
 ## 2026-11-10 — Proposed mixes no longer pitch adding music (founder)
 
 Every catalogue or proposed mix now shows the add-your-music line under it
