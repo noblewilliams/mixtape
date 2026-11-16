@@ -12,6 +12,7 @@ import {
   proposalCount,
   proposeSongs,
   titleKey,
+  unitEstimate,
   verifyProposals,
   VERIFY_DEADLINE_MS,
   VERIFY_CONCURRENCY,
@@ -226,6 +227,73 @@ describe('proposeSongs', () => {
     expect(requests).toHaveLength(2)
   })
 
+  // Plan 2026-11-16 propose-first, S3: the model's own estimate of how each
+  // recording feels, a fallback where no measured features exist.
+  it('both prompts are still static constants and ask for energy and valence estimates', () => {
+    for (const prompt of [PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL]) {
+      expect(typeof prompt).toBe('string')
+      expect(prompt).toMatch(/"energy"/)
+      expect(prompt).toMatch(/"valence"/)
+      expect(prompt).toMatch(/your best estimate of how the recording feels/)
+      expect(prompt).not.toContain(EM)
+    }
+  })
+
+  it('keeps energy and valence when they are numbers from 0 to 1', async () => {
+    const items = [
+      { title: 'Essence', artist: 'Wizkid', reason: 'a', energy: 0.42, valence: 0.7 },
+      { title: 'Joro', artist: 'Wizkid', reason: 'b', energy: 0, valence: 1 },
+    ]
+    const { llm } = scripted(turn(JSON.stringify(items)))
+    const out = await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
+    expect(out).toEqual([
+      { title: 'Essence', artist: 'Wizkid', reason: 'A', energy: 0.42, valence: 0.7 },
+      { title: 'Joro', artist: 'Wizkid', reason: 'B', energy: 0, valence: 1 },
+    ])
+  })
+
+  it('drops a missing, non-numeric or out-of-range estimate, never the proposal', async () => {
+    const raw = '[' + [
+      '{"title":"A","artist":"One","reason":"r","energy":"0.5","valence":0.3}',
+      '{"title":"B","artist":"Two","reason":"r","energy":1.4,"valence":-0.1}',
+      '{"title":"C","artist":"Three","reason":"r","energy":null,"valence":true}',
+      '{"title":"D","artist":"Four","reason":"r","valence":0.6}',
+    ].join(',') + ']'
+    const { llm } = scripted(turn(raw))
+    const out = await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
+    expect(out.map((s) => s.title)).toEqual(['A', 'B', 'C', 'D'])
+    expect(out[0].energy).toBeUndefined()
+    expect(out[0].valence).toBe(0.3)
+    expect(out[1].energy).toBeUndefined()
+    expect(out[1].valence).toBeUndefined()
+    expect(out[2]).not.toHaveProperty('energy')
+    expect(out[2]).not.toHaveProperty('valence')
+    expect(out[3].energy).toBeUndefined()
+    expect(out[3].valence).toBe(0.6)
+  })
+
+  it('unitEstimate: a finite number from 0 to 1, else undefined', () => {
+    expect(unitEstimate(0)).toBe(0)
+    expect(unitEstimate(0.55)).toBe(0.55)
+    expect(unitEstimate(1)).toBe(1)
+    for (const bad of [NaN, Infinity, -Infinity, 1.4, -0.1, '0.5', null, undefined, true, {}, []]) {
+      expect(unitEstimate(bad)).toBeUndefined()
+    }
+  })
+
+  it('drops an estimate that overflows to Infinity in the reply', async () => {
+    const { llm } = scripted(turn('[{"title":"A","artist":"One","reason":"r","energy":1e999,"valence":0.2}]'))
+    const out = await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
+    expect(out).toEqual([{ title: 'A', artist: 'One', reason: 'R', valence: 0.2 }])
+  })
+
+  it('an old-shape reply without estimates still parses', async () => {
+    const { llm } = scripted(turn('[{"title":"A","artist":"One","reason":"r"}]'))
+    const out = await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
+    expect(out).toEqual([{ title: 'A', artist: 'One', reason: 'R' }])
+    expect(out[0]).not.toHaveProperty('energy')
+  })
+
   it('unparseable output is an empty list', async () => {
     const { llm } = scripted(turn('I would suggest some Wizkid.'))
     expect(await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })).toEqual([])
@@ -309,6 +377,26 @@ describe('verifyProposals', () => {
     expect(out.searches).toBe(3)
     expect(out.verified.map((v) => [v.title, v.reason])).toEqual([['Essence (feat. Tems)', 'opens soft'], ['Free Mind', 'the lift']])
     expect(out.misses.map((m) => m.title)).toEqual(['Made Up Song'])
+  })
+
+  it('carries the model\'s energy and valence onto the verified song as its estimate, omitted when there is none', async () => {
+    const db = await createTestDb()
+    const { catalog } = fakeSearch({
+      'Essence Wizkid': [song('e1', 'Essence', 'Wizkid')],
+      'Free Mind Tems': [song('e2', 'Free Mind', 'Tems')],
+      'Joro Wizkid': [song('e3', 'Joro', 'Wizkid')],
+    })
+    const proposals: Proposal[] = [
+      { ...p('Essence', 'Wizkid'), energy: 0.4, valence: 0.8 },
+      p('Free Mind', 'Tems'),
+      { ...p('Joro', 'Wizkid'), valence: 0.5 },
+    ]
+    const out = await verifyProposals(db, catalog, { proposals, storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS })
+    expect(out.verified.map((v) => v.title)).toEqual(['Essence', 'Free Mind', 'Joro'])
+    expect(out.verified[0].estimate).toEqual({ energy: 0.4, valence: 0.8 })
+    expect(out.verified[1]).not.toHaveProperty('estimate')
+    expect(out.verified[2].estimate).toEqual({ valence: 0.5 })
+    expect(out.verified[2].estimate).not.toHaveProperty('energy')
   })
 
   it('a hit Apple titles as an interlude is a miss unless the listener named it', async () => {
