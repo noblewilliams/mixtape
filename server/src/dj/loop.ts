@@ -86,7 +86,19 @@ import { claimTurn, finishTurn, rollbackTurn, TurnGuard, TurnStopped, type TurnC
 // turnStopped is the turn's stop as its guard has seen it (dj/turn-stop.ts),
 // set by runDjTurn like step: work that is not a model call (the feature
 // chain) starts nothing new once it is true.
-export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean; step?: TurnStepReporter; turnStopped?: () => boolean }
+// proposeFirst is the PROPOSE_FIRST flag (index.ts proposeFirstEnabled) for
+// this turn's listener: with it on, NEVER_REFUSE on and fill wired, a
+// personal mix blends verified proposals (PROPOSE_SHARE) and a corpus mix
+// proposes more of itself (corpusProposeShare). proposeFirstFor resolves it
+// per listener (PROPOSE_FIRST_USERS); runDjTurn sets proposeFirst from it
+// when it is wired. Absent or false is today's behaviour exactly.
+export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean; proposeFirst?: boolean; proposeFirstFor?: (userId: string) => boolean; step?: TurnStepReporter; turnStopped?: () => boolean }
+
+// Whether the propose-first blend can run this turn: the flag, and the
+// never-refuse fill it is built on.
+function proposeFirstActive(deps: DjDeps): boolean {
+  return deps.proposeFirst === true && deps.neverRefuse === true && deps.fill !== undefined
+}
 
 // Where a turn's time goes, for the turn log: each model call as
 // "<kind>@<start>+<duration>" in tenths of a second from the turn's start
@@ -200,6 +212,35 @@ export const CORPUS_NOTICE =
 // libraries happen to be synced. The rest is curated from the catalogue as
 // before, and covers any proposal that does not verify.
 export const CORPUS_PROPOSE_SHARE = 0.5
+
+// PROPOSE_FIRST on (decisions 2026-11-16): a corpus mix proposes 0.75 of
+// itself. Off, CORPUS_PROPOSE_SHARE as before.
+export function corpusProposeShare(proposeFirst: boolean): number {
+  return proposeFirst ? 0.75 : CORPUS_PROPOSE_SHARE
+}
+
+// PROPOSE_FIRST on: the share of a personal mix proposed from all of music
+// and verified on Apple, by the brief's familiarity (decisions 2026-11-16).
+// The library curation covers the rest. An own-music brief (ownMusicBrief)
+// blends nothing, so comfort's share applies only once comfort stops being
+// read as favourites.
+export const PROPOSE_SHARE: Readonly<Record<Intent['familiarity'], number>> = Object.freeze({
+  comfort: 0.25,
+  mix: 0.5,
+  adventurous: 0.75,
+})
+
+// Songs from a personal listener's own pool named to the blend's proposal
+// call, so it spends its slots on songs they do not own (spike 2026-11-16:
+// 16.6% of proposals were already owned).
+const OWNED_EXCLUDE = 60
+
+// A personal mix's blend, in place of blendedNotice: the songs are new to
+// the listener, not a sign the mix is not theirs. Goes to the MODEL.
+export function personalBlendNotice(count: number): string {
+  return `note: ${count} of these picks ${count === 1 ? "is a song they don't" : "are songs they don't"} own yet, ` +
+    'chosen for this brief and checked on Apple Music. Say which.'
+}
 
 // Follows CORPUS_NOTICE when some of the mix was proposed. Goes to the MODEL.
 export function blendedNotice(count: number): string {
@@ -625,7 +666,7 @@ export const PERSONA_PROMPT_WITH_FILL = [...PERSONA_LINES.slice(0, -2), FILL_PER
 // already carries allowOutside), the fill variant when only the shortfall
 // fill can run, today's otherwise.
 function conversationVariant(deps: DjDeps): { system: string; tools: typeof DJ_TOOLS } {
-  if (deps.outsidePicks) return { system: PERSONA_PROMPT_WITH_OUTSIDE, tools: DJ_TOOLS_WITH_OUTSIDE }
+  if (deps.outsidePicks || proposeFirstActive(deps)) return { system: PERSONA_PROMPT_WITH_OUTSIDE, tools: DJ_TOOLS_WITH_OUTSIDE }
   if (deps.neverRefuse === true && deps.fill) return { system: PERSONA_PROMPT_WITH_FILL, tools: DJ_TOOLS_WITH_OUTSIDE }
   return { system: PERSONA_PROMPT, tools: DJ_TOOLS }
 }
@@ -1438,10 +1479,23 @@ async function runProposals(
   return { verified, funnelWritten: false }
 }
 
-// The proposed share of a corpus mix: one round, no replacement (the
-// catalogue covers a shortfall). Never throws: a failed call or search
-// leaves the mix to the catalogue. Kept on the tracker so a conflict retry
-// or a second generate_queue this turn reuses it.
+// How many of a blended mix are proposed: the corpus share, or a personal
+// listener's by familiarity (PROPOSE_SHARE, PROPOSE_FIRST on).
+function blendWant(intent: Intent, personal: boolean, proposeFirst: boolean): number {
+  const share = personal ? PROPOSE_SHARE[intent.familiarity] : corpusProposeShare(proposeFirst)
+  return Math.floor(intent.targetCount * share)
+}
+
+// The personal blend's extras: the proposal call leans to the listener's
+// taste (PROPOSE_SYSTEM_PROMPT_PERSONAL, their top artists) and is told the
+// songs they already own, so it does not spend slots on them.
+type PersonalBlend = { listener: 'personal'; owned: ProposedSong[] }
+
+// The proposed share of a blended mix (a corpus mix, or with PROPOSE_FIRST
+// a personal one): one round, no replacement (the curation covers a
+// shortfall). Never throws: a failed call or search leaves the mix to the
+// curation. Kept on the tracker so a conflict retry or a second
+// generate_queue this turn reuses it.
 async function blendProposals(
   db: Db,
   deps: DjDeps,
@@ -1452,14 +1506,18 @@ async function blendProposals(
   sessionContext: string,
   budget: CurationBudget,
   tracker: FillTracker,
+  want: number,
+  personal?: PersonalBlend,
 ): Promise<VerifiedProposal[]> {
   if (tracker.blend) return tracker.blend
-  const want = Math.floor(intent.targetCount * CORPUS_PROPOSE_SHARE)
   if (want <= 0) return []
   const spend = proposeSpend(tracker)
   try {
     const ctx = await proposeContext(db, fill, session, userText, sessionContext)
-    const round = await proposeRound(db, deps, fill, ctx, { intent, want, count: want + PROPOSE_EXTRA }, budget, tracker)
+    const taste = personal
+      ? { listener: personal.listener, topArtists: await topLibraryArtists(db, session.userId), exclude: personal.owned }
+      : {}
+    const round = await proposeRound(db, deps, fill, ctx, { intent, want, count: want + PROPOSE_EXTRA, ...taste }, budget, tracker)
     const verified = round?.result.verified ?? []
     spend.log.verified += verified.length
     tracker.blend = verified
@@ -1955,7 +2013,7 @@ async function generateFromBrief(
     }
     return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
   }
-  const blending = poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined
+  const proposeFirst = proposeFirstActive(deps)
   // A short curation is filled from outside the library (decision 2 of spec
   // 2026-11-09 every-song-earns-its-place) on the same gates as the blend,
   // and never when the brief asked for only the listener's own music.
@@ -1967,6 +2025,22 @@ async function generateFromBrief(
   // capped at the outside share.
   const outsideAllowed = !ownMusicBrief(intent)
   const fillShort = outsideAllowed && neverRefuse && deps.fill !== undefined
+  // PROPOSE_FIRST (spec 2026-11-16 propose-first, step 2): a personal mix
+  // blends proposals like a corpus mix, on the shortfall's own gates, so
+  // never for an own-music brief or allowOutside false.
+  const personalBlend = proposeFirst && poolMode.mode === 'personal' && fillShort && intent.allowOutside !== false
+  const blending = (poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined) || personalBlend
+  const blendTarget = blending ? blendWant(intent, personalBlend, proposeFirst) : 0
+  // The songs the listener owns that fit this brief, told to the blend's
+  // proposal call so it reaches past them. Outside rows are not theirs.
+  const owned = personalBlend
+    ? pool.filter((t) => !t.outside).slice(0, OWNED_EXCLUDE).map((t) => ({ title: t.title, artist: t.artist }))
+    : []
+  // The library curates only its own share of a personal blend, so it does
+  // not pad the mix; a short blend is topped up as a corpus one is.
+  const curationIntent = personalBlend && blendTarget > 0
+    ? { ...intent, targetCount: Math.max(1, intent.targetCount - blendTarget) }
+    : intent
   budget.consume()
   const byId = new Map(pool.map((t) => [t.trackId, t]))
   // A named genre's sound check on the curated songs (decision 8) chains
@@ -1992,7 +2066,7 @@ async function generateFromBrief(
   // thinking there took 44 to 95 s); a personal pool's request is as before.
   const thinking = poolMode.mode === 'corpus' ? { thinking: 'off' as const } : {}
   const [curatedCheck, proposedRaw] = await Promise.all([
-    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap, ...thinking })
+    curateFitting(deps.llm, pool, curationIntent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap, ...thinking })
       .catch((e: unknown): CuratedTrack[] => {
         if ((blending || early) && isCurationFailure(e)) {
           curationError = e
@@ -2001,7 +2075,10 @@ async function generateFromBrief(
         throw e
       })
       .then((c) => genreFilter(deps, turn.tracker, intent.genres, c, poolCandidate(byId), curatedHeld)),
-    blending ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker) : Promise.resolve([]),
+    blending
+      ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker, blendTarget,
+        personalBlend ? { listener: 'personal', owned } : undefined)
+      : Promise.resolve([]),
   ])
   const curated = curatedCheck.kept
   // A proposal the catalogue curation also picked is one song, queued once:
@@ -2094,10 +2171,15 @@ async function generateFromBrief(
     ? updatedQueue.filter((t) => t.newToYou && proposedIds.has(t.trackId)).map((t) => t.trackId)
     : []
   const outsideAt = outsidePositions(updatedQueue, new Set([...outsideIdsIn(pool, picks), ...proposedNew]))
+  // A personal blend says its proposals are new to the listener, never that
+  // they come from somewhere other than their taste.
+  const blendLines = personalBlend
+    ? (proposedNew.length > 0 ? [personalBlendNotice(proposedNew.length)] : [])
+    : (blendedCount > 0 ? [blendedNotice(blendedCount)] : [])
   return {
     resultText: [
       ...(poolMode.mode === 'corpus' ? [CORPUS_NOTICE] : []),
-      ...(blendedCount > 0 ? [blendedNotice(blendedCount)] : []),
+      ...blendLines,
       ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
       ...genreLines,
       ...(picks.length < intent.targetCount
@@ -2105,7 +2187,7 @@ async function generateFromBrief(
         : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
-      formatQueueListing(updatedQueue, deps.outsidePicks === true),
+      formatQueueListing(updatedQueue, deps.outsidePicks === true || personalBlend),
     ].join('\n'),
     queueChanged: true,
     newVersion: version,
@@ -2995,6 +3077,8 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     claim = null
   }
   const writes: TurnWrites = { messageSeqs: [], renamed: false, historyOffered: false }
+  // PROPOSE_FIRST for this listener (PROPOSE_FIRST_USERS), once per turn.
+  if (deps.proposeFirstFor) deps = { ...deps, proposeFirst: deps.proposeFirstFor(session.userId) }
   if (!claim) return runClaimedTurn(db, deps, session, userText, options, startingVersion, writes)
   const guard = new TurnGuard(db, session.id, claim.turnId, options.stopTiming)
   const guarded: DjDeps = { ...deps, llm: guard.wrap(deps.llm), embed: guard.wrap(deps.embed), turnStopped: () => guard.stopped }

@@ -193,6 +193,23 @@ fits the genre label; `allowOutside: false` → zero proposals; `comfort` →
 library majority; an edit naming an artist the listener doesn't own → that
 artist appears.
 
+As built (S7): `proposeFirstEnabled(env, userId)` in `src/index.ts` (exact
+`"on"`, or the listener's id in the optional `PROPOSE_FIRST_USERS`), wired
+as `DjDeps.proposeFirstFor` and resolved once per turn by `runDjTurn` into
+`DjDeps.proposeFirst`. The personal blend reuses the corpus blend
+(`blendProposals` in `dj/loop.ts`) rather than merging one pool: it runs
+beside the library curation, which is asked for `targetCount` less the
+proposed share (`PROPOSE_SHARE`), and a short curation or blend is topped
+up from the same round (`topUpFromBlend`). Proposals use the personal
+prompt with top artists, and the pool's own songs (up to 60) as the
+exclude list. The mix stays personal (`not_personal` unset, no
+`CORPUS_NOTICE`); `personalBlendNotice` replaces `blendedNotice`, the
+listing carries the "| new" marks, and the persona is
+`PERSONA_PROMPT_WITH_OUTSIDE`. "New to you" needs no new column: the queue
+view derives it from ownership. Open: the gate is `ownMusicBrief`, which
+reads `comfort` as favourites, so `comfort`'s 0.25 share never applies
+until comfort and favourites are told apart.
+
 ## Step 3: sequencing uses the new features (server)
 
 - Once candidates are chosen, the batch feature lookup runs (Step 1) before

@@ -64,6 +64,8 @@ type Bindings = {
   OUTSIDE_PICKS?: string
   ALBUM_PICKS?: string
   NEVER_REFUSE?: string
+  PROPOSE_FIRST?: string
+  PROPOSE_FIRST_USERS?: string
   AI_CONSENT?: string
   SHARE_BASE_URL?: string
   SHARE_READ_LIMITER?: ShareRateLimiter
@@ -134,6 +136,17 @@ export function neverRefuseEnabled(env: { NEVER_REFUSE?: string }): boolean {
   return env.NEVER_REFUSE === 'on'
 }
 
+// Propose first (spec 2026-11-16): personal mixes blend songs the DJ
+// proposes from all of music, verified on Apple, and corpus mixes propose
+// more of themselves. Same exact-"on" rule as outside picks. For the gated
+// rollout, PROPOSE_FIRST_USERS (comma-separated user ids, optional) turns it
+// on for those listeners only while PROPOSE_FIRST stays "off".
+export function proposeFirstEnabled(env: { PROPOSE_FIRST?: string; PROPOSE_FIRST_USERS?: string }, userId?: string): boolean {
+  if (env.PROPOSE_FIRST === 'on') return true
+  if (!userId || !env.PROPOSE_FIRST_USERS) return false
+  return env.PROPOSE_FIRST_USERS.split(',').some((id) => id.trim() !== '' && id.trim() === userId)
+}
+
 // The album loop rides the DJ's model clients plus the Apple catalogue, so it
 // exists only when the flag is on and both of those are configured; absent,
 // createApp mounts no Listen later routes and album sessions are refused.
@@ -169,6 +182,8 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
     titleComplete: anthropicComplete(anthropic),
     outsidePicks: outsidePicksEnabled(env),
     neverRefuse: neverRefuseEnabled(env),
+    // Resolved per turn for its listener (runDjTurn).
+    proposeFirstFor: (userId) => proposeFirstEnabled(env, userId),
   }
 }
 
