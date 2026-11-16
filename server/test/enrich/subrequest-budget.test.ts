@@ -31,8 +31,8 @@ import { tracks } from '../../src/db/schema'
 import { fillFeaturesForTurn, CHAIN_SUBREQUESTS } from '../../src/enrich/features-chain'
 import { createDeezerTempoClient } from '../../src/enrich/deezer-tempo'
 import { STAGE_SUBREQUESTS } from '../../src/dj/catalogue-fill'
-import { TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS } from '../../src/dj/loop'
-import { VERIFY_MAX } from '../../src/dj/propose'
+import { TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS, WIDE_TURN_APPLE_BUDGET } from '../../src/dj/loop'
+import { GENRE_POOL_MAX, VERIFY_MAX, WIDE_VERIFY_MAX } from '../../src/dj/propose'
 
 const DURATION_MS = 200_000
 const spotifyId = (i: number) => `S${String(i).padStart(21, '0')}`
@@ -254,5 +254,17 @@ describe('enrichment subrequest budget', () => {
   it('a DJ turn\'s feature allowance covers every song verification can confirm, inside the paid plan\'s budget', () => {
     expect(TURN_FEATURES_BUDGET).toBe(VERIFY_MAX * (STAGE_SUBREQUESTS.features + 1))
     expect(TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET).toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
+  })
+
+  it('a personal genre blend\'s wider allowance (2026-11-16) searches its whole pool and stays well inside the budget', () => {
+    expect(TURN_APPLE_BUDGET).toBe(22)
+    expect(VERIFY_MAX).toBe(22)
+    expect(WIDE_VERIFY_MAX).toBe(34)
+    expect(WIDE_VERIFY_MAX).toBeGreaterThanOrEqual(GENRE_POOL_MAX)
+    // The searches plus the three sound checks a genre generate can make.
+    expect(WIDE_TURN_APPLE_BUDGET).toBe(WIDE_VERIFY_MAX + 3)
+    // 37 + 26 + 66 = 129, under the 900 held for a paid-plan invocation.
+    expect(WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET).toBe(129)
+    expect(WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET).toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
   })
 })

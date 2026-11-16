@@ -569,3 +569,106 @@ describe('remake and outside picks', () => {
     for (const t of result.queue.filter((q) => q.newToYou)) expect(t.title).toMatch(/^Song /)
   })
 })
+
+// Live 2026-11-16 ("lofi afro house slow living great instrumentals"): 15
+// proposed, 8 verified, the sound check rightly rejected the ambient and
+// electronica ones, and the library holds almost no afro house: 1 song. A
+// genre brief now asks for a larger, genre-true first pool, verifies more of
+// it, and refills to a floor from the closest songs the check rejected.
+describe('a genre brief gets a larger, faster first pool', () => {
+  // The sound check passes the songs whose titles `passes` accepts.
+  function checker(passes: (title: string) => boolean = () => false) {
+    const prompts: string[] = []
+    const titleComplete = async (opts: { prompt: string }) => {
+      prompts.push(opts.prompt)
+      const ok = Array.from(opts.prompt.matchAll(/^(\d+) \| (.+?) — /gm)).filter((m) => passes(m[2])).map((m) => Number(m[1]))
+      return JSON.stringify(ok)
+    }
+    return { prompts, titleComplete: titleComplete as unknown as DjDeps['titleComplete'] }
+  }
+
+  async function genreTurn(opts: {
+    targetCount: number
+    library?: number
+    libraryGenre?: string
+    round?: number
+    confirmed?: (p: Proposed, i: number) => boolean
+    genreOf?: (p: Proposed) => string
+    passes?: (title: string) => boolean
+    genres?: string[]
+    deps?: Partial<DjDeps>
+    checkThrows?: boolean
+  }) {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, opts.library ?? 30, 'u1', opts.libraryGenre ?? 'Soul')
+    const session = await seedSession(db)
+    const round = proposals(opts.round ?? 34)
+    const { fill, searches } = fakeApple(round.filter((p, i) => (opts.confirmed ?? (() => true))(p, i)), opts.genreOf ?? (() => 'Pop'))
+    const check = checker(opts.passes)
+    const titleComplete = opts.checkThrows ? (async () => { throw new Error('check down') }) as unknown as DjDeps['titleComplete'] : check.titleComplete
+    const { llm, requests } = scriptedLlm([generate({ genres: opts.genres ?? ['jazz'], targetCount: opts.targetCount })], round)
+    const deps: DjDeps = { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true, titleComplete, ...opts.deps }
+    const result = await runDjTurn(db, deps, { id: session.id, userId: 'u1' }, 'lofi jazz slow living')
+    const [text] = toolResults(requests)
+    return { result, requests, searches, text, checks: check.prompts }
+  }
+
+  const askedFor = (req: LlmRequest) => Number((req.messages[0].content as string).match(/Propose up to (\d+) songs\./)?.[1])
+  const noDuplicates = (queue: Array<{ trackId: string; title: string; artist: string }>) => {
+    expect(new Set(queue.map((t) => t.trackId)).size).toBe(queue.length)
+    expect(new Set(queue.map((t) => `${t.title.toLowerCase()}|${t.artist.toLowerCase()}`)).size).toBe(queue.length)
+  }
+
+  it('the proposal call asks for twice the mix, genre-true, with thinking off', async () => {
+    const { requests } = await genreTurn({ targetCount: 15, genreOf: () => 'Jazz' })
+    const [req] = proposalRequests(requests)
+    expect(askedFor(req)).toBe(30)
+    expect(req.messages[0].content as string).toContain('Genre: every song must be jazz.')
+    expect(req.thinking).toBe('off')
+  })
+
+  it('a brief with no genre keeps proposalCount, thinking off as well', async () => {
+    const { requests } = await personalTurn({ input: { targetCount: 10 } })
+    const [req] = proposalRequests(requests)
+    expect(askedFor(req)).toBe(10 + PROPOSE_EXTRA)
+    expect(req.messages[0].content as string).not.toMatch(/^Genres?:/m)
+    expect(req.thinking).toBe('off')
+  })
+
+  it('a long genre mix asks for at most 34 and may search past 22, never past 34', async () => {
+    const { requests, searches } = await genreTurn({ targetCount: 20, passes: (t) => Number(t.split(' ')[1]) % 4 === 0 })
+    expect(askedFor(proposalRequests(requests)[0])).toBe(34)
+    expect(searches.length).toBeGreaterThan(VERIFY_MAX)
+    expect(searches.length).toBeLessThanOrEqual(34)
+  })
+
+  it('flag off: a personal genre brief keeps the old limits, thinking and notices', async () => {
+    const { requests, searches, text } = await genreTurn({ targetCount: 15, deps: { proposeFirst: false } })
+    for (const req of proposalRequests(requests)) {
+      expect('thinking' in req).toBe(false)
+      expect(askedFor(req)).toBeLessThanOrEqual(VERIFY_MAX)
+    }
+    expect(searches.length).toBeLessThanOrEqual(VERIFY_MAX)
+    expect(text).not.toMatch(/lean adjacent/)
+  })
+
+  it('a corpus genre mix with the flag on is unchanged: no thinking change, no refill', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedUser(db, 'other')
+    await seedLibrary(db, 27, 'other')
+    for (const name of ['Mine A', 'Mine B', 'Mine C']) await db.insert(userArtistSeeds).values({ userId: 'u1', name, source: 'interview' })
+    const session = await seedSession(db)
+    const round = proposals(22)
+    const { fill, searches } = fakeApple(round, () => 'Pop')
+    const { llm, requests } = scriptedLlm([generate({ genres: ['jazz'], targetCount: 15 })], round)
+    const { titleComplete } = checker()
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true, titleComplete }, { id: session.id, userId: 'u1' }, 'jazz')
+    const [req] = proposalRequests(requests)
+    expect('thinking' in req).toBe(false)
+    expect(askedFor(req)).toBe(Math.floor(15 * 0.75) + PROPOSE_EXTRA)
+    expect(searches.length).toBeLessThanOrEqual(VERIFY_MAX)
+    expect(toolResults(requests)[0]).not.toMatch(/lean adjacent/)
+  })
+})

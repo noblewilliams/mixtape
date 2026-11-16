@@ -39,6 +39,15 @@ export const VERIFY_DEADLINE_MS = 10_000
 // 12s verifying (local "90s r&b", 2026-11-10). Small, to stay well clear of
 // Apple's rate limit; a batch never asks for more than could still verify.
 export const VERIFY_CONCURRENCY = 4
+// A personal blend whose brief names a genre, with propose first active
+// (2026-11-16, "lofi afro house slow living" came back 1 song): the one
+// proposal call asks for about twice the mix so the sound check's rejects
+// can be replaced from the same round, and the turn may search and verify
+// all of it. Only those turns get the wider allowance (the turn's tracker,
+// dj/loop.ts); every other turn keeps VERIFY_MAX and VERIFY_DEADLINE_MS.
+export const GENRE_POOL_MAX = 34
+export const WIDE_VERIFY_MAX = 34
+export const WIDE_VERIFY_DEADLINE_MS = 14_000
 // No replacement round once the turn has run this long: the reply round and
 // the title still have to fit inside the iOS client's 120 s.
 export const ROUND_TWO_CUTOFF_MS = 50_000
@@ -132,6 +141,11 @@ export function proposalCount(intent: Pick<Intent, 'targetCount'>): number {
   return Math.min(intent.targetCount + PROPOSE_EXTRA, VERIFY_MAX)
 }
 
+/** A genre pool's first proposal: about twice the mix, at most GENRE_POOL_MAX. */
+export function genrePoolCount(intent: Pick<Intent, 'targetCount'>): number {
+  return Math.min(intent.targetCount * 2, GENRE_POOL_MAX)
+}
+
 export type ProposeInput = {
   // The listener's own words this turn.
   brief: string
@@ -152,6 +166,9 @@ export type ProposeInput = {
   // The artists the listener's library holds most of, most first: taste
   // input for a personal listener's round. Bounded by the caller.
   topArtists?: string[]
+  // 'off': no adaptive thinking (a personal blend with propose first, whose
+  // call runs beside the library curation and must not outlast it).
+  thinking?: 'off'
 }
 
 const proposalKey = (s: ProposedSong): string => `${titleKey(s.title)}\u0000${artistKey(s.artist)}`
@@ -254,6 +271,7 @@ export async function proposeSongs(llm: LlmClient, input: ProposeInput): Promise
     tools: [],
     maxTokens,
     effort: 'medium',
+    ...(input.thinking === 'off' ? { thinking: 'off' as const } : {}),
   }
   let turn = await llm(request)
   if (turn.stopReason === 'max_tokens') {

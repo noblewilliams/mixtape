@@ -17,6 +17,10 @@ import {
   VERIFY_DEADLINE_MS,
   VERIFY_CONCURRENCY,
   VERIFY_MAX,
+  GENRE_POOL_MAX,
+  genrePoolCount,
+  WIDE_VERIFY_DEADLINE_MS,
+  WIDE_VERIFY_MAX,
   type Proposal,
 } from '../../src/dj/propose'
 import { CurationTruncated, MAX_TOKENS_CAP, REASON_RULE, scaledMaxTokens } from '../../src/dj/curate'
@@ -617,5 +621,23 @@ describe('genre briefs (2026-11-16)', () => {
     expect(userBlock(requests[0])).not.toMatch(/^Genres?:/m)
     expect(requests[0].system).toBe(PROPOSE_SYSTEM_PROMPT)
     expect(requests[1].system).toBe(PROPOSE_SYSTEM_PROMPT_PERSONAL)
+  })
+
+  it('thinking is off only when asked for; absent, the request carries no thinking field', async () => {
+    const { llm, requests } = scripted(turn('[]'), turn('[]'))
+    await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng', thinking: 'off' })
+    await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
+    expect(requests[0].thinking).toBe('off')
+    expect('thinking' in requests[1]).toBe(false)
+  })
+
+  it('a genre pool asks for twice the mix, at most GENRE_POOL_MAX, within the wide search allowance', () => {
+    expect(genrePoolCount({ targetCount: 15 })).toBe(30)
+    expect(genrePoolCount({ targetCount: 8 })).toBe(16)
+    expect(genrePoolCount({ targetCount: 40 })).toBe(GENRE_POOL_MAX)
+    expect(GENRE_POOL_MAX).toBe(34)
+    expect(WIDE_VERIFY_MAX).toBeGreaterThanOrEqual(GENRE_POOL_MAX)
+    expect(WIDE_VERIFY_DEADLINE_MS).toBe(14_000)
+    expect(WIDE_VERIFY_DEADLINE_MS).toBeGreaterThan(VERIFY_DEADLINE_MS)
   })
 })

@@ -41,6 +41,9 @@ import {
   verifyProposals,
   VERIFY_DEADLINE_MS,
   VERIFY_MAX,
+  WIDE_VERIFY_DEADLINE_MS,
+  WIDE_VERIFY_MAX,
+  genrePoolCount,
   type Proposal,
   type ProposedSong,
   type VerifiedProposal,
@@ -1109,7 +1112,23 @@ type FillTracker = {
   // The feature chain's share of the turn (fillProposalFeatures): what it
   // has spent, how long it has run, and the songs it has already handled.
   features?: { spent: number; ms: number; done: Set<string> }
+  // A personal genre blend with propose first ran this turn: the wider
+  // search, verification time and Apple ledger (WIDE_* above) apply to the
+  // rest of the turn.
+  wide?: true
   turnStartedAt: number
+}
+
+// The turn's verification limits: the wide ones once a personal genre blend
+// set them, else VERIFY_MAX, VERIFY_DEADLINE_MS and TURN_APPLE_BUDGET.
+function verifyMax(tracker: FillTracker): number {
+  return tracker.wide ? WIDE_VERIFY_MAX : VERIFY_MAX
+}
+function verifyDeadlineMs(tracker: FillTracker): number {
+  return tracker.wide ? WIDE_VERIFY_DEADLINE_MS : VERIFY_DEADLINE_MS
+}
+function appleBudget(tracker: FillTracker): number {
+  return tracker.wide ? WIDE_TURN_APPLE_BUDGET : TURN_APPLE_BUDGET
 }
 
 // remake: a "Remake with my music" turn (DjTurnOptions.remake), an
@@ -1140,6 +1159,14 @@ type TurnFill = { tracker: FillTracker; surface: Surface; remake?: boolean }
 // with no unit left a check fails closed (only labelled songs stay), never
 // over the cap.
 export const TURN_APPLE_BUDGET = 22
+// A personal genre blend with propose first (FillTracker.wide): the ledger
+// holds the wider search allowance (WIDE_VERIFY_MAX, dj/propose.ts) plus
+// the three sound checks such a generate can make (the curated songs, the
+// proposals, the spares). Workers Paid (decisions 2026-11-06) allows 1,000
+// subrequests; the turn's worst case stays far under the 900 the enrichment
+// paths budget for (test/enrich/subrequest-budget.test.ts). Only those
+// turns: every other turn keeps 22.
+export const WIDE_TURN_APPLE_BUDGET = WIDE_VERIFY_MAX + 3
 
 // Features for the verified proposals headed for the queue (plan
 // 2026-11-16 propose-first, S4): ReccoBeats, then Deezer tempo, then the
@@ -1238,7 +1265,7 @@ async function proposalEnergies(db: Db, picks: VerifiedProposal[]): Promise<Map<
 }
 
 function appleLeft(tracker: FillTracker): number {
-  return Math.max(0, TURN_APPLE_BUDGET - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0) - (tracker.genreChecks ?? 0))
+  return Math.max(0, appleBudget(tracker) - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0) - (tracker.genreChecks ?? 0))
 }
 
 // Searches a proposal round may make: the ledger, less one unit kept for
@@ -1459,7 +1486,7 @@ async function proposeRound(
   deps: DjDeps,
   fill: FillDeps,
   ctx: ProposeContext,
-  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; want: number; listener?: 'personal'; topArtists?: string[] },
+  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; want: number; listener?: 'personal'; topArtists?: string[]; thinking?: 'off' },
   budget: CurationBudget,
   tracker: FillTracker,
 ): Promise<{ proposals: Proposal[]; result: VerifyResult } | null> {
@@ -1473,13 +1500,13 @@ async function proposeRound(
 async function proposeOnly(
   deps: DjDeps,
   ctx: ProposeContext,
-  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; listener?: 'personal'; topArtists?: string[] },
+  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; listener?: 'personal'; topArtists?: string[]; thinking?: 'off' },
   budget: CurationBudget,
   tracker: FillTracker,
 ): Promise<Proposal[] | null> {
   const spend = proposeSpend(tracker)
-  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, round.intent))
-  const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
+  const searchesLeft = Math.min(verifyMax(tracker) - spend.log.searches, searchRoom(tracker, round.intent))
+  const timeLeft = verifyDeadlineMs(tracker) - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0) return null
   spend.log.rounds += 1
   budget.consume()
@@ -1488,6 +1515,7 @@ async function proposeOnly(
     ...(round.exclude && round.exclude.length > 0 ? { exclude: round.exclude } : {}),
     ...(round.listener ? { listener: round.listener } : {}),
     ...(round.topArtists && round.topArtists.length > 0 ? { topArtists: round.topArtists } : {}),
+    ...(round.thinking ? { thinking: round.thinking } : {}),
     count: Math.min(round.count ?? proposalCount(round.intent), searchesLeft),
   })
   spend.log.proposed += proposals.length
@@ -1507,8 +1535,8 @@ async function verifyRound(
   step: TurnStepReporter | undefined,
 ): Promise<VerifyResult> {
   const spend = proposeSpend(tracker)
-  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, round.intent))
-  const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
+  const searchesLeft = Math.min(verifyMax(tracker) - spend.log.searches, searchRoom(tracker, round.intent))
+  const timeLeft = verifyDeadlineMs(tracker) - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0 || proposals.length === 0) return { verified: [], misses: [], searches: 0 }
   step?.({ step: 'checking' })
   const began = ctx.now()
@@ -1641,15 +1669,21 @@ async function blendProposals(
   const spend = proposeSpend(tracker)
   try {
     const ctx = await proposeContext(db, fill, session, userText, sessionContext)
+    // A personal blend's call runs with thinking off: it runs beside the
+    // library curation and must not outlast it (live 2026-11-16, 35 s for
+    // 15 songs with adaptive thinking).
     const taste = personal
-      ? { listener: personal.listener, topArtists: await topLibraryArtists(db, session.userId), exclude: personal.owned }
+      ? { listener: personal.listener, topArtists: await topLibraryArtists(db, session.userId), exclude: personal.owned, thinking: 'off' as const }
       : {}
     // A personal blend asks for the whole mix (proposalCount) but verifies
     // only its share: the unsearched rest are spares for a library that
     // curates short or proposals the sound check drops (live 2026-11-16, a
     // narrow genre brief left with 1 to 3 songs). Same one call. A corpus
-    // blend's round is as before.
-    const count = personal ? proposalCount(intent) : want + PROPOSE_EXTRA
+    // blend's round is as before. A personal genre brief asks for about
+    // twice the mix (genrePoolCount), so the sound check's rejects are
+    // replaced from the same round.
+    const genre = (intent.genres ?? []).length > 0
+    const count = personal ? (genre ? genrePoolCount(intent) : proposalCount(intent)) : want + PROPOSE_EXTRA
     const round = await proposeRound(db, deps, fill, ctx, { intent, want, count, ...taste }, budget, tracker)
     const verified = round?.result.verified ?? []
     spend.log.verified += verified.length
@@ -1685,8 +1719,8 @@ async function topUpFromBlend(
   const rest = tracker.blendRest
   if (!rest || rest.proposals.length === 0 || want <= 0) return []
   const spend = proposeSpend(tracker)
-  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, intent))
-  const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
+  const searchesLeft = Math.min(verifyMax(tracker) - spend.log.searches, searchRoom(tracker, intent))
+  const timeLeft = verifyDeadlineMs(tracker) - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0) return []
   step?.({ step: 'checking' })
   try {
@@ -2236,6 +2270,10 @@ async function generateFromBrief(
   const personalBlend = proposeFirst && poolMode.mode === 'personal' && fillShort && intent.allowOutside !== false && turn.remake !== true
   const blending = (poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined) || personalBlend
   const blendTarget = blending ? blendWant(intent, personalBlend, proposeFirst) : 0
+  // A personal genre blend: the wider search allowance for the rest of the
+  // turn (FillTracker.wide).
+  const genreBlend = personalBlend && (intent.genres ?? []).length > 0
+  if (genreBlend) turn.tracker.wide = true
   // The songs the listener owns that fit this brief, told to the blend's
   // proposal call so it reaches past them. Outside rows are not theirs.
   const owned = personalBlend
