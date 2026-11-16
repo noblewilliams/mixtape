@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '../helpers/db'
-import { djSessions, funnelEvents, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
+import { djSessions, funnelEvents, trackFeatureFallbacks, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
 import {
   runDjTurn,
   CORPUS_NOTICE,
@@ -60,7 +60,7 @@ function proposals(prefix: string, n: number) {
   return Array.from({ length: n }, (_, i) => ({ title: `${prefix} ${i}`, artist: ARTISTS[i % 3], reason: `${prefix} reason ${i}` }))
 }
 
-type Proposed = { title: string; artist: string; reason: string }
+type Proposed = { title: string; artist: string; reason: string; energy?: number; valence?: number }
 
 // Apple: the three artists are found (the fill inserts their top songs) and
 // every song in `confirmed` answers its own search.
@@ -500,6 +500,35 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(curations[0]).not.toHaveProperty('thinking')
   })
 
+  it('a proposed mix leaves feature fallbacks for its queued songs when the chain is wired', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const round = proposals('Song', 13).map((p, i) => ({ ...p, energy: 0.7, valence: i === 0 ? 1.5 : 0.4 }))
+    const { fill, enrichCalls } = fakeFill(round)
+    const deezerAsked: string[] = []
+    fill.deezerTempo = { tempoByIsrc: async (isrc) => { deezerAsked.push(isrc); return 120 } }
+    const { llm } = scriptedLlm([brief(5)], [round])
+
+    const { logged } = await withLog(() =>
+      runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'party'))
+
+    const queued = await db.execute(`SELECT q.track_id, t.title FROM queue_tracks q JOIN tracks t ON t.id = q.track_id
+      WHERE q.session_id = '${session.id}' AND q.state = 'active' ORDER BY q.position`)
+    const ids = (queued.rows as Array<{ track_id: string }>).map((r) => r.track_id)
+    expect(ids).toHaveLength(5)
+    const rows = await db.select().from(trackFeatureFallbacks)
+    // The queued songs only: ReccoBeats missed each, no ISRC for Deezer, so
+    // the model's estimate stands, range-checked.
+    expect(rows.map((r) => r.trackId).sort()).toEqual([...ids].sort())
+    for (const r of rows) expect(r).toMatchObject({ energy: 0.7, moodSource: 'model', tempo: null })
+    expect(rows.find((r) => r.trackId === ids[0])!.valence).toBeNull()
+    expect(rows.find((r) => r.trackId === ids[1])!.valence).toBe(0.4)
+    expect(enrichCalls.features).toBe(5)
+    expect(deezerAsked).toHaveLength(0)
+    expect(logged.propose).toMatchObject({ features: { measured: 0, fallback: 5, skipped: 0, subrequests: 10 } })
+  })
+
   it('without the Apple fill wired, the flag on still refuses as before', async () => {
     const db = await createTestDb()
     await seedUser(db)
@@ -640,6 +669,25 @@ describe('never refuse: edits on a proposed mix', () => {
     const titles = (await queueTitles(db, session.id)).map((r) => r.title)
     expect(titles).toEqual([...round.slice(0, 5), ...more].map((s) => s.title))
     expect(toolResults(requests)[0].split('\n')[0]).toBe(PROPOSED_NOTICE)
+  })
+})
+
+describe('never refuse: feature chain on edits', () => {
+  it('a proposed swap leaves a fallback row for the song it brought in', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const { fill } = fakeApple(echo)
+    await proposedMix(db, session.id, fill)
+    fill.deezerTempo = { tempoByIsrc: async () => 120 }
+    const { llm } = editLlm([{ op: 'swap', position: 2 }], [{ title: 'Swap In', artist: 'Asake', reason: 'new lift', energy: 0.33 }])
+
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'swap the third one')
+
+    const rows = await db.select({ title: tracks.title, energy: trackFeatureFallbacks.energy })
+      .from(trackFeatureFallbacks).innerJoin(tracks, eq(tracks.id, trackFeatureFallbacks.trackId))
+    // The first mix ran without the chain; the swap's song has its estimate.
+    expect(rows).toEqual([{ title: 'Swap In', energy: 0.33 }])
   })
 })
 

@@ -28,6 +28,11 @@ import {
 } from '../../src/enrich/scheduled'
 import { MAX_BATCH } from '../../src/routes/enrich'
 import { tracks } from '../../src/db/schema'
+import { fillFeaturesForTurn, CHAIN_SUBREQUESTS } from '../../src/enrich/features-chain'
+import { createDeezerTempoClient } from '../../src/enrich/deezer-tempo'
+import { STAGE_SUBREQUESTS } from '../../src/dj/catalogue-fill'
+import { TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS } from '../../src/dj/loop'
+import { VERIFY_MAX } from '../../src/dj/propose'
 
 const DURATION_MS = 200_000
 const spotifyId = (i: number) => `S${String(i).padStart(21, '0')}`
@@ -213,4 +218,41 @@ describe('enrichment subrequest budget', () => {
     expect(MAX_BATCH).toBe(5)
   })
 
+  it('the DJ turn\'s feature chain charges ReccoBeats at the features stage and Deezer at one request, as fetched', async () => {
+    // ReccoBeats searches and matches (so the features fetch runs) but the
+    // match has no features (404, a miss), so Deezer runs too: every song
+    // pays the most a song can.
+    const hosts: string[] = []
+    const fetchLike = async (input: string | URL) => {
+      const url = new URL(input)
+      hosts.push(url.host)
+      if (url.pathname === '/v1/track/search') {
+        return Response.json({ content: [{ id: 'rb1', trackTitle: url.searchParams.get('searchText'), artists: [{ name: 'Artist' }], durationMs: DURATION_MS, isrc: null }] })
+      }
+      if (url.pathname === '/v1/track/rb1/audio-features') return new Response(null, { status: 404 })
+      if (url.host === 'api.deezer.com') return Response.json({ id: 1, bpm: 120 })
+      throw new Error(`unexpected request ${url.host}${url.pathname}`)
+    }
+    const db = await createTestDb()
+    const songs = []
+    for (let i = 0; i < 4; i++) {
+      const isrc = `USUG1190${String(i).padStart(4, '0')}`
+      const [row] = await db.insert(tracks).values({ appleId: `a${i}`, title: `Song ${i}`, artist: 'Artist', durationMs: DURATION_MS, isrc }).returning()
+      songs.push({ trackId: row.id, isrc, title: row.title, artist: 'Artist', durationMs: DURATION_MS })
+    }
+    const result = await fillFeaturesForTurn(db, {
+      features: (key) => resolveAndFetchFeatures(key, fetchLike),
+      deezer: createDeezerTempoClient({ fetchLike }),
+    }, songs, { deadlineMs: 6_000, concurrency: 4 })
+    expect(CHAIN_SUBREQUESTS.reccobeats).toBe(STAGE_SUBREQUESTS.features)
+    expect(CHAIN_SUBREQUESTS.deezer).toBe(1)
+    expect(hosts.filter((h) => h === 'api.reccobeats.com')).toHaveLength(4 * STAGE_SUBREQUESTS.features)
+    expect(hosts.filter((h) => h === 'api.deezer.com')).toHaveLength(4)
+    expect(result.subrequests).toBe(hosts.length)
+  })
+
+  it('a DJ turn\'s feature allowance covers every song verification can confirm, inside the paid plan\'s budget', () => {
+    expect(TURN_FEATURES_BUDGET).toBe(VERIFY_MAX * (STAGE_SUBREQUESTS.features + 1))
+    expect(TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET).toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
+  })
 })

@@ -59,4 +59,15 @@ describe('buildFillDeps', () => {
     expect(await deps.enrich.itunes('1', 'gb')).toBeNull()
     expect(deps.enrichFetches!()).toBe(urls.length)
   })
+
+  it('wires the Deezer tempo client for the per-turn feature chain on the given fetch', async () => {
+    const urls: string[] = []
+    const fetchLike = async (url: string | URL) => {
+      urls.push(String(url))
+      return json({ id: 1, bpm: 122 })
+    }
+    const deps = buildFillDeps({ AI: ai }, { catalog }, fetchLike)!
+    expect(await deps.deezerTempo!.tempoByIsrc('USUG11900001')).toBe(122)
+    expect(urls).toEqual(['https://api.deezer.com/track/isrc:USUG11900001'])
+  })
 })

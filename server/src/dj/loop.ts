@@ -5,6 +5,7 @@ import type { Embedder } from '../enrich/embedder'
 import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds, userTracks } from '../db/schema'
 import type { Surface } from '../seeds/contracts'
 import { fillForArtist, fillForSeeds, FILL_BUDGET, type FillDeps, type FillResult } from './catalogue-fill'
+import { CHAIN_SUBREQUESTS, fillFeaturesForTurn, type FeaturesChainResult } from '../enrich/features-chain'
 import { artistKey } from './artist-keys'
 import type { LlmClient, LlmComplete, LlmMessage, LlmRequest } from './llm'
 import { LlmError } from './llm'
@@ -959,7 +960,8 @@ type FillLog = { inserted: number; enriched: number; subrequests: number; appleE
 // proposal calls (a generate's two rounds and any edit's); `error` marks a
 // replacement round that failed and was let go.
 // `curationFailed`: the curation failed and the proposals filled the mix.
-type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall'; curationFailed?: true }
+// `features`: the per-turn feature chain's counts, when it ran.
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall'; curationFailed?: true; features?: FeaturesChainResult }
 
 // What one turn's proposals verified, kept so a conflict retry or a second
 // generate_queue reuses them instead of spending the searches again.
@@ -998,6 +1000,9 @@ type FillTracker = {
   // Named-genre sound checks made this turn (dj/genre-check.ts), one model
   // call each, counted in the ledger below.
   genreChecks?: number
+  // The feature chain's share of the turn (fillProposalFeatures): what it
+  // has spent, how long it has run, and the songs it has already handled.
+  features?: { spent: number; ms: number; done: Set<string> }
   turnStartedAt: number
 }
 
@@ -1027,6 +1032,67 @@ type TurnFill = { tracker: FillTracker; surface: Surface }
 // with no unit left a check fails closed (only labelled songs stay), never
 // over the cap.
 export const TURN_APPLE_BUDGET = 22
+
+// Features for the verified proposals headed for the queue (plan
+// 2026-11-16 propose-first, S4): ReccoBeats, then Deezer tempo, then the
+// model's estimate (enrich/features-chain.ts), awaited before the queue is
+// written so the pools and ordering can read them. One time box and one
+// allowance for the whole turn, across a generate, its edits and a conflict
+// retry: a song handled once this turn is not looked up again.
+//
+// Its subrequests are charged at their worst case (CHAIN_SUBREQUESTS) to an
+// allowance of their own beside the Apple ledger: a full ReccoBeats and
+// Deezer lookup for every song verification can confirm (VERIFY_MAX). The
+// Apple ledger is sized for the free plan's 50; on Workers Paid (decisions
+// 2026-11-06) the turn's total, Apple ledger plus the measured 26 of model
+// calls and database plus this, stays far under the 1,000 ceiling
+// (test/enrich/subrequest-budget.test.ts). Once it is spent, or the time
+// box runs out, the rest get the model's estimate only.
+export const FEATURES_DEADLINE_MS = 6_000
+export const FEATURES_CONCURRENCY = 4
+export const TURN_FEATURES_BUDGET = VERIFY_MAX * (CHAIN_SUBREQUESTS.reccobeats + CHAIN_SUBREQUESTS.deezer)
+// Model calls and database a measured turn made besides Apple (see
+// TURN_APPLE_BUDGET above).
+export const TURN_OTHER_SUBREQUESTS = 26
+
+async function fillProposalFeatures(db: Db, fill: FillDeps | undefined, tracker: FillTracker, picks: VerifiedProposal[]): Promise<void> {
+  if (!fill?.deezerTempo) return
+  const state = (tracker.features ??= { spent: 0, ms: 0, done: new Set() })
+  const todo = picks.filter((p) => !state.done.has(p.trackId))
+  if (todo.length === 0) return
+  for (const p of todo) state.done.add(p.trackId)
+  const estimates = new Map(todo.map((p) => [p.trackId, p.estimate]))
+  const now = fill.now ?? Date.now
+  const began = now()
+  let result: FeaturesChainResult
+  try {
+    // The row as the cron would read it: Apple's title and artist, ISRC, duration.
+    const rows = await db
+      .select({ trackId: tracks.id, isrc: tracks.isrc, title: tracks.title, artist: tracks.artist, durationMs: tracks.durationMs })
+      .from(tracks)
+      .where(inArray(tracks.id, [...estimates.keys()]))
+    const songs = rows.map((r) => {
+      const estimate = estimates.get(r.trackId)
+      return { ...r, ...(estimate ? { estimate } : {}) }
+    })
+    result = await fillFeaturesForTurn(db, { features: fill.enrich.features, deezer: fill.deezerTempo, now }, songs, {
+      deadlineMs: Math.max(0, FEATURES_DEADLINE_MS - state.ms),
+      concurrency: FEATURES_CONCURRENCY,
+      budget: Math.max(0, TURN_FEATURES_BUDGET - state.spent),
+    })
+  } catch {
+    // Missing features never fail the turn (fillFeaturesForTurn never
+    // throws; this is the row read).
+    return
+  }
+  state.ms += now() - began
+  state.spent += result.subrequests
+  const log = proposeSpend(tracker).log
+  const prev = log.features
+  log.features = prev
+    ? { measured: prev.measured + result.measured, fallback: prev.fallback + result.fallback, skipped: prev.skipped + result.skipped, subrequests: prev.subrequests + result.subrequests }
+    : result
+}
 
 function appleLeft(tracker: FillTracker): number {
   return Math.max(0, TURN_APPLE_BUDGET - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0) - (tracker.genreChecks ?? 0))
@@ -1632,6 +1698,7 @@ async function executeProposedQueue(
     return { resultText: [NOTHING_FITS_TEXT, ...genreLines].join('\n'), queueChanged: false, intent }
   }
   const picks = genreCheck.kept.slice(0, intent.targetCount)
+  await fillProposalFeatures(db, fill, turn.tracker, picks)
   const version = await replaceQueue(
     db,
     session.id,
@@ -1983,6 +2050,10 @@ async function generateFromBrief(
     ? interleaveBlend<{ trackId: string; reason: string }>(curated, proposed, intent.targetCount)
     : curated
   const blendedCount = picks.filter((p) => proposedIds.has(p.trackId)).length
+  if (blendedCount > 0) {
+    const pickedIds = new Set(picks.map((p) => p.trackId))
+    await fillProposalFeatures(db, deps.fill, turn.tracker, proposed.filter((p) => pickedIds.has(p.trackId)))
+  }
   const version = await replaceQueue(
     db,
     session.id,
@@ -2290,6 +2361,9 @@ async function executeEditQueue(
         round.result.verified.filter((v) => !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId)).slice(0, count),
         proposalCandidate)
       turn.tracker.spend!.log.verified += fresh.length
+      // Per request, as applyOps asks for them; the turn's one time box and
+      // allowance bound the lot (fillProposalFeatures).
+      await fillProposalFeatures(db, proposedFill, turn.tracker, fresh)
       for (const v of fresh) returnedThisBatch.add(v.trackId)
       if (fresh.length > 0) proposedPicksLanded = true
       return fresh.map((v) => ({ trackId: v.trackId, reason: v.reason }))

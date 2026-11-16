@@ -36,12 +36,12 @@ function classifyError(e: unknown): string {
 
 // A transient failure keeps the same text behind TRANSIENT_PREFIX, which is
 // what the runner's backoff reads (failures.ts).
-function failureText(e: unknown): string {
+export function failureText(e: unknown): string {
   const text = classifyError(e)
   return isTransientFailure(e) ? `${TRANSIENT_PREFIX}${text}` : text
 }
 
-async function recordFailure(db: Db, trackId: string, stage: Stage, error: string) {
+export async function recordFailure(db: Db, trackId: string, stage: Stage, error: string) {
   await db
     .insert(enrichmentFailures)
     .values({ trackId, stage, error: error.slice(0, 500) })
@@ -55,6 +55,35 @@ async function clearFailure(db: Db, trackId: string, stage: Stage) {
   await db
     .delete(enrichmentFailures)
     .where(and(eq(enrichmentFailures.trackId, trackId), eq(enrichmentFailures.stage, stage)))
+}
+
+// A ReccoBeats hit, written as the cron writes it: the measured row
+// (source 'reccobeats'), the ISRC and matched duration where the track has
+// none, and the stage's failure row cleared. Shared with the per-turn chain
+// (features-chain.ts) so the column mapping lives in one place.
+export async function saveMeasuredFeatures(
+  db: Db,
+  track: { id: string; durationMs: number | null },
+  feats: AudioFeatures,
+): Promise<void> {
+  const { isrc, matchedDurationMs, ...cols } = feats
+  await db
+    .insert(trackFeatures)
+    .values({ trackId: track.id, ...cols, source: 'reccobeats' })
+    .onConflictDoUpdate({ target: trackFeatures.trackId, set: { ...cols, source: 'reccobeats', fetchedAt: sql`now()` } })
+  if (isrc) {
+    await db.update(tracks).set({ isrc }).where(and(eq(tracks.id, track.id), isNull(tracks.isrc)))
+  }
+  // Spotify-side duration from an exact-title+artist match; unverified against
+  // Apple's copy (the ±5s gate doesn't run when the track had no duration), but
+  // good enough to key LRCLIB exact-gets and P3 pacing.
+  if (matchedDurationMs != null && track.durationMs == null) {
+    await db
+      .update(tracks)
+      .set({ durationMs: matchedDurationMs })
+      .where(and(eq(tracks.id, track.id), isNull(tracks.durationMs)))
+  }
+  await clearFailure(db, track.id, 'features')
 }
 
 export async function enrichTrack(
@@ -127,25 +156,8 @@ export async function enrichTrack(
       // follow the existing failure/retry path without another provider call.
       feats ??= await deps.features({ title: track.title, artist, durationMs })
       if (feats) {
-        const { isrc, matchedDurationMs, ...cols } = feats
-        await db
-          .insert(trackFeatures)
-          .values({ trackId: track.id, ...cols, source: 'reccobeats' })
-          .onConflictDoUpdate({ target: trackFeatures.trackId, set: { ...cols, source: 'reccobeats', fetchedAt: sql`now()` } })
-        if (isrc) {
-          await db.update(tracks).set({ isrc }).where(and(eq(tracks.id, track.id), isNull(tracks.isrc)))
-        }
-        // Spotify-side duration from an exact-title+artist match; unverified against
-        // Apple's copy (the ±5s gate doesn't run when the track had no duration), but
-        // good enough to key LRCLIB exact-gets and P3 pacing.
-        if (matchedDurationMs != null && track.durationMs == null) {
-          await db
-            .update(tracks)
-            .set({ durationMs: matchedDurationMs })
-            .where(and(eq(tracks.id, track.id), isNull(tracks.durationMs)))
-        }
-        durationMs = durationMs ?? matchedDurationMs
-        await clearFailure(db, track.id, 'features')
+        await saveMeasuredFeatures(db, track, feats)
+        durationMs = durationMs ?? feats.matchedDurationMs
         featuresOutcome = 'ok'
       } else {
         await recordFailure(db, track.id, 'features', NO_MATCH)

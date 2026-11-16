@@ -12,6 +12,7 @@ import { enrichTrack, type EnrichDeps } from '../enrich/pipeline'
 import { runTwinCopy } from '../enrich/twin-copy'
 import { dueTracks, FRONT_OF_QUEUE_PRIORITY, type DueTrack } from '../enrich/runner'
 import { failureExhausted } from '../enrich/failures'
+import type { DeezerTempoClient } from '../enrich/deezer-tempo'
 import { artistKey, creditedKeys } from './artist-keys'
 import type { NamedSong } from './contracts'
 
@@ -72,6 +73,10 @@ export type FillDeps = {
   enrichFetches?: () => number
   // Milliseconds, for the deadline; Date.now when absent.
   now?: () => number
+  // Deezer tempo by ISRC, for the per-turn feature chain on verified
+  // proposals (enrich/features-chain.ts, with enrich.features for
+  // ReccoBeats). Absent, the chain is skipped.
+  deezerTempo?: DeezerTempoClient
 }
 
 export type FillOptions = {

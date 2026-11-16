@@ -31,6 +31,7 @@ import type { MusicKitWiring, ShareRateLimiter, SharesWiring, TranscribeWiring }
 import type { ArtworkDeps } from './artwork/runner'
 import { createSpotifyOEmbedArtworkClient } from './artwork/spotify-oembed'
 import { createDeezerArtworkClient } from './artwork/deezer'
+import { createDeezerTempoClient } from './enrich/deezer-tempo'
 import type { SpotifyArtworkDeps } from './artwork/spotify-fallback'
 import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 import type { AlbumDeps } from './albums/loop'
@@ -174,7 +175,8 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
 // The DJ's catalogue fill (dj/catalogue-fill.ts) needs the Apple catalogue
 // and the enrichment sources. Its ReccoBeats and LRCLIB calls go through a
 // fetch that counts, per request, so the fill charges its subrequest budget
-// what those calls actually fetched.
+// what those calls actually fetched. The same ReccoBeats fetch and a Deezer
+// tempo client serve the per-turn feature chain on verified proposals.
 export function buildFillDeps(
   env: Pick<Bindings, 'AI' | 'ITUNES_STOREFRONT'>,
   musicKit: { catalog: FillDeps['catalog'] } | undefined,
@@ -199,6 +201,9 @@ export function buildFillDeps(
       embed: workersAiEmbedder(env.AI),
     },
     enrichFetches: () => fetches,
+    // The per-turn feature chain's tempo fallback, on the same fetch as the
+    // artwork Deezer client (uncounted: the chain charges its own worst case).
+    deezerTempo: createDeezerTempoClient({ fetchLike }),
   }
 }
 
