@@ -4,6 +4,8 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 
 ## Owed right now
 
+- **1.1.0 (11) uploaded to TestFlight (2026-11-16, from `main` at `5e826f7`):** adds working-line polish on top of 1.1.0 (10). The DJ's working lines and the working Mixes subtitle ("The DJ is on it") drop their trailing "…" and shimmer instead (plain under reduced motion). Uploaded from the command line again after the founder's Organizer sign-in. **Owed:** see the shimmer on a device in light and dark mode, plus the 1.1.0 (10) checks below.
+
 - **1.1.0 (10) uploaded to TestFlight (2026-11-16, from `main` at `5c3df61`):** adds the reel loader on top of 1.1.0 (9): a close-up of the turning hub in Home's "Making your mix", in a working Mixes row and in the chat working line (approval `docs/mockups/approved/2026-11-16-reel-loader.md`). The CLI export failed with "No Accounts", so the founder uploaded the archive from Xcode's Organizer. **Owed:** a device pass on Home's starting state, which the simulator preview can't reach, plus the 1.1.0 (9) checks below.
 
 - **1.1.0 (9) uploaded to TestFlight (2026-11-16, from `main` at `c761f2d`):** load errors and chat/first-run failures say "you're offline" only when the phone is, otherwise that the DJ didn't answer, and "Try again" shows a spinner (decision 2026-11-15); also carries the stop-turn, keep-composer-open and shape-chip work. Archived with `scripts/build-ios-release.sh` on Flutter 3.50 and uploaded with `xcodebuild -exportArchive` (`destination` upload). **Owed:** a device pass with Wi-Fi off (Library "Try again", a chat send, a first-run step) and with Wi-Fi on but the API down if that can be arranged; stopping a running turn on device.
