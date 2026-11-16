@@ -28,6 +28,11 @@ export const ARTIST_MIN = 3
 // Apple top songs read per artist: depth for the filters (owned songs,
 // album glue, second releases) to leave ARTIST_PER_MIX.
 export const ARTIST_TOP_SONGS = 10
+// An instrumental brief reads deeper (2026-11-16): Apple's top songs lean
+// to vocal features, and the instrumentals sit further down. Still one
+// top-songs page per artist (the client caps a page at 30), so the Apple
+// call count is unchanged.
+export const ARTIST_TOP_SONGS_INSTRUMENTAL = 20
 // Songs any one artist may put in the pool, and so in the mix.
 export const ARTIST_PER_MIX = 3
 // Artists looked up at once (two Apple calls each, one after the other).
@@ -110,6 +115,11 @@ function buildUserBlock(input: ArtistProposeInput): string {
     lines.push(`Era: ${intent.eraFrom ?? '-'}–${intent.eraTo ?? '-'}`)
   }
   lines.push(`Familiarity: ${intent.familiarity}`)
+  // Only when asked, so every other brief's user turn is as before.
+  if (intent.instrumental === true) {
+    lines.push('Instrumental: the listener wants instrumentals, no vocals. Favour artists of the genre known for ' +
+      'instrumental, dub or instrumental-led releases.')
+  }
   const seeds = input.seeds.map((s) => sanitizeForPrompt(s)).filter((s) => s !== '')
   if (seeds.length > 0) lines.push(`Artists the listener named or loves: ${seeds.join(', ')}`)
   const top = (input.topArtists ?? []).map((s) => sanitizeForPrompt(s)).filter((s) => s !== '')
@@ -175,16 +185,29 @@ export type ArtistPoolOptions = {
   namedSongs?: NamedSong[]
   // Apple calls this pool may make (ARTIST_POOL_APPLE at most).
   budget: number
+  // The brief asks for instrumentals (Intent.instrumental): read
+  // ARTIST_TOP_SONGS_INSTRUMENTAL per artist, songs without lyrics first,
+  // and songs with lyrics only when the rest fall short of `floor`.
+  instrumental?: boolean
+  // The mix's genre floor (genreFloor in dj/loop.ts).
+  floor?: number
   deadlineMs: number
   now: () => number
 }
 
+// A pool song, with Apple's genre names and hasLyrics for the sound check.
+export type ArtistPoolSong = VerifiedProposal & { genres?: string[]; hasLyrics?: boolean | null }
+
 export type ArtistPoolResult = {
   // Round-robin across artists in Apple's popularity order, ARTIST_PER_MIX
-  // per artist at most; each carries its artist's note.
-  candidates: VerifiedProposal[]
+  // per artist at most; each carries its artist's note. An instrumental
+  // brief's pool puts songs without lyrics first, then unknown, then songs
+  // with lyrics (round-robin within each).
+  candidates: ArtistPoolSong[]
   // Artists with at least one song in the pool.
   used: number
+  // Pool songs Apple lists without lyrics.
+  instrumental: number
   // Apple calls made.
   apple: number
   appleError?: string
@@ -202,6 +225,9 @@ function rowsOf(res: unknown): Record<string, unknown>[] {
 
 const upperIsrc = (isrc: string | null | undefined): string | null => (isrc ? isrc.trim().toUpperCase() || null : null)
 
+// 0 without lyrics, 1 unknown, 2 with lyrics.
+const vocalTier = (s: CatalogSong): number => (s.hasLyrics === false ? 0 : s.hasLyrics === true ? 2 : 1)
+
 const isRateLimit = (e: unknown): boolean => e instanceof AppleCatalogError && (e.category === 'rate_limit' || e.status === 429)
 
 /**
@@ -216,7 +242,9 @@ const isRateLimit = (e: unknown): boolean => e instanceof AppleCatalogError && (
 export async function buildArtistPool(db: Db, catalog: AppleCatalogArtistClient, options: ArtistPoolOptions): Promise<ArtistPoolResult> {
   const { artists, now } = options
   const started = now()
-  const result: ArtistPoolResult = { candidates: [], used: 0, apple: 0 }
+  const result: ArtistPoolResult = { candidates: [], used: 0, instrumental: 0, apple: 0 }
+  const instrumental = options.instrumental === true
+  const perArtist = instrumental ? ARTIST_TOP_SONGS_INSTRUMENTAL : ARTIST_TOP_SONGS
   const fetched: CatalogSong[][] = artists.map(() => [])
   let stopped = false
   let next = 0
@@ -238,7 +266,7 @@ export async function buildArtistPool(db: Db, catalog: AppleCatalogArtistClient,
         return true
       }
       try {
-        fetched[i] = (await artistTopSongsByName(catalog, options.storefront, artists[i].name, ARTIST_TOP_SONGS, gate)) ?? []
+        fetched[i] = (await artistTopSongsByName(catalog, options.storefront, artists[i].name, perArtist, gate)) ?? []
       } catch (e) {
         result.appleError = e instanceof AppleCatalogError ? e.category : 'internal'
         if (isRateLimit(e)) stopped = true
@@ -268,7 +296,10 @@ export async function buildArtistPool(db: Db, catalog: AppleCatalogArtistClient,
   }
 
   const taken = new Set<string>(options.ownedSongs)
-  const usable = fetched.map((songs) => {
+  // An instrumental brief reads each artist's songs without lyrics first,
+  // then unknown, then with lyrics, Apple's order within each.
+  const usable = fetched.map((fetchedSongs) => {
+    const songs = instrumental ? [...fetchedSongs].sort((a, b) => vocalTier(a) - vocalTier(b)) : fetchedSongs
     const out: CatalogSong[] = []
     for (const song of songs) {
       if (out.length >= ARTIST_PER_MIX) break
@@ -283,11 +314,18 @@ export async function buildArtistPool(db: Db, catalog: AppleCatalogArtistClient,
     }
     return out
   })
-  const order: { song: CatalogSong; artist: ProposedArtist }[] = []
+  let order: { song: CatalogSong; artist: ProposedArtist }[] = []
   for (let round = 0; round < ARTIST_PER_MIX; round++) {
     usable.forEach((songs, i) => {
       if (round < songs.length) order.push({ song: songs[round], artist: artists[i] })
     })
+  }
+  if (instrumental) {
+    // Songs without lyrics first, round-robin kept within each tier. Songs
+    // with lyrics stay, last, only when the rest cannot reach the floor.
+    order = order.map((o, i) => ({ o, i })).sort((a, b) => vocalTier(a.o.song) - vocalTier(b.o.song) || a.i - b.i).map(({ o }) => o)
+    const quiet = order.filter((o) => o.song.hasLyrics !== true)
+    if (quiet.length >= (options.floor ?? 0)) order = quiet
   }
   if (order.length === 0) return result
 
@@ -299,7 +337,11 @@ export async function buildArtistPool(db: Db, catalog: AppleCatalogArtistClient,
     if (!trackId || seenTrack.has(trackId)) continue
     seenTrack.add(trackId)
     usedArtists.add(artistKey(artist.name))
-    result.candidates.push({ trackId, title: song.title, artist: song.artist, reason: artist.reason, genre: song.genre ?? null, year: song.releaseYear ?? null })
+    result.candidates.push({
+      trackId, title: song.title, artist: song.artist, reason: artist.reason, genre: song.genre ?? null, year: song.releaseYear ?? null,
+      genres: song.genres ?? [], hasLyrics: song.hasLyrics ?? null,
+    })
+    if (song.hasLyrics === false) result.instrumental += 1
   }
   result.used = usedArtists.size
   return result

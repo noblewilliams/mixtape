@@ -135,6 +135,21 @@ describe('Apple catalog client', () => {
     expect(result.get('2')).toMatchObject({ durationMs: null, genre: null, releaseYear: null, explicit: null })
   })
 
+  it('carries hasLyrics and every genre name but the generic "Music", keeping genre as the first name', async () => {
+    const item = song('1')
+    const result = await client(async () => jsonResponse({ data: [
+      { ...item, attributes: { ...item.attributes, hasLyrics: false, genreNames: ['Dance', 'Music', 'African', 'Afro House'] } },
+      { ...song('2'), attributes: { ...song('2').attributes, hasLyrics: true, genreNames: ['Dance', 'Music'] } },
+      song('3'),
+      { ...song('4'), attributes: { ...song('4').attributes, hasLyrics: 'no', genreNames: ['Music', 7, '', 'Afro House', 'afro house'] } },
+    ] })).getSongs('ng', ['1', '2', '3', '4'])
+    expect(result.get('1')).toMatchObject({ genre: 'Dance', hasLyrics: false, genres: ['Dance', 'African', 'Afro House'] })
+    expect(result.get('2')).toMatchObject({ genre: 'Dance', hasLyrics: true, genres: ['Dance'] })
+    // Absent or malformed: unknown lyrics, no genres; genre as before.
+    expect(result.get('3')).toMatchObject({ genre: null, hasLyrics: null, genres: [] })
+    expect(result.get('4')).toMatchObject({ genre: 'Music', hasLyrics: null, genres: ['Afro House', 'afro house'] })
+  })
+
   it('rejects ambiguous duplicate IDs and non-song resources instead of choosing a winner', async () => {
     const result = await client(async () => jsonResponse({ data: [
       song('1'), song('1'), { ...song('2'), type: 'albums' }, song('3'),

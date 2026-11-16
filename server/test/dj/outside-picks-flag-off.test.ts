@@ -58,8 +58,8 @@ describe('flag off is byte-for-byte today', () => {
   // named genre each song is checked against) are deliberate changes to what
   // the model sees, flag on or off; with them stripped, the flag-off tools
   // are still the pre-outside ones.
-  it('sends the same tool definitions, bar the named artists and songs, the artist-only scope and the genres', () => {
-    const added = new Set(['namedArtists', 'namedSongs', 'onlyArtist', 'genres'])
+  it('sends the same tool definitions, bar the named artists and songs, the artist-only scope, the genres and instrumental', () => {
+    const added = new Set(['namedArtists', 'namedSongs', 'onlyArtist', 'genres', 'instrumental'])
     const stripped = JSON.stringify(
       JSON.parse(JSON.stringify(DJ_TOOLS), (k, v) => (added.has(k) ? undefined : v)),
     )

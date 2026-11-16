@@ -20,6 +20,11 @@ export type CatalogSong = {
   genre?: string | null
   releaseYear?: number | null
   explicit?: boolean | null
+  // Apple's hasLyrics: false is an instrumental. Null when Apple did not say.
+  hasLyrics?: boolean | null
+  // Every genre name but the generic "Music", in Apple's order; `genre`
+  // stays the first name, as stored. Not persisted.
+  genres?: string[]
 }
 
 export type AppleCatalogClient = {
@@ -121,7 +126,7 @@ const MAX_ISRCS_PER_REQUEST = 25
 const MAX_ALBUM_IDS_PER_REQUEST = 100
 const MAX_ALBUM_SEARCH_LIMIT = 10
 const MAX_ARTIST_SEARCH_LIMIT = 25
-const MAX_TOP_SONGS_LIMIT = 30
+export const MAX_TOP_SONGS_LIMIT = 30
 const MAX_CHART_LIMIT = 200
 const MAX_PLAYLIST_SEARCH_LIMIT = 25
 const MAX_PLAYLIST_TRACKS_LIMIT = 100
@@ -156,6 +161,10 @@ function parseSong(value: unknown): CatalogSong | null {
     releaseYear: typeof attributes.releaseDate === 'string' && /^\d{4}(?:-\d{2}-\d{2})?$/.test(attributes.releaseDate)
       ? Number(attributes.releaseDate.slice(0, 4)) : null,
     explicit: attributes.contentRating === 'explicit' ? true : attributes.contentRating === 'clean' ? false : null,
+    hasLyrics: typeof attributes.hasLyrics === 'boolean' ? attributes.hasLyrics : null,
+    genres: Array.isArray(attributes.genreNames)
+      ? attributes.genreNames.filter((g): g is string => typeof g === 'string' && g.trim() !== '' && g.trim().toLowerCase() !== 'music')
+      : [],
   }
 }
 

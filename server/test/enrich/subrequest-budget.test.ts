@@ -32,7 +32,8 @@ import { fillFeaturesForTurn, CHAIN_SUBREQUESTS } from '../../src/enrich/feature
 import { createDeezerTempoClient } from '../../src/enrich/deezer-tempo'
 import { STAGE_SUBREQUESTS } from '../../src/dj/catalogue-fill'
 import { ARTIST_POOL_OTHER_SUBREQUESTS, TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS, WIDE_TURN_APPLE_BUDGET } from '../../src/dj/loop'
-import { ARTIST_ASK, ARTIST_POOL_APPLE } from '../../src/dj/artist-pool'
+import { ARTIST_ASK, ARTIST_POOL_APPLE, ARTIST_TOP_SONGS_INSTRUMENTAL } from '../../src/dj/artist-pool'
+import { MAX_TOP_SONGS_LIMIT } from '../../src/musickit/catalog'
 import { GENRE_POOL_MAX, VERIFY_MAX, WIDE_VERIFY_MAX } from '../../src/dj/propose'
 
 const DURATION_MS = 200_000
@@ -267,6 +268,9 @@ describe('enrichment subrequest budget', () => {
     expect(ARTIST_POOL_APPLE).toBe(2 * ARTIST_ASK)
     expect(ARTIST_POOL_APPLE).toBe(24)
     expect(WIDE_TURN_APPLE_BUDGET).toBe(WIDE_VERIFY_MAX + 3 + ARTIST_POOL_APPLE)
+    // An instrumental brief's deeper read is still one top-songs page per
+    // artist, and its mood check the same one sound-check unit.
+    expect(ARTIST_TOP_SONGS_INSTRUMENTAL).toBeLessThanOrEqual(MAX_TOP_SONGS_LIMIT)
     // 61 + 26 + 66 + 6 = 159, well under the 900 held for a paid-plan invocation.
     const worst = WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET + ARTIST_POOL_OTHER_SUBREQUESTS
     expect(worst).toBe(159)

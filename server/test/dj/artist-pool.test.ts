@@ -8,10 +8,12 @@ import {
   ARTIST_PER_MIX,
   ARTIST_SYSTEM_PROMPT,
   ARTIST_TOP_SONGS,
+  ARTIST_TOP_SONGS_INSTRUMENTAL,
   proposeArtists,
 } from '../../src/dj/artist-pool'
 import type { FillDeps } from '../../src/dj/catalogue-fill'
 import type { CatalogSong } from '../../src/musickit/catalog'
+import { MOOD_CHECK_SYSTEM } from '../../src/dj/genre-check'
 import type { LlmClient, LlmRequest, LlmTurn } from '../../src/dj/llm'
 import type { Intent } from '../../src/dj/contracts'
 
@@ -53,9 +55,20 @@ const songTitle = (artist: string, j: number) => `${artist} Hit ${j}`
 // every title asked for, so a fallback still lands.
 type Proposed = { title: string; artist: string; reason: string }
 
-function fakeApple(known: string[], opts: { songsPer?: number; genreOf?: (artist: string, j: number) => string; shape?: (artist: string, own: CatalogSong[]) => CatalogSong[]; proposals?: Proposed[] } = {}) {
+type AppleOpts = {
+  songsPer?: number
+  genreOf?: (artist: string, j: number) => string
+  // Apple's every genre name but "Music", and hasLyrics; absent when unset.
+  genresOf?: (artist: string, j: number) => string[]
+  lyricsOf?: (artist: string, j: number) => boolean | null
+  shape?: (artist: string, own: CatalogSong[]) => CatalogSong[]
+  proposals?: Proposed[]
+}
+
+function fakeApple(known: string[], opts: AppleOpts = {}) {
   const artistSearches: string[] = []
   const topSongs: string[] = []
+  const limits: number[] = []
   const songSearches: string[] = []
   const catalog: FillDeps['catalog'] = {
     async searchArtists(_sf, term) {
@@ -65,9 +78,12 @@ function fakeApple(known: string[], opts: { songsPer?: number; genreOf?: (artist
     async artistTopSongs(_sf, id, limit) {
       const name = id.replace(/^ar-/, '')
       topSongs.push(name)
+      limits.push(limit)
       const own = Array.from({ length: opts.songsPer ?? 10 }, (_, j) => ({
         appleId: `ap-${name}-${j}`, isrc: null, title: songTitle(name, j), artist: name, album: 'Album', artwork: null,
         durationMs: 200_000, genre: opts.genreOf ? opts.genreOf(name, j) : 'Dance', releaseYear: 2020, explicit: false,
+        ...(opts.genresOf ? { genres: opts.genresOf(name, j) } : {}),
+        ...(opts.lyricsOf ? { hasLyrics: opts.lyricsOf(name, j) } : {}),
       } satisfies CatalogSong))
       return (opts.shape ? opts.shape(name, own) : own).slice(0, limit)
     },
@@ -82,7 +98,7 @@ function fakeApple(known: string[], opts: { songsPer?: number; genreOf?: (artist
     defaultStorefront: 'us',
     enrich: { storefront: 'us', itunes: async () => null, features: async () => null, lyrics: async () => null, embed: async () => UNIT },
   }
-  return { fill, artistSearches, topSongs, songSearches }
+  return { fill, artistSearches, topSongs, songSearches, limits }
 }
 
 const isSongProposal = (req: LlmRequest) => req.system === PROPOSE_SYSTEM_PROMPT || req.system === PROPOSE_SYSTEM_PROMPT_PERSONAL
@@ -120,15 +136,24 @@ function scriptedLlm(generateInput: Record<string, unknown>, script: Script) {
   return { llm, requests }
 }
 
-// The sound check passes titles `passes` accepts.
-function checker(passes: (title: string) => boolean) {
+// The sound check passes titles `passes` accepts. The artist pool's mood
+// check (MOOD_CHECK_SYSTEM) answers genre by `passes` and mood by `passes`
+// and `mood`.
+function checker(passes: (title: string) => boolean, mood: (title: string) => boolean = () => true) {
   const prompts: string[] = []
-  const titleComplete = async (opts: { prompt: string }) => {
+  const moodPrompts: string[] = []
+  const titleComplete = async (opts: { prompt: string; system: string }) => {
     prompts.push(opts.prompt)
-    const ok = Array.from(opts.prompt.matchAll(/^(\d+) \| (.+?) — /gm)).filter((m) => passes(m[2])).map((m) => Number(m[1]))
-    return JSON.stringify(ok)
+    const lines = Array.from(opts.prompt.matchAll(/^(\d+) \| (.+?) — /gm))
+    if (opts.system === MOOD_CHECK_SYSTEM) {
+      moodPrompts.push(opts.prompt)
+      const genre = lines.filter((m) => passes(m[2])).map((m) => Number(m[1]))
+      const fits = lines.filter((m) => passes(m[2]) && mood(m[2])).map((m) => Number(m[1]))
+      return JSON.stringify({ genre, mood: fits })
+    }
+    return JSON.stringify(lines.filter((m) => passes(m[2])).map((m) => Number(m[1])))
   }
-  return { prompts, titleComplete: titleComplete as unknown as DjDeps['titleComplete'] }
+  return { prompts, moodPrompts, titleComplete: titleComplete as unknown as DjDeps['titleComplete'] }
 }
 
 function toolResults(requests: LlmRequest[]): string[] {
@@ -159,6 +184,9 @@ async function genreTurn(opts: {
   genreOf?: (artist: string, j: number) => string
   script?: Script
   passes?: (title: string) => boolean
+  mood?: (title: string) => boolean
+  genresOf?: AppleOpts['genresOf']
+  lyricsOf?: AppleOpts['lyricsOf']
   deps?: Partial<DjDeps>
   library?: number
   before?: (db: TestDb) => Promise<void>
@@ -170,14 +198,16 @@ async function genreTurn(opts: {
   await seedLibrary(db, opts.library ?? 30)
   await opts.before?.(db)
   const session = await seedSession(db)
-  const apple = fakeApple(opts.known ?? ARTISTS, { songsPer: opts.songsPer, genreOf: opts.genreOf, shape: opts.shape, proposals: opts.script?.proposed })
-  const check = checker(opts.passes ?? isHit)
+  const apple = fakeApple(opts.known ?? ARTISTS, {
+    songsPer: opts.songsPer, genreOf: opts.genreOf, genresOf: opts.genresOf, lyricsOf: opts.lyricsOf, shape: opts.shape, proposals: opts.script?.proposed,
+  })
+  const check = checker(opts.passes ?? isHit, opts.mood)
   const genres = opts.genres === null ? {} : { genres: opts.genres ?? ['afro house', 'lofi'] }
   const { llm, requests } = scriptedLlm({ targetCount: opts.targetCount ?? 15, ...genres, ...opts.input }, opts.script ?? {})
   const deps: DjDeps = { llm, embed: embedFake, fill: apple.fill, neverRefuse: true, proposeFirst: true, titleComplete: check.titleComplete, ...opts.deps }
   const { value: result, logged } = await withLog(() => runDjTurn(db, deps, { id: session.id, userId: 'u1' }, 'lofi afro house slow living great instrumentals'))
   const [text] = toolResults(requests)
-  return { db, session, result, requests, text, logged, checks: check.prompts, ...apple }
+  return { db, session, result, requests, text, logged, checks: check.prompts, moodChecks: check.moodPrompts, ...apple }
 }
 
 const perArtist = (queue: Array<{ artist: string }>) => {
@@ -328,7 +358,7 @@ describe('a propose-first genre brief draws from its artists\' real songs', () =
   it('the turn log counts the artists, songs and Apple calls, nothing else', async () => {
     const { logged } = await genreTurn({})
     const propose = logged.propose as Record<string, unknown>
-    expect(propose.artists).toEqual({ asked: 12, used: 12, songs: 12 * ARTIST_PER_MIX, apple: 24 })
+    expect(propose.artists).toEqual({ asked: 12, used: 12, songs: 12 * ARTIST_PER_MIX, apple: 24, instrumental: 0, moodPassed: 12 * ARTIST_PER_MIX })
     expect(JSON.stringify(propose)).not.toMatch(/Afro|Hit/)
   })
 
@@ -346,6 +376,99 @@ describe('a propose-first genre brief draws from its artists\' real songs', () =
     await runDjTurn(db, { llm, embed: embedFake, fill: apple.fill, neverRefuse: true, proposeFirst: true, titleComplete: checker(isHit).titleComplete },
       { id: session.id, userId: 'u1' }, 'afro house')
     expect(limit).toBe(ARTIST_TOP_SONGS)
+  })
+})
+
+// Mood words steer the pool (2026-11-16): live, "lofi afro house slow
+// living great instrumentals" came back as afro house vocal hits.
+describe('the artist pool honours instrumental and mood', () => {
+  const lineTitles = (prompt: string) => Array.from(prompt.matchAll(/^\d+ \| (.+?) — /gm)).map((m) => m[1])
+  const instrumentalTitle = (t: string) => / Hit (1|3|5|7|9|11|13|15|17|19)$/.test(t)
+
+  it('an instrumental brief asks Apple for twenty songs per artist and tells the artist call', async () => {
+    const { limits, requests } = await genreTurn({ input: { instrumental: true }, songsPer: 20 })
+    expect(ARTIST_TOP_SONGS_INSTRUMENTAL).toBe(20)
+    expect(limits.length).toBe(12)
+    expect(limits.every((l) => l === ARTIST_TOP_SONGS_INSTRUMENTAL)).toBe(true)
+    const block = requests.find(isArtistCall)!.messages[0].content as string
+    expect(block).toMatch(/instrumental/i)
+    expect(ARTIST_SYSTEM_PROMPT).not.toMatch(/Instrumental:/)
+  })
+
+  it('a brief without instrumental keeps ten per artist and an unchanged artist call', async () => {
+    const { limits, requests } = await genreTurn({})
+    expect(limits.every((l) => l === ARTIST_TOP_SONGS)).toBe(true)
+    const block = requests.find(isArtistCall)!.messages[0].content as string
+    expect(block).not.toMatch(/Instrumental:/)
+  })
+
+  it('keeps songs without lyrics and drops songs with lyrics when enough remain for the floor', async () => {
+    // Odd-numbered songs are instrumentals: Apple's top two are vocal.
+    const { result, moodChecks, logged } = await genreTurn({
+      input: { instrumental: true }, songsPer: 20, lyricsOf: (_a, j) => j % 2 === 0,
+    })
+    const pool = lineTitles(moodChecks[0])
+    expect(pool).toHaveLength(36)
+    expect(pool.every(instrumentalTitle)).toBe(true)
+    expect(result.queue).toHaveLength(15)
+    expect(result.queue.every((t) => instrumentalTitle(t.title))).toBe(true)
+    for (const n of perArtist(result.queue).values()) expect(n).toBeLessThanOrEqual(ARTIST_PER_MIX)
+    expect((logged.propose as { artists: { instrumental: number } }).artists.instrumental).toBe(36)
+  })
+
+  it('keeps songs with lyrics, last, when too few instrumentals remain for the floor; unknown sits between', async () => {
+    // Afro A to C have one instrumental each (song 5), Afro D one song of unknown lyrics (song 6); the rest are vocal.
+    const lyricsOf = (a: string, j: number) => (['Afro A', 'Afro B', 'Afro C'].includes(a) && j === 5 ? false : a === 'Afro D' && j === 6 ? null : true)
+    const { result, moodChecks } = await genreTurn({ input: { instrumental: true }, songsPer: 20, lyricsOf })
+    const pool = lineTitles(moodChecks[0])
+    expect(pool.slice(0, 3).sort()).toEqual(['Afro A Hit 5', 'Afro B Hit 5', 'Afro C Hit 5'])
+    expect(pool[3]).toBe('Afro D Hit 6')
+    expect(pool).toHaveLength(36)
+    expect(result.queue).toHaveLength(15)
+    const titles = result.queue.map((t) => t.title)
+    for (const t of ['Afro A Hit 5', 'Afro B Hit 5', 'Afro C Hit 5', 'Afro D Hit 6']) expect(titles).toContain(t)
+    for (const n of perArtist(result.queue).values()) expect(n).toBeLessThanOrEqual(ARTIST_PER_MIX)
+  })
+
+  it('a song labelled the genre in any of its genre names passes as genre, and is still checked for mood', async () => {
+    // The model calls nothing genre; every song's names hold Afro House.
+    const { result, moodChecks } = await genreTurn({
+      passes: () => false,
+      genresOf: () => ['Dance', 'African', 'Afro House'],
+      // Mood alone cannot pass a song the check calls off-genre, so the
+      // fake's mood list is empty; label matches then fail mood.
+    })
+    expect(moodChecks).toHaveLength(1)
+    // Label matches were sent to the call.
+    expect(lineTitles(moodChecks[0])).toHaveLength(36)
+    expect(moodChecks[0]).toContain('| Dance, African, Afro House |')
+    // Genre-true by label, failed mood: they refill the floor first.
+    expect(result.queue).toHaveLength(10)
+    expect(result.queue.every((t) => isHit(t.title))).toBe(true)
+  })
+
+  it('one mood check for the pool, with the brief mood, and the mix takes mood passes first', async () => {
+    const moodOk = (t: string) => / Hit [12]$/.test(t)
+    const { result, moodChecks, logged } = await genreTurn({ mood: moodOk })
+    expect(moodChecks).toHaveLength(1)
+    expect(moodChecks[0]).toContain('Mood asked for: slow living, instrumental')
+    // 24 pass mood; the mix (15, all from the pool) takes only them.
+    expect(result.queue).toHaveLength(15)
+    expect(result.queue.every((t) => moodOk(t.title))).toBe(true)
+    expect((logged.propose as { artists: { moodPassed: number } }).artists.moodPassed).toBe(24)
+  })
+
+  it('mood-failing genre-true songs refill the floor before other rejects', async () => {
+    // Only Afro A passes mood; Afro B and C are genre-true; everyone else fails genre.
+    const { result } = await genreTurn({
+      passes: (t) => /^Afro [ABC] /.test(t),
+      mood: (t) => t.startsWith('Afro A '),
+    })
+    expect(result.queue).toHaveLength(10)
+    const artists = perArtist(result.queue)
+    expect(artists.get('Afro A')).toBe(3)
+    expect(artists.get('Afro B')).toBe(3)
+    expect(artists.get('Afro C')).toBe(3)
   })
 })
 

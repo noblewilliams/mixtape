@@ -100,8 +100,12 @@ const namedSongsSchema = z
 
 export type NamedSong = { title: string; artist?: string }
 
+// Instrumental briefs (2026-11-16): set only when the listener asks for no
+// vocals. Read by the propose-first genre artist pool (dj/artist-pool.ts),
+// which then prefers songs Apple marks without lyrics. generate_queue only;
+// optional rather than defaulted, like allowOutside.
 export const intentSchema = intentBase
-  .extend({ namedArtists: namedArtistsSchema.optional(), namedSongs: namedSongsSchema.optional() })
+  .extend({ namedArtists: namedArtistsSchema.optional(), namedSongs: namedSongsSchema.optional(), instrumental: z.boolean().optional() })
   .superRefine(checkWindowOrdering)
 export type Intent = z.infer<typeof intentSchema>
 
@@ -299,6 +303,13 @@ const namedProperties = {
       'Songs the listener asks to hear or to build the mix around (at most 5), with the artist when they say it. ' +
       'Leave out any song they want less of, want to avoid, or mention only as a contrast (less X, no X, nothing ' +
       'like X). Never invent any, never guess an artist they did not give, and leave this out when they name none.',
+  },
+  instrumental: {
+    type: 'boolean',
+    description:
+      'Set true only when the listener asks for instrumentals, no vocals or no lyrics ("great instrumentals", ' +
+      '"nothing with words", "no vocals"). The mix then prefers songs without vocals. Leave it out otherwise: a ' +
+      'mood such as "chill", "focus" or "lofi" on its own is not a request for instrumentals.',
   },
 }
 

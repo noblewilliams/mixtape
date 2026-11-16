@@ -727,3 +727,43 @@ describe('genres', () => {
     expect(DJ_TOOLS_WITH_OUTSIDE.find((t) => t.name === 'generate_queue')!.input_schema.properties).toHaveProperty('genres')
   })
 })
+
+// Instrumental briefs (2026-11-16): the propose-first genre artist pool
+// prefers songs Apple marks without lyrics when this is set.
+describe('instrumental', () => {
+  const genProps = () => DJ_TOOLS.find((t) => t.name === 'generate_queue')!.input_schema.properties as Record<string, { type: string; description: string }>
+
+  it('parses a boolean on the generate intent and is absent when unsent', () => {
+    expect(intentSchema.parse({ themes: 'x', instrumental: true }).instrumental).toBe(true)
+    expect(intentSchema.parse({ themes: 'x', instrumental: false }).instrumental).toBe(false)
+    expect(intentSchema.parse({ themes: 'x' })).not.toHaveProperty('instrumental')
+    expect(intentSchema.safeParse({ themes: 'x', instrumental: 'yes' }).success).toBe(false)
+  })
+
+  it('is generate_queue only', () => {
+    const ops = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema.properties.ops as { items: { oneOf: Array<{ properties: { intent?: { properties: Record<string, unknown> } } }> } }
+    expect(ops.items.oneOf[2].properties.intent!.properties).not.toHaveProperty('instrumental')
+    expect(ops.items.oneOf[3].properties.intent!.properties).not.toHaveProperty('instrumental')
+    expect(opIntentSchema.parse({ themes: 'x', instrumental: true })).not.toHaveProperty('instrumental')
+  })
+
+  it('tells the model to set it only when the listener asks for instrumentals or no vocals', () => {
+    const { type, description } = genProps().instrumental
+    expect(type).toBe('boolean')
+    expect(description).toMatch(/instrumental/i)
+    expect(description).toMatch(/no vocals/)
+    expect(description).toMatch(/no lyrics/)
+    expect(description).toMatch(/only when/i)
+    expect(description).not.toContain('—')
+    expect(DJ_TOOLS_WITH_OUTSIDE.find((t) => t.name === 'generate_queue')!.input_schema.properties).toHaveProperty('instrumental')
+  })
+
+  const rows: Row[] = [
+    { label: 'instrumental true is valid', sample: { themes: 'x', instrumental: true } },
+    { label: 'a non-boolean instrumental is invalid', sample: { themes: 'x', instrumental: 'yes' } },
+  ]
+  it.each(rows)('generate_queue agrees with zod: $label', ({ sample }) => {
+    const schema = DJ_TOOLS.find((t) => t.name === 'generate_queue')!.input_schema
+    expect(matchesJsonSchema(schema, sample)).toBe(intentSchema.safeParse(sample).success)
+  })
+})

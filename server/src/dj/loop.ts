@@ -27,8 +27,8 @@ import {
 } from './contracts'
 import { buildPool, hasPersonalCandidates, listenerPlaysSql, musicReady, onSpotifySql, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
-import { checkGenres, GENRE_CHECK_SYSTEM, type GenreCandidate } from './genre-check'
-import { ARTIST_DEADLINE_MS, ARTIST_MIN, ARTIST_POOL_APPLE, ARTIST_POOL_MIN_SONGS, buildArtistPool, proposeArtists, type ProposedArtist } from './artist-pool'
+import { checkGenres, checkGenresAndMood, GENRE_CHECK_SYSTEM, type GenreCandidate } from './genre-check'
+import { ARTIST_DEADLINE_MS, ARTIST_MIN, ARTIST_POOL_APPLE, ARTIST_POOL_MIN_SONGS, buildArtistPool, proposeArtists, type ArtistPoolSong, type ProposedArtist } from './artist-pool'
 import {
   MIN_VERIFIED,
   PROPOSE_EXTRA,
@@ -1081,7 +1081,12 @@ type ProposeLog = { proposed: number; verified: number; searches: number; rounds
 // went to song proposals instead: the call failed ('call'), it named too
 // few artists ('artists'), Apple gave too few songs ('songs'), no room left
 // in the turn ('budget') or the pool could not be written ('error').
-type ArtistsLog = { asked: number; used: number; songs: number; apple: number; appleError?: string; fallback?: 'call' | 'artists' | 'songs' | 'budget' | 'error' }
+// instrumental: pool songs Apple lists without lyrics. moodPassed: pool
+// songs the mood check passed (genre and mood), once it ran.
+type ArtistsLog = {
+  asked: number; used: number; songs: number; apple: number; instrumental?: number; moodPassed?: number
+  appleError?: string; fallback?: 'call' | 'artists' | 'songs' | 'budget' | 'error'
+}
 
 // What one turn's proposals verified, kept so a conflict retry or a second
 // generate_queue reuses them instead of spending the searches again.
@@ -1337,6 +1342,36 @@ async function genreFilter<T extends { trackId: string }>(
     rejected: result.failed ? [] : picks.filter((p) => !result.kept.has(p.trackId)),
   }
 }
+
+// The artist pool's check (2026-11-16): genre AND the brief's mood words
+// (intent.themes), one call over every pool song, label matches included
+// (a label proves genre, not mood), with every Apple genre name as label.
+// Same ledger unit and timeout as genreFilter. `rejected` lists the
+// genre-true songs that failed the mood first (the floor's first refill),
+// then the rest, each in pool order. The pool's order already puts songs
+// without lyrics first on an instrumental brief.
+async function artistPoolFilter(
+  deps: DjDeps,
+  tracker: FillTracker,
+  intent: Intent,
+  picks: VerifiedProposal[],
+): Promise<GenreFiltered<VerifiedProposal>> {
+  const genres = intent.genres ?? []
+  if (genres.length === 0 || picks.length === 0) return { kept: picks, dropped: 0, failed: false, rejected: [] }
+  const onCall = deps.step ? () => deps.step?.({ step: 'checking', genres }) : undefined
+  const result = await checkGenresAndMood(deps.titleComplete, genres, intent.themes, picks.map(artistPoolCandidate), { allowed: appleLeft(tracker) > 0, onCall })
+  tracker.genreChecks = (tracker.genreChecks ?? 0) + result.calls
+  const log = tracker.spend?.log.artists
+  if (log && !result.failed) log.moodPassed = result.moodPassed
+  const rejected = result.failed ? [] : [
+    ...picks.filter((p) => result.genreOnly.has(p.trackId)),
+    ...picks.filter((p) => !result.kept.has(p.trackId) && !result.genreOnly.has(p.trackId)),
+  ]
+  return { kept: picks.filter((p) => result.kept.has(p.trackId)), dropped: result.dropped, failed: result.failed, rejected }
+}
+
+const artistPoolCandidate = (v: ArtistPoolSong): GenreCandidate =>
+  ({ ...proposalCandidate(v), genres: v.genres ?? [], hasLyrics: v.hasLyrics ?? null })
 
 // Charges the curated songs' check before anything runs beside it. The
 // corpus blend's proposal round runs alongside the curation and keeps one
@@ -1747,11 +1782,13 @@ async function artistPoolRound(
       userId: session.userId, storefront: ctx.storefront, artists, ownedSongs: ownedKeys,
       allowExplicit: intent.allowExplicit, namedSongs: intent.namedSongs,
       budget: room, deadlineMs: ARTIST_DEADLINE_MS, now: ctx.now,
+      instrumental: intent.instrumental === true, floor: genreFloor(intent.targetCount),
     })
     tracker.artistApple = (tracker.artistApple ?? 0) + pool.apple
     log.apple = pool.apple
     log.used = pool.used
     log.songs = pool.candidates.length
+    log.instrumental = pool.instrumental
     if (pool.appleError) log.appleError = pool.appleError
     if (pool.used < ARTIST_MIN || pool.candidates.length < Math.min(intent.targetCount, ARTIST_POOL_MIN_SONGS)) {
       log.fallback = 'songs'
@@ -2491,7 +2528,9 @@ async function generateFromBrief(
   // The proposals, blend and shortfall alike, pass the same check: at most
   // one more call, for those Apple labels otherwise. A spare stands in for
   // one that fails; past the spares the mix is shorter and says why.
-  const proposedCheck = await genreFilter(deps, turn.tracker, intent.genres, proposed, proposalCandidate)
+  const proposedCheck = turn.tracker.artistPool
+    ? await artistPoolFilter(deps, turn.tracker, intent, proposed)
+    : await genreFilter(deps, turn.tracker, intent.genres, proposed, proposalCandidate)
   let proposedAimed = Math.min(proposed.length, proposedRoom)
   const checkedIds = proposed.map((p) => p.trackId)
   const checkedSongs = proposed.map(songKey)
