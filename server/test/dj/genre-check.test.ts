@@ -94,6 +94,21 @@ describe('checkGenres', () => {
     expect(calls[0].prompt).not.toContain('Song a')
   })
 
+  it('names several genres as alternatives: a song fitting any one of them passes', async () => {
+    const { complete, calls } = fakeComplete('[]')
+    await checkGenres(complete, ['lofi', 'afro house'], [song('a', 'Dance')])
+    expect(calls[0].prompt).toContain('Genres asked for (a song passes if it fits any one of them): lofi, afro house')
+    expect(calls[0].prompt).not.toContain('Genre asked for: lofi, afro house')
+  })
+
+  it('tells the checker that any one named genre is enough and that close subgenres pass', () => {
+    expect(GENRE_CHECK_SYSTEM).toMatch(/any one of them/)
+    expect(GENRE_CHECK_SYSTEM).toMatch(/need not fit all/)
+    expect(GENRE_CHECK_SYSTEM).toMatch(/close subgenres/)
+    // The old rule that rejected every neighbouring style is gone.
+    expect(GENRE_CHECK_SYSTEM).not.toMatch(/adjacent to it/)
+  })
+
   it('makes no call when every song matches its label', async () => {
     const { complete, calls } = fakeComplete('[]')
     const result = await checkGenres(complete, ['jazz'], [song('a', 'Jazz')])
