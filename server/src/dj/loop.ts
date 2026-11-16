@@ -28,6 +28,7 @@ import {
 import { buildPool, hasPersonalCandidates, listenerPlaysSql, musicReady, onSpotifySql, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
 import { checkGenres, GENRE_CHECK_SYSTEM, type GenreCandidate } from './genre-check'
+import { ARTIST_DEADLINE_MS, ARTIST_MIN, ARTIST_POOL_APPLE, ARTIST_POOL_MIN_SONGS, buildArtistPool, proposeArtists, type ProposedArtist } from './artist-pool'
 import {
   MIN_VERIFIED,
   PROPOSE_EXTRA,
@@ -1071,7 +1072,16 @@ type FillLog = { inserted: number; enriched: number; subrequests: number; appleE
 // `curationFailed`: the curation failed and the proposals filled the mix.
 // `features`: the per-turn feature chain's counts, when it ran.
 // `adjacent`: songs a genre blend's floor kept that the sound check rejected.
-type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' | 'edit'; curationFailed?: true; features?: FeaturesChainResult; adjacent?: number }
+// `artists`: a personal genre blend's artist pool (dj/artist-pool.ts).
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' | 'edit'; curationFailed?: true; features?: FeaturesChainResult; adjacent?: number; artists?: ArtistsLog }
+
+// The artist pool's part of the turn log: counts and codes only. `asked`:
+// artists the model named; `used`: those with songs in the pool; `songs`:
+// the pool's size; `apple`: Apple calls made. `fallback` says why the turn
+// went to song proposals instead: the call failed ('call'), it named too
+// few artists ('artists'), Apple gave too few songs ('songs'), no room left
+// in the turn ('budget') or the pool could not be written ('error').
+type ArtistsLog = { asked: number; used: number; songs: number; apple: number; appleError?: string; fallback?: 'call' | 'artists' | 'songs' | 'budget' | 'error' }
 
 // What one turn's proposals verified, kept so a conflict retry or a second
 // generate_queue reuses them instead of spending the searches again.
@@ -1117,6 +1127,11 @@ type FillTracker = {
   // search, verification time and Apple ledger (WIDE_* above) apply to the
   // rest of the turn.
   wide?: true
+  // The artist pool's Apple calls this turn (dj/artist-pool.ts), in the
+  // ledger below; `artistPool` marks tracker.blend as that pool, a list
+  // of candidates longer than the blend's share.
+  artistApple?: number
+  artistPool?: true
   turnStartedAt: number
 }
 
@@ -1166,8 +1181,15 @@ export const TURN_APPLE_BUDGET = 22
 // proposals, the spares). Workers Paid (decisions 2026-11-06) allows 1,000
 // subrequests; the turn's worst case stays far under the 900 the enrichment
 // paths budget for (test/enrich/subrequest-budget.test.ts). Only those
-// turns: every other turn keeps 22.
-export const WIDE_TURN_APPLE_BUDGET = WIDE_VERIFY_MAX + 3
+// turns: every other turn keeps 22. The artist pool's lookups
+// (ARTIST_POOL_APPLE, an artist search and a top-songs page per artist) sit
+// in the same ledger, beside the searches a fallback to song proposals may
+// still need.
+export const WIDE_TURN_APPLE_BUDGET = WIDE_VERIFY_MAX + 3 + ARTIST_POOL_APPLE
+// What the artist pool adds outside the Apple ledger: the owned-song read,
+// the insert (held read, insert, priority update), the track-id read, and a
+// fallback's song-proposal call after the artist call.
+export const ARTIST_POOL_OTHER_SUBREQUESTS = 6
 
 // Features for the verified proposals headed for the queue (plan
 // 2026-11-16 propose-first, S4): ReccoBeats, then Deezer tempo, then the
@@ -1266,7 +1288,7 @@ async function proposalEnergies(db: Db, picks: VerifiedProposal[]): Promise<Map<
 }
 
 function appleLeft(tracker: FillTracker): number {
-  return Math.max(0, appleBudget(tracker) - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0) - (tracker.genreChecks ?? 0))
+  return Math.max(0, appleBudget(tracker) - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0) - (tracker.genreChecks ?? 0) - (tracker.artistApple ?? 0))
 }
 
 // Searches a proposal round may make: the ledger, less one unit kept for
@@ -1668,8 +1690,81 @@ function blendWant(intent: Intent, personal: boolean, proposeFirst: boolean): nu
 
 // The personal blend's extras: the proposal call leans to the listener's
 // taste (PROPOSE_SYSTEM_PROMPT_PERSONAL, their top artists) and is told the
-// songs they already own, so it does not spend slots on them.
-type PersonalBlend = { listener: 'personal'; owned: ProposedSong[] }
+// songs they already own, so it does not spend slots on them. `artists`: a
+// genre blend, which draws on the artist pool first; `ownedKeys` are the
+// songKeys of the pool's own songs, kept out of it.
+type PersonalBlend = { listener: 'personal'; owned: ProposedSong[]; artists?: { ownedKeys: Set<string> } }
+
+// A personal genre blend's outside songs (2026-11-16, founder: the model
+// knows a niche genre's artists, not their track titles): one artist call
+// beside the library curation, then those artists' top songs from Apple
+// (dj/artist-pool.ts). The whole pool is returned, round-robin across the
+// artists; the sound check and the blend's share then choose from it. Null,
+// with the reason in the turn log, when the turn should propose songs
+// instead: the call failed, it named fewer than ARTIST_MIN artists, or
+// Apple gave fewer than ARTIST_MIN artists' songs or fewer than
+// ARTIST_POOL_MIN_SONGS (or the mix's length). Throws only the turn's own
+// budget.
+async function artistPoolRound(
+  db: Db,
+  deps: DjDeps,
+  fill: FillDeps,
+  session: DjSessionRef,
+  ctx: ProposeContext,
+  intent: Intent,
+  ownedKeys: Set<string>,
+  topArtists: string[],
+  budget: CurationBudget,
+  tracker: FillTracker,
+): Promise<VerifiedProposal[] | null> {
+  const log: ArtistsLog = { asked: 0, used: 0, songs: 0, apple: 0 }
+  proposeSpend(tracker).log.artists = log
+  // One unit stays back for the pool's own sound check.
+  const room = Math.min(ARTIST_POOL_APPLE, appleLeft(tracker) - 1)
+  if (room < 2 * ARTIST_MIN) {
+    log.fallback = 'budget'
+    return null
+  }
+  let artists: ProposedArtist[]
+  try {
+    budget.consume()
+    artists = await proposeArtists(deps.llm, {
+      brief: ctx.userText, intent, seeds: ctx.seeds, topArtists, storefront: ctx.storefront, sessionContext: ctx.sessionContext,
+    })
+  } catch (e) {
+    if (e instanceof DjError) throw e
+    log.fallback = 'call'
+    return null
+  }
+  log.asked = artists.length
+  if (artists.length < ARTIST_MIN) {
+    log.fallback = 'artists'
+    return null
+  }
+  deps.step?.({ step: 'checking' })
+  try {
+    const pool = await buildArtistPool(db, fill.catalog, {
+      userId: session.userId, storefront: ctx.storefront, artists, ownedSongs: ownedKeys,
+      allowExplicit: intent.allowExplicit, namedSongs: intent.namedSongs,
+      budget: room, deadlineMs: ARTIST_DEADLINE_MS, now: ctx.now,
+    })
+    tracker.artistApple = (tracker.artistApple ?? 0) + pool.apple
+    log.apple = pool.apple
+    log.used = pool.used
+    log.songs = pool.candidates.length
+    if (pool.appleError) log.appleError = pool.appleError
+    if (pool.used < ARTIST_MIN || pool.candidates.length < Math.min(intent.targetCount, ARTIST_POOL_MIN_SONGS)) {
+      log.fallback = 'songs'
+      return null
+    }
+    return pool.candidates
+  } catch {
+    // Charged in full: the calls may have gone out before the write failed.
+    tracker.artistApple = (tracker.artistApple ?? 0) + room
+    log.fallback = 'error'
+    return null
+  }
+}
 
 // The proposed share of a blended mix (a corpus mix, or with PROPOSE_FIRST
 // a personal one): one round, no replacement (the curation covers a
@@ -1700,6 +1795,17 @@ async function blendProposals(
     const taste = personal
       ? { listener: personal.listener, topArtists: await topLibraryArtists(db, session.userId), exclude: personal.owned, thinking: 'off' as const }
       : {}
+    // A personal genre blend draws on its artists' real songs first, and
+    // proposes songs only when that falls short.
+    if (personal?.artists) {
+      const pool = await artistPoolRound(db, deps, fill, session, ctx, intent, personal.artists.ownedKeys, taste.topArtists ?? [], budget, tracker)
+      if (pool) {
+        tracker.blend = pool
+        tracker.artistPool = true
+        return pool
+      }
+      // Fell back: the turn log's propose.artists says why.
+    }
     // A personal blend asks for the whole mix (proposalCount) but verifies
     // only its share: the unsearched rest are spares for a library that
     // curates short or proposals the sound check drops (live 2026-11-16, a
@@ -2304,6 +2410,9 @@ async function generateFromBrief(
   const owned = personalBlend
     ? pool.filter((t) => !t.outside).slice(0, OWNED_EXCLUDE).map((t) => ({ title: t.title, artist: t.artist }))
     : []
+  // A genre blend's artist pool keeps out every song of the listener's own
+  // in this pool, not only the first OWNED_EXCLUDE.
+  const artistsBlend = genreBlend ? { artists: { ownedKeys: new Set(pool.filter((t) => !t.outside).map(songKey)) } } : {}
   budget.consume()
   const byId = new Map(pool.map((t) => [t.trackId, t]))
   // A named genre's sound check on the curated songs (decision 8) chains
@@ -2342,7 +2451,7 @@ async function generateFromBrief(
       .then((c) => genreFilter(deps, turn.tracker, intent.genres, c, poolCandidate(byId), curatedHeld)),
     blending
       ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker, blendTarget,
-        personalBlend ? { listener: 'personal', owned } : undefined)
+        personalBlend ? { listener: 'personal', owned, ...artistsBlend } : undefined)
       : Promise.resolve([]),
   ])
   const curated = [...curatedCheck.kept]
@@ -2359,8 +2468,11 @@ async function generateFromBrief(
   // count is the larger of it and what the curation left unfilled.
   const shortfall = intent.targetCount - curated.length
   // How many proposals the mix takes: the blend's share, or the shortfall
-  // when that is larger. Any beyond it are a named genre's spares.
-  const proposedRoom = fillShort ? Math.max(shortfall, proposed.length) : proposed.length
+  // when that is larger. Any beyond it are a named genre's spares. The
+  // artist pool is longer than the share, so its share is counted, not its
+  // length.
+  const share = turn.tracker.artistPool ? Math.min(proposed.length, blendTarget) : proposed.length
+  const proposedRoom = fillShort ? Math.max(shortfall, share) : share
   if (fillShort && proposed.length < shortfall) {
     const held = new Set([...curatedIds, ...proposed.map((p) => p.trackId)])
     const heldSongs = new Set([...curatedSongs, ...proposed.map(songKey)])

@@ -447,6 +447,28 @@ async function enrichDue(
   }
 }
 
+// One artist's top songs on Apple, by name: an artist search, the result
+// whose name folds to the same key (a few candidates let the key match skip
+// a similarly named act), then that artist's top songs in Apple's order.
+// `gate` runs before each of the two calls and charges it; false stops
+// there. Null when the name folds to nothing, the artist is not found or a
+// gate stopped it. Apple errors propagate. Shared by the artist-only fill
+// and the genre artist pool (dj/artist-pool.ts).
+export async function artistTopSongsByName(
+  catalog: AppleCatalogArtistClient,
+  storefront: string,
+  name: string,
+  limit: number,
+  gate: () => boolean = () => true,
+): Promise<CatalogSong[] | null> {
+  const key = artistKey(name)
+  if (key === '' || !gate()) return null
+  const found = await catalog.searchArtists(storefront, name, ARTIST_SEARCH_LIMIT)
+  const artist = found.find((a) => artistKey(a.name) === key)
+  if (!artist || !gate()) return null
+  return catalog.artistTopSongs(storefront, artist.id, limit)
+}
+
 export type ArtistFillOptions = {
   userId: string
   // The artist's name as the brief gave it; matched to Apple's by key.
@@ -485,12 +507,14 @@ export async function fillForArtist(db: Db, deps: FillDeps, options: ArtistFillO
   // Both Apple calls or neither, as in fillForSeeds.
   if (Number(row?.held ?? 0) < ONLY_ARTIST_FILL && left() >= 2 * STAGE_SUBREQUESTS.apple && !expired()) {
     try {
-      result.subrequests += STAGE_SUBREQUESTS.apple
-      const found = await deps.catalog.searchArtists(storefront, options.name, ARTIST_SEARCH_LIMIT)
-      const artist = found.find((a) => artistKey(a.name) === key)
-      if (artist && !expired()) {
+      let calls = 0
+      const songs = await artistTopSongsByName(deps.catalog, storefront, options.name, ONLY_ARTIST_FILL, () => {
+        if (calls > 0 && expired()) return false
+        calls += 1
         result.subrequests += STAGE_SUBREQUESTS.apple
-        const songs = await deps.catalog.artistTopSongs(storefront, artist.id, ONLY_ARTIST_FILL)
+        return true
+      })
+      if (songs) {
         newIds.push(...await addCatalogueSongs(db, songs.slice(0, ONLY_ARTIST_FILL), storefront))
         result.artists.push(options.name)
       }

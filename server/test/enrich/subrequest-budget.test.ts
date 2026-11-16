@@ -31,7 +31,8 @@ import { tracks } from '../../src/db/schema'
 import { fillFeaturesForTurn, CHAIN_SUBREQUESTS } from '../../src/enrich/features-chain'
 import { createDeezerTempoClient } from '../../src/enrich/deezer-tempo'
 import { STAGE_SUBREQUESTS } from '../../src/dj/catalogue-fill'
-import { TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS, WIDE_TURN_APPLE_BUDGET } from '../../src/dj/loop'
+import { ARTIST_POOL_OTHER_SUBREQUESTS, TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS, WIDE_TURN_APPLE_BUDGET } from '../../src/dj/loop'
+import { ARTIST_ASK, ARTIST_POOL_APPLE } from '../../src/dj/artist-pool'
 import { GENRE_POOL_MAX, VERIFY_MAX, WIDE_VERIFY_MAX } from '../../src/dj/propose'
 
 const DURATION_MS = 200_000
@@ -261,10 +262,14 @@ describe('enrichment subrequest budget', () => {
     expect(VERIFY_MAX).toBe(22)
     expect(WIDE_VERIFY_MAX).toBe(34)
     expect(WIDE_VERIFY_MAX).toBeGreaterThanOrEqual(GENRE_POOL_MAX)
-    // The searches plus the three sound checks a genre generate can make.
-    expect(WIDE_TURN_APPLE_BUDGET).toBe(WIDE_VERIFY_MAX + 3)
-    // 37 + 26 + 66 = 129, under the 900 held for a paid-plan invocation.
-    expect(WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET).toBe(129)
-    expect(WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET).toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
+    // The searches, the three sound checks a genre generate can make, and
+    // the artist pool's lookups (a search and a top-songs page per artist).
+    expect(ARTIST_POOL_APPLE).toBe(2 * ARTIST_ASK)
+    expect(ARTIST_POOL_APPLE).toBe(24)
+    expect(WIDE_TURN_APPLE_BUDGET).toBe(WIDE_VERIFY_MAX + 3 + ARTIST_POOL_APPLE)
+    // 61 + 26 + 66 + 6 = 159, well under the 900 held for a paid-plan invocation.
+    const worst = WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET + ARTIST_POOL_OTHER_SUBREQUESTS
+    expect(worst).toBe(159)
+    expect(worst).toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
   })
 })

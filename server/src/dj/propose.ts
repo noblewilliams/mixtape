@@ -432,6 +432,31 @@ function rowsOf(res: unknown): Record<string, unknown>[] {
 const upperIsrc = (isrc: string | null | undefined): string | null => (isrc ? isrc.trim().toUpperCase() || null : null)
 
 /**
+ * Inserts Apple songs as proposal catalogue rows (addCatalogueSongs with
+ * PROPOSAL_QUEUE: ISRC then Apple id dedupe, FILL_QUEUE_BOOST, new rows
+ * meaning-deferred, never enriched here) and returns each song's track id:
+ * held rows and new rows alike, by Apple id, else by ISRC on an Apple row.
+ */
+export async function landProposalSongs(db: Db, songs: CatalogSong[], storefront: string): Promise<(song: CatalogSong) => string | undefined> {
+  if (songs.length === 0) return () => undefined
+  await addCatalogueSongs(db, songs, storefront, PROPOSAL_QUEUE)
+  const list = (values: string[]) => sql.join(values.map((v) => sql`${v}`), sql`, `)
+  const appleIds = songs.map((s) => s.appleId)
+  const isrcs = songs.flatMap((s) => (upperIsrc(s.isrc) ? [upperIsrc(s.isrc)!] : []))
+  const rows = rowsOf(await db.execute(sql`
+    SELECT t.id, t.apple_id, upper(t.isrc) AS isrc FROM tracks t
+    WHERE t.apple_id IN (${list(appleIds)})${isrcs.length > 0
+      ? sql` OR (t.apple_id IS NOT NULL AND upper(t.isrc) IN (${list(isrcs)}))`
+      : sql``}`))
+  const byApple = new Map(rows.map((r) => [String(r.apple_id), String(r.id)]))
+  const byIsrc = new Map(rows.flatMap((r) => (r.isrc ? [[String(r.isrc), String(r.id)] as const] : [])))
+  return (song) => {
+    const isrc = upperIsrc(song.isrc)
+    return byApple.get(song.appleId) ?? (isrc ? byIsrc.get(isrc) : undefined)
+  }
+}
+
+/**
  * One Apple search per proposal, VERIFY_CONCURRENCY at a time in proposal
  * order, until the budget, the deadline or `want` stops it. Confirmed songs are inserted as catalogue rows in one
  * addCatalogueSongs call (ISRC then Apple id dedupe, FILL_QUEUE_BOOST, new
@@ -492,22 +517,10 @@ export async function verifyProposals(db: Db, catalog: AppleCatalogSearchClient,
   if (options.want !== undefined) hits.splice(options.want)
   if (hits.length === 0) return result
 
-  await addCatalogueSongs(db, hits.map((h) => h.song), options.storefront, PROPOSAL_QUEUE)
-  // Held rows and new rows alike: by Apple id, else by ISRC on an Apple row.
-  const list = (values: string[]) => sql.join(values.map((v) => sql`${v}`), sql`, `)
-  const appleIds = hits.map((h) => h.song.appleId)
-  const isrcs = hits.flatMap((h) => (upperIsrc(h.song.isrc) ? [upperIsrc(h.song.isrc)!] : []))
-  const rows = rowsOf(await db.execute(sql`
-    SELECT t.id, t.apple_id, upper(t.isrc) AS isrc FROM tracks t
-    WHERE t.apple_id IN (${list(appleIds)})${isrcs.length > 0
-      ? sql` OR (t.apple_id IS NOT NULL AND upper(t.isrc) IN (${list(isrcs)}))`
-      : sql``}`))
-  const byApple = new Map(rows.map((r) => [String(r.apple_id), String(r.id)]))
-  const byIsrc = new Map(rows.flatMap((r) => (r.isrc ? [[String(r.isrc), String(r.id)] as const] : [])))
+  const trackIdOf = await landProposalSongs(db, hits.map((h) => h.song), options.storefront)
   const seenTrack = new Set<string>()
   for (const { song, proposal } of hits) {
-    const isrc = upperIsrc(song.isrc)
-    const trackId = byApple.get(song.appleId) ?? (isrc ? byIsrc.get(isrc) : undefined)
+    const trackId = trackIdOf(song)
     if (!trackId || seenTrack.has(trackId)) continue
     seenTrack.add(trackId)
     const verified: VerifiedProposal = { trackId, title: song.title, artist: song.artist, reason: proposal.reason, genre: song.genre ?? null, year: song.releaseYear ?? null }

@@ -575,6 +575,9 @@ describe('remake and outside picks', () => {
 // electronica ones, and the library holds almost no afro house: 1 song. A
 // genre brief now asks for a larger, genre-true first pool, verifies more of
 // it, and refills to a floor from the closest songs the check rejected.
+// These turns name no artists (the scripted model answers the artist call
+// with an empty list), so they run on the song-proposal fallback; the
+// artist pool itself is covered in artist-pool.test.ts.
 describe('a genre brief comes back full (floor)', () => {
   // The sound check passes the songs whose titles `passes` accepts.
   function checker(passes: (title: string) => boolean = () => false) {
