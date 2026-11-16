@@ -3,11 +3,13 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
+import 'package:mixtape/presentation/format/network_copy.dart';
 import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
@@ -881,7 +883,7 @@ void main() {
         api.onGetSession = (_) async =>
             SessionDetail(session: _session(), messages: [], queue: []);
         api.onSendMessage = (id, text) async =>
-            throw NetworkException('no route to host');
+            throw NetworkException(http.ClientException('No route to host'));
         final container = _makeContainer(api);
         await container.read(chatProvider('s1').future);
 
@@ -892,11 +894,28 @@ void main() {
         expect(state.messages[0].message.role, 'user');
         expect(state.messages[0].isError, isFalse);
         expect(state.messages[1].isError, isTrue);
-        expect(
-          state.messages[1].message.content,
-          contains('check your connection'),
-        );
+        expect(state.messages[1].message.content, NetworkCopy.djOffline);
         expect(state.sending, isFalse);
+      },
+    );
+
+    test(
+      'a send that times out says the DJ did not answer, not that the phone '
+      'is offline',
+      () async {
+        final api = FakeDjApi();
+        api.onGetSession = (_) async =>
+            SessionDetail(session: _session(), messages: [], queue: []);
+        api.onSendMessage = (id, text) async =>
+            throw NetworkException(TimeoutException('Future not completed'));
+        final container = _makeContainer(api);
+        await container.read(chatProvider('s1').future);
+
+        await container.read(chatProvider('s1').notifier).send('play jazz');
+
+        final state = container.read(chatProvider('s1')).value!;
+        expect(state.messages[1].isError, isTrue);
+        expect(state.messages[1].message.content, NetworkCopy.djUnreachable);
       },
     );
 
@@ -1425,7 +1444,7 @@ void main() {
       () async {
         final fake = api();
         fake.onSendWithProgress = (id, text, onProgress) async =>
-            throw NetworkException('no route to host');
+            throw NetworkException(http.ClientException('No route to host'));
         final container = _makeContainer(fake);
         await container.read(chatProvider('s1').future);
 
@@ -1434,10 +1453,7 @@ void main() {
         final state = container.read(chatProvider('s1')).value!;
         expect(state.messages.map((m) => m.message.role), ['user', 'dj']);
         expect(state.messages.last.isError, isTrue);
-        expect(
-          state.messages.last.message.content,
-          contains('check your connection'),
-        );
+        expect(state.messages.last.message.content, NetworkCopy.djOffline);
         // No re-read: the server never had it.
         expect(fake.getSessionCallCount, 1);
         expect(state.workingStep, isNull);
@@ -1794,7 +1810,7 @@ void main() {
         queue: [_track(0)],
       );
       api.onApplyQueueOps = (id, ops, expectedVersion) async =>
-          throw NetworkException('no route to host');
+          throw NetworkException(http.ClientException('No route to host'));
       final container = _makeContainer(api);
       await container.read(chatProvider('s1').future);
 
@@ -1805,7 +1821,7 @@ void main() {
       ]);
 
       final state = container.read(chatProvider('s1')).value!;
-      expect(state.transientError, contains('check your connection'));
+      expect(state.transientError, NetworkCopy.djOffline);
       expect(state.queue, hasLength(1)); // unchanged
       expect(state.queueVersion, 1); // unchanged
     });

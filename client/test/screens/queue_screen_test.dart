@@ -1016,7 +1016,7 @@ void main() {
       final gate = Completer<void>();
       api.onApplyQueueOps = (id, ops, expectedVersion) async {
         await gate.future;
-        throw NetworkException('offline');
+        throw NetworkException(http.ClientException('Network is unreachable'));
       };
       final container = _makeContainer(api);
       await _pump(tester, container);

@@ -28,6 +28,7 @@ import '../widgets/energy_journey.dart' show EnergyArc;
 import 'funnel_provider.dart';
 import 'keep_mixes_provider.dart';
 import 'listen_later_provider.dart';
+import '../format/network_copy.dart';
 
 /// Built over the SAME baseUrl/tokenStore as the app's shared [ApiClient]
 /// (structural sharing, per [DjApi.from]'s doc comment) but with its own
@@ -40,8 +41,6 @@ final djApiProvider = Provider<DjApi>((ref) {
 });
 
 const _genericApiErrorMessage = 'something went wrong on our end — try again';
-const _offlineErrorMessage =
-    "couldn't reach the DJ — check your connection and try again";
 
 /// Shown when an edit loses a version race. Public so a screen with its own
 /// approved conflict copy (the arrangement's "This mix changed elsewhere.")
@@ -907,7 +906,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           ],
         ),
       );
-    } on NetworkException {
+    } on NetworkException catch (e) {
       if (!live()) return;
       if (streamed) {
         await _afterDroppedStream(
@@ -928,7 +927,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           messages: [
             ...c.messages,
             ChatMessage(
-              _localMessage('dj', _offlineErrorMessage),
+              _localMessage('dj', djNetworkMessage(e)),
               isError: true,
             ),
           ],
@@ -1335,8 +1334,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       _mergeCurrent((c) => c.copyWith(transientError: e.message));
     } on ApiException {
       _mergeCurrent((c) => c.copyWith(transientError: _genericApiErrorMessage));
-    } on NetworkException {
-      _mergeCurrent((c) => c.copyWith(transientError: _offlineErrorMessage));
+    } on NetworkException catch (e) {
+      _mergeCurrent((c) => c.copyWith(transientError: djNetworkMessage(e)));
     }
   }
 
@@ -1439,7 +1438,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   String _messageFor(Object error) => switch (error) {
     DjApiException(:final message) => message,
-    NetworkException() => _offlineErrorMessage,
+    NetworkException() => djNetworkMessage(error),
     _ => _genericApiErrorMessage,
   };
 

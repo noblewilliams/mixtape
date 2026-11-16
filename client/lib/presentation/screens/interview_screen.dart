@@ -14,10 +14,9 @@ import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/section_word.dart';
 import '../widgets/foundation/tape_button.dart';
+import '../format/network_copy.dart';
 
 const _genericErrorMessage = 'something went wrong on our end — try again';
-const _offlineErrorMessage =
-    "couldn't reach the DJ — check your connection and try again";
 
 /// The waiting state's five-turn DJ interview (spec "Before the data
 /// arrives"), as one scrolling form: artists you would never skip as chips
@@ -126,9 +125,9 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
         ),
       );
       Navigator.of(context).pop();
-    } on NetworkException {
+    } on NetworkException catch (e) {
       if (!mounted) return;
-      setState(() => _error = _offlineErrorMessage);
+      setState(() => _error = djNetworkMessage(e));
     } on ApiException {
       if (!mounted) return;
       setState(() => _error = _genericErrorMessage);
