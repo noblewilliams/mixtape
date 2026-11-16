@@ -30,6 +30,7 @@ mostly invented (6 of 27 verified in production), so the model names up to
 12 artists in the genre and the mix takes their Apple top songs (3 per
 artist at most), sound-checked once; song proposals remain the fallback.
 Spec: As built (artist pool) in `superpowers/specs/2026-11-16-propose-first-design.md`.
+Amended (2026-11-16): the artist pool honours mood and instrumentals: a song must fit the genre and the brief's mood words, and an `instrumental` brief prefers songs Apple lists without lyrics (As built: instrumental and mood).
 
 ## 2026-11-16 — Propose first: all of music is the pool, no paid data APIs (founder)
 

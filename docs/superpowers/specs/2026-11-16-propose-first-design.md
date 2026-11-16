@@ -316,6 +316,38 @@ unchanged.
   fallback?}`, counts and codes only. Worst case per turn 61 + 26 + 66 + 6
   = 159 subrequests, far under 900.
 
+As built (artist pool: instrumental and mood, 2026-11-16): live, the
+founder's "lofi afro house slow living great instrumentals" came back as a
+full 15-song afro house mix of mostly vocal hits (features with Thandiswa,
+Ayra Starr, Ami Faku, Msaki): Apple's top songs lean to vocal features and
+the sound check judged genre only. Only the artist-pool branch changed;
+every other path is as before.
+- **Apple data.** `CatalogSong` gains `hasLyrics` (Apple's attribute, null
+  when absent) and `genres` (every `genreNames` entry but the generic
+  "Music"); `genre` stays the first name. Neither is persisted.
+- **`instrumental` on the intent** (generate_queue only, optional): set
+  only when the listener asks for instrumentals, no vocals or no lyrics.
+  Then the artist call's user turn asks for artists known for
+  instrumental or dub work (system prompt unchanged), each artist's Apple
+  read goes to `ARTIST_TOP_SONGS_INSTRUMENTAL` (20, still one page, so
+  `ARTIST_POOL_APPLE` and the 159 worst case are unchanged), and each
+  artist's three are chosen songs without lyrics first, then unknown, then
+  with lyrics. The pool orders the same tiers first (round-robin within
+  each) and drops songs with lyrics outright when the rest reach
+  `genreFloor`; otherwise they stay, last.
+- **Mood check.** The pool's one sound check is `checkGenresAndMood`
+  (static `MOOD_CHECK_SYSTEM`): a song passes only when it fits a named
+  genre and the brief's mood words (`intent.themes`, sanitised, as "Mood
+  asked for"). A label proves genre, not mood, so label matches go to the
+  call too; any of a song's `genres` counts as its label. Same unit, model
+  and 5 s timeout; a failed check keeps label matches only, as before.
+  Genre-true songs that failed the mood are the floor's first refill, then
+  the other rejects, then the library's.
+- **Turn log:** `propose.artists` gains `instrumental` (pool songs without
+  lyrics) and `moodPassed`. Turn time: the deeper Apple read is the same
+  calls with bigger pages; the check now sends every pool song (up to 36
+  lines) and answers two short lists, roughly a second as before.
+
 As built (S8, edits): a personal listener's swap or extend goes outside
 their music only when it cannot be covered from it: a named or artist-only
 scope with no songs to draw on (after the existing catalogue and Apple
