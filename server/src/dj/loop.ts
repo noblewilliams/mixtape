@@ -83,7 +83,10 @@ import { claimTurn, finishTurn, rollbackTurn, TurnGuard, TurnStopped, type TurnC
 // step is the turn's step reporter (dj/turn-steps.ts), set by runDjTurn from
 // DjTurnOptions.onStep, never by callers. Riding the deps, it reaches every
 // executor with no new parameter; absent, every report is a no-op.
-export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean; step?: TurnStepReporter }
+// turnStopped is the turn's stop as its guard has seen it (dj/turn-stop.ts),
+// set by runDjTurn like step: work that is not a model call (the feature
+// chain) starts nothing new once it is true.
+export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean; step?: TurnStepReporter; turnStopped?: () => boolean }
 
 // Where a turn's time goes, for the turn log: each model call as
 // "<kind>@<start>+<duration>" in tenths of a second from the turn's start
@@ -1055,7 +1058,16 @@ export const TURN_FEATURES_BUDGET = VERIFY_MAX * (CHAIN_SUBREQUESTS.reccobeats +
 // TURN_APPLE_BUDGET above).
 export const TURN_OTHER_SUBREQUESTS = 26
 
-async function fillProposalFeatures(db: Db, fill: FillDeps | undefined, tracker: FillTracker, picks: VerifiedProposal[]): Promise<void> {
+// The parts of the turn's tracker the chain reads and writes.
+export type FeaturesTracker = Pick<FillTracker, 'features' | 'spend'>
+
+export async function fillProposalFeatures(
+  db: Db,
+  fill: FillDeps | undefined,
+  tracker: FeaturesTracker,
+  picks: VerifiedProposal[],
+  stopped?: () => boolean,
+): Promise<void> {
   if (!fill?.deezerTempo) return
   const state = (tracker.features ??= { spent: 0, ms: 0, done: new Set() })
   const todo = picks.filter((p) => !state.done.has(p.trackId))
@@ -1079,6 +1091,7 @@ async function fillProposalFeatures(db: Db, fill: FillDeps | undefined, tracker:
       deadlineMs: Math.max(0, FEATURES_DEADLINE_MS - state.ms),
       concurrency: FEATURES_CONCURRENCY,
       budget: Math.max(0, TURN_FEATURES_BUDGET - state.spent),
+      ...(stopped ? { stopped } : {}),
     })
   } catch {
     // Missing features never fail the turn (fillFeaturesForTurn never
@@ -1293,7 +1306,7 @@ async function topLibraryArtists(db: Db, userId: string): Promise<string[]> {
   return rows.map((r) => r.artist)
 }
 
-function proposeSpend(tracker: FillTracker): ProposeSpend {
+function proposeSpend(tracker: Pick<FillTracker, 'spend'>): ProposeSpend {
   tracker.spend ??= { log: { proposed: 0, verified: 0, searches: 0, rounds: 0 }, verifyMs: 0 }
   return tracker.spend
 }
@@ -1698,7 +1711,7 @@ async function executeProposedQueue(
     return { resultText: [NOTHING_FITS_TEXT, ...genreLines].join('\n'), queueChanged: false, intent }
   }
   const picks = genreCheck.kept.slice(0, intent.targetCount)
-  await fillProposalFeatures(db, fill, turn.tracker, picks)
+  await fillProposalFeatures(db, fill, turn.tracker, picks, deps.turnStopped)
   const version = await replaceQueue(
     db,
     session.id,
@@ -2052,7 +2065,7 @@ async function generateFromBrief(
   const blendedCount = picks.filter((p) => proposedIds.has(p.trackId)).length
   if (blendedCount > 0) {
     const pickedIds = new Set(picks.map((p) => p.trackId))
-    await fillProposalFeatures(db, deps.fill, turn.tracker, proposed.filter((p) => pickedIds.has(p.trackId)))
+    await fillProposalFeatures(db, deps.fill, turn.tracker, proposed.filter((p) => pickedIds.has(p.trackId)), deps.turnStopped)
   }
   const version = await replaceQueue(
     db,
@@ -2363,7 +2376,7 @@ async function executeEditQueue(
       turn.tracker.spend!.log.verified += fresh.length
       // Per request, as applyOps asks for them; the turn's one time box and
       // allowance bound the lot (fillProposalFeatures).
-      await fillProposalFeatures(db, proposedFill, turn.tracker, fresh)
+      await fillProposalFeatures(db, proposedFill, turn.tracker, fresh, deps.turnStopped)
       for (const v of fresh) returnedThisBatch.add(v.trackId)
       if (fresh.length > 0) proposedPicksLanded = true
       return fresh.map((v) => ({ trackId: v.trackId, reason: v.reason }))
@@ -2984,7 +2997,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   const writes: TurnWrites = { messageSeqs: [], renamed: false, historyOffered: false }
   if (!claim) return runClaimedTurn(db, deps, session, userText, options, startingVersion, writes)
   const guard = new TurnGuard(db, session.id, claim.turnId, options.stopTiming)
-  const guarded: DjDeps = { ...deps, llm: guard.wrap(deps.llm), embed: guard.wrap(deps.embed) }
+  const guarded: DjDeps = { ...deps, llm: guard.wrap(deps.llm), embed: guard.wrap(deps.embed), turnStopped: () => guard.stopped }
   let outcome: { ok: true; value: DjTurnResult } | { ok: false; error: unknown }
   try {
     outcome = { ok: true, value: await runClaimedTurn(db, guarded, session, userText, options, startingVersion, writes) }

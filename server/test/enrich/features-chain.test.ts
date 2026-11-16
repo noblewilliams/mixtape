@@ -240,4 +240,78 @@ describe('fillFeaturesForTurn', () => {
       log.mockRestore()
     }
   })
+  it('a later estimate-only write keeps an earlier Deezer tempo', async () => {
+    const db = await createTestDb()
+    const song = await seedSong(db)
+    const first = fakeHttp({ reccobeats: () => '429', deezer: () => 124 })
+    await fillFeaturesForTurn(db, first.deps, [song], OPTS)
+    expect(await fallbackOf(db, song.trackId)).toMatchObject({ tempo: 124, tempoSource: 'deezer', energy: null, moodSource: null })
+
+    const second = fakeHttp({ reccobeats: () => '429', deezer: () => 90 })
+    await fillFeaturesForTurn(db, second.deps, [{ ...song, estimate: { energy: 0.5, valence: 0.6 } }], OPTS)
+
+    expect(await fallbackOf(db, song.trackId)).toMatchObject({ tempo: 124, tempoSource: 'deezer', energy: 0.5, valence: 0.6, moodSource: 'model' })
+    // The stored Deezer tempo is not asked for again.
+    expect(second.requests.filter((r) => r.startsWith('api.deezer.com'))).toHaveLength(0)
+  })
+
+  it('a ReccoBeats miss on a row with a Spotify id records no failure, so the cron\'s by-id lookup still runs', async () => {
+    const db = await createTestDb()
+    const song = await seedSong(db, { estimate: { energy: 0.4 } })
+    await db.update(tracks).set({ spotifyId: 'S000000000000000000001' }).where(eq(tracks.id, song.trackId))
+    const { deps } = fakeHttp({ reccobeats: () => 'miss', deezer: () => 101 })
+
+    const result = await fillFeaturesForTurn(db, deps, [song], OPTS)
+
+    expect(result).toMatchObject({ fallback: 1 })
+    expect(await failureOf(db, song.trackId)).toBeUndefined()
+    expect(await fallbackOf(db, song.trackId)).toMatchObject({ tempo: 101, energy: 0.4 })
+  })
+
+  it('returns within the deadline plus grace while a ReccoBeats lookup hangs, the song left with its estimate', async () => {
+    const db = await createTestDb()
+    const song = await seedSong(db, { estimate: { energy: 0.45 } })
+    let release!: () => void
+    const hung = new Promise<void>((resolve) => { release = resolve })
+    const { deps } = fakeHttp({ reccobeats: () => 'miss', deezer: () => 120 })
+    const slow: FeaturesChainDeps = { ...deps, features: async (key) => { await hung; return deps.features(key) } }
+
+    const began = Date.now()
+    const result = await fillFeaturesForTurn(db, slow, [song], { deadlineMs: 300, concurrency: 4, graceMs: 100, minLookupMs: 50 })
+    const took = Date.now() - began
+
+    expect(took).toBeLessThan(300 + 100 + 250)
+    expect(result).toMatchObject({ measured: 0, fallback: 1 })
+    expect(await fallbackOf(db, song.trackId)).toMatchObject({ energy: 0.45, tempo: null })
+    // The late lookup finishes after the return without an unhandled error.
+    release()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(await fallbackOf(db, song.trackId)).toMatchObject({ energy: 0.45 })
+  })
+
+  it('starts no ReccoBeats lookup with less than its minimum time left', async () => {
+    const db = await createTestDb()
+    const song = await seedSong(db, { estimate: { energy: 0.5 } })
+    let clock = 0
+    const { deps, requests } = fakeHttp({ reccobeats: () => 'hit', deezer: () => 120 })
+    clock = 4_500 // 1.5 s of 6 s left once the chain starts measuring
+    const late = { ...deps, now: () => clock }
+    // Started at 4.5 s: begins its own clock at 4.5, so give it the remaining 1.5 s.
+    const result = await fillFeaturesForTurn(db, late, [song], { deadlineMs: 1_500, concurrency: 4 })
+
+    expect(requests.filter((r) => r.startsWith('api.reccobeats.com'))).toHaveLength(0)
+    expect(requests.filter((r) => r.startsWith('api.deezer.com'))).toHaveLength(1)
+    expect(result).toMatchObject({ measured: 0, fallback: 1 })
+  })
+
+  it('a stopped turn starts no network call', async () => {
+    const db = await createTestDb()
+    const song = await seedSong(db, { estimate: { energy: 0.5 } })
+    const { deps, requests } = fakeHttp({ reccobeats: () => 'hit', deezer: () => 120 })
+
+    const result = await fillFeaturesForTurn(db, deps, [song], { ...OPTS, stopped: () => true })
+
+    expect(requests).toHaveLength(0)
+    expect(result).toMatchObject({ fallback: 1 })
+  })
 })
