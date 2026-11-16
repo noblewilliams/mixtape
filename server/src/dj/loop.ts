@@ -1644,7 +1644,13 @@ async function blendProposals(
     const taste = personal
       ? { listener: personal.listener, topArtists: await topLibraryArtists(db, session.userId), exclude: personal.owned }
       : {}
-    const round = await proposeRound(db, deps, fill, ctx, { intent, want, count: want + PROPOSE_EXTRA, ...taste }, budget, tracker)
+    // A personal blend asks for the whole mix (proposalCount) but verifies
+    // only its share: the unsearched rest are spares for a library that
+    // curates short or proposals the sound check drops (live 2026-11-16, a
+    // narrow genre brief left with 1 to 3 songs). Same one call. A corpus
+    // blend's round is as before.
+    const count = personal ? proposalCount(intent) : want + PROPOSE_EXTRA
+    const round = await proposeRound(db, deps, fill, ctx, { intent, want, count, ...taste }, budget, tracker)
     const verified = round?.result.verified ?? []
     spend.log.verified += verified.length
     tracker.blend = verified
@@ -2311,13 +2317,30 @@ async function generateFromBrief(
   // one more call, for those Apple labels otherwise. A spare stands in for
   // one that fails; past the spares the mix is shorter and says why.
   const proposedCheck = await genreFilter(deps, turn.tracker, intent.genres, proposed, proposalCandidate)
-  const proposedAimed = Math.min(proposed.length, proposedRoom)
+  let proposedAimed = Math.min(proposed.length, proposedRoom)
+  const checkedIds = proposed.map((p) => p.trackId)
+  const checkedSongs = proposed.map(songKey)
   proposed = proposedCheck.kept.slice(0, proposedRoom)
+  // A personal blend still short after the check: the round's spares,
+  // verified for the gap (with a named genre's spares) and checked once
+  // more. No second proposal call; nothing when no spare or search is left.
+  let sparesFailed = false
+  const gap = intent.targetCount - curated.length - proposed.length
+  if (personalBlend && gap > 0) {
+    const held = new Set([...curatedIds, ...checkedIds])
+    const heldSongs = new Set([...curatedSongs, ...checkedSongs])
+    const spares = await topUpFromBlend(db, deps.fill!, intent, turn.tracker, gap + genreSpares(intent, gap), held, heldSongs, deps.step)
+    const sparesCheck = await genreFilter(deps, turn.tracker, intent.genres, spares, proposalCandidate)
+    sparesFailed = sparesCheck.failed
+    proposed.push(...sparesCheck.kept.slice(0, gap))
+    // The places the listener counts are the mix's, not the round's spares.
+    proposedAimed = Math.min(proposedAimed, intent.targetCount - curated.length)
+  }
   // Dropped as the listener would count it: the places left empty, not
   // spares that failed with another in their place.
   const genreDropped = curatedCheck.dropped + Math.max(0, proposedAimed - proposed.length)
   const genreLines = genreDropped > 0
-    ? [genreCheckNotice({ dropped: genreDropped, genres: intent.genres ?? [], failed: curatedCheck.failed || proposedCheck.failed })]
+    ? [genreCheckNotice({ dropped: genreDropped, genres: intent.genres ?? [], failed: curatedCheck.failed || proposedCheck.failed || sparesFailed })]
     : []
   const source = poolMode.mode === 'corpus' ? 'catalog' as const : 'library' as const
   const outsideReason = !outsideAllowed ? 'own-only' as const : fillShort ? 'unconfirmed' as const : 'unavailable' as const

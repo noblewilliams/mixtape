@@ -19,7 +19,7 @@ import {
   PROPOSE_SHARE,
   type DjDeps,
 } from '../../src/dj/loop'
-import { PROPOSE_EXTRA, PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL } from '../../src/dj/propose'
+import { PROPOSE_EXTRA, PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL, VERIFY_MAX } from '../../src/dj/propose'
 import { DJ_TOOLS_WITH_OUTSIDE } from '../../src/dj/contracts'
 import { proposeFirstEnabled } from '../../src/index'
 import type { FillDeps } from '../../src/dj/catalogue-fill'
@@ -61,11 +61,12 @@ function proposals(n: number): Proposed[] {
   return Array.from({ length: n }, (_, i) => ({ title: `Song ${i}`, artist: ['Miles Davis', 'Bill Evans', 'Chet Baker'][i % 3], reason: `reason ${i}` }))
 }
 
-// Apple confirms every song in `confirmed`, labelled Jazz.
-function fakeApple(confirmed: Proposed[]) {
+// Apple confirms every song in `confirmed`, labelled Jazz unless `genreOf`
+// says otherwise.
+function fakeApple(confirmed: Proposed[], genreOf: (s: Proposed) => string = () => 'Jazz') {
   const searches: string[] = []
   const songs = new Map(confirmed.map((s, i) => [`${s.title} ${s.artist}`, {
-    appleId: `v-${i}`, isrc: null, title: s.title, artist: s.artist, album: 'Album', artwork: null, durationMs: 200_000, genre: 'Jazz', releaseYear: 1959, explicit: false,
+    appleId: `v-${i}`, isrc: null, title: s.title, artist: s.artist, album: 'Album', artwork: null, durationMs: 200_000, genre: genreOf(s), releaseYear: 1959, explicit: false,
   } satisfies CatalogSong]))
   const catalog: FillDeps['catalog'] = {
     async searchArtists() { return [] },
@@ -261,7 +262,9 @@ describe('a personal mix blends proposals', () => {
     expect(proposalRequests(requests)).toHaveLength(1)
     expect(proposal.system).toBe(PROPOSE_SYSTEM_PROMPT_PERSONAL)
     const block = proposal.messages[0].content as string
-    expect(block).toContain(`Propose up to ${10 + PROPOSE_EXTRA} songs.`)
+    // Asked for the whole mix, so the unsearched rest are spares; only the
+    // share (10) is verified up front.
+    expect(block).toContain(`Propose up to ${Math.min(20 + PROPOSE_EXTRA, VERIFY_MAX)} songs.`)
     expect(block).toMatch(/Artists this listener plays most: Mine/)
     expect(searches).toHaveLength(10)
 
@@ -391,6 +394,56 @@ describe('a personal mix blends proposals', () => {
     expect(toolResults(requests)[0]).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
   })
 
+
+  // Live 2026-11-16 ("lofi afro house slow living"): the library curated
+  // next to nothing for the genre and the first round, sized for the
+  // proposed share, had too few unsearched songs left to fill the rest. The
+  // round is sized to the whole mix, so its spares cover it.
+  it('a genre brief the library cannot cover fills from the one round\'s spares, no second proposal call', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 30, 'u1', 'Soul')
+    const session = await seedSession(db)
+    const round = proposals(22)
+    // Apple misses the first four.
+    const { fill, searches } = fakeApple(round.slice(4))
+    const titleComplete = async () => '[]'
+    const { llm, requests } = scriptedLlm([generate({ genres: ['jazz'], targetCount: 15 })], round)
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true, titleComplete: titleComplete as DjDeps['titleComplete'] },
+      { id: session.id, userId: 'u1' }, 'soft jazz')
+    expect(result.queue).toHaveLength(15)
+    expect(result.queue.every((t) => t.title.startsWith('Song '))).toBe(true)
+    expect(proposalRequests(requests)).toHaveLength(1)
+    const block = proposalRequests(requests)[0].messages[0].content as string
+    expect(Number(block.match(/Propose up to (\d+) songs\./)?.[1])).toBeGreaterThanOrEqual(15)
+    expect(searches.length).toBeLessThanOrEqual(22)
+    expect(toolResults(requests)[0]).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
+  })
+
+  it('proposals the sound check drops are replaced from the round\'s spares, with at most one more check', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 6, 'u1', 'Jazz')
+    const session = await seedSession(db)
+    const round = proposals(22)
+    // Five of the first round and one spare are labelled Pop and fail the check.
+    const pop = new Set(['Song 0', 'Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 11'])
+    const { fill } = fakeApple(round, (s) => (pop.has(s.title) ? 'Pop' : 'Jazz'))
+    const checked: string[] = []
+    const titleComplete = async (opts: { prompt: string }) => { checked.push(opts.prompt); return '[]' }
+    const { llm, requests } = scriptedLlm([generate({ genres: ['jazz'], targetCount: 15 })], round)
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true, titleComplete: titleComplete as DjDeps['titleComplete'] },
+      { id: session.id, userId: 'u1' }, 'soft jazz')
+    expect(result.queue).toHaveLength(15)
+    expect(result.queue.filter((t) => t.title.startsWith('Library '))).toHaveLength(6)
+    expect(result.queue.some((t) => pop.has(t.title))).toBe(false)
+    expect(proposalRequests(requests)).toHaveLength(1)
+    // The proposals' check, and one for the spares.
+    expect(checked.length).toBeLessThanOrEqual(2)
+    const [text] = toolResults(requests)
+    expect(text).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
+    expect(text).not.toMatch(/failed the jazz check/)
+  })
 })
 
 describe('the library covers proposals that do not land', () => {
