@@ -22,6 +22,7 @@ import { intentSchema, type Intent } from '../../src/dj/contracts'
 import {
   tracks,
   trackFeatures,
+  trackFeatureFallbacks,
   trackMeanings,
   userTracks,
   user,
@@ -2335,5 +2336,119 @@ describe('buildPool onlyArtistKey with several keys', () => {
       { mode: 'corpus', onlyArtistKey: ['kendricklamar', 'sza'] })).map((t) => t.trackId)
 
     expect(ids.sort()).toEqual([kendrick.id, sza.id, both.id].sort())
+  })
+})
+
+// Propose-first S5: pools read measured features first, then the fallback
+// estimate (track_feature_fallbacks). Membership never reads the fallback.
+describe('pools read fallback features', () => {
+  async function fallback(db: TestDb, trackId: string, v: { tempo?: number; energy?: number; valence?: number }) {
+    await db.insert(trackFeatureFallbacks).values({
+      trackId,
+      tempo: v.tempo ?? null,
+      energy: v.energy ?? null,
+      valence: v.valence ?? null,
+      tempoSource: v.tempo === undefined ? null : 'deezer',
+      moodSource: v.energy === undefined && v.valence === undefined ? null : 'model',
+    })
+  }
+
+  it('a library song with only a fallback row shows its estimate in the pool', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const t = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    await fallback(db, t.id, { tempo: 128, energy: 0.7, valence: 0.4 })
+
+    const [row] = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+
+    expect(row).toMatchObject({ trackId: t.id, tempo: 128, energy: 0.7, valence: 0.4 })
+  })
+
+  it('measured beats fallback per column; a measured null falls through to the estimate', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const t = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, tempo: 100, valence: 0.9 })
+    await fallback(db, t.id, { tempo: 150, energy: 0.6, valence: 0.1 })
+
+    const [row] = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+
+    expect(row).toMatchObject({ trackId: t.id, tempo: 100, energy: 0.6, valence: 0.9 })
+  })
+
+  it('the fallback tempo drives the tempo hard filter and feature-fit', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const inWindow = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    await fallback(db, inWindow.id, { tempo: 125 })
+    const outOfWindow = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    await fallback(db, outOfWindow.id, { tempo: 200 })
+    const unknown = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', tempoMin: 120, tempoMax: 130 }))
+
+    expect(pool.map((p) => p.trackId)).toEqual([inWindow.id, unknown.id])
+    expect(pool[0].score).toBeGreaterThan(pool[1].score)
+  })
+
+  it('a selected playlist profile reads fallback tempo and energy', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const seed = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    await fallback(db, seed.id, { tempo: 90, energy: 0.2 })
+    const near = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, tempo: 90, energy: 0.2 })
+    const far = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, tempo: 170, energy: 0.95 })
+    const playlist = await seedPlaylistWith(db, seed.id)
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), undefined,
+      { playlistSeed: { playlistId: playlist.id, excludeSourceTracks: true } })
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(pool.map((p) => p.trackId)).not.toContain(seed.id)
+    expect(byId(near.id).score).toBeGreaterThan(byId(far.id).score)
+  })
+
+  it('a catalogue song with only fallbacks is not corpus-eligible', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const enriched = await seedCorpusTrack(db, { tempo: 120 })
+    const fallbackOnly = await seedCorpusTrack(db, { enriched: false })
+    await fallback(db, fallbackOnly.id, { tempo: 120, energy: 0.5, valence: 0.5 })
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), undefined, { mode: 'corpus' }))
+      .map((p) => p.trackId)
+
+    expect(ids).toEqual([enriched.id])
+  })
+
+  it('fallback-only catalogue songs do not count as seed matches for resolvePoolMode', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    for (const name of ['ArtistA', 'ArtistB']) {
+      await seedArtistSeed(db, 'u1', name)
+      for (let i = 0; i < 15; i++) {
+        const t = await seedCorpusTrack(db, { artist: name, enriched: false })
+        await fallback(db, t.id, { tempo: 120, energy: 0.5 })
+      }
+    }
+
+    expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 0, seedArtists: 0 })
+  })
+
+  it('outside rows carry coalesced features: fallback alone, and measured over fallback', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, tempo: 120, artist: 'Mine' })
+    const estimated = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, enriched: false })
+    await fallback(db, estimated.id, { tempo: 140, energy: 0.8, valence: 0.3 })
+    const measured = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 110 })
+    await fallback(db, measured.id, { tempo: 160, energy: 0.2 })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix', targetCount: 15 }),
+      undefined, { outsideCap: 3 })
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(estimated.id)).toMatchObject({ outside: true, tempo: 140, energy: 0.8, valence: 0.3 })
+    expect(byId(measured.id)).toMatchObject({ outside: true, tempo: 110, energy: 0.2, valence: null })
   })
 })
