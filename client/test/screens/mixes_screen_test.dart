@@ -375,17 +375,15 @@ void main() {
         tester.getTopLeft(find.byKey(MixesScreen.pendingKey)).dy,
         lessThan(tester.getTopLeft(find.byKey(const Key('session-a'))).dy),
       );
-      expect(
-        tester
-            .widget<CassetteTile>(
-              find.descendant(
-                of: find.byKey(MixesScreen.pendingKey),
-                matching: find.byType(CassetteTile),
-              ),
-            )
-            .spinning,
-        isTrue,
+      final pendingTile = tester.widget<CassetteTile>(
+        find.descendant(
+          of: find.byKey(MixesScreen.pendingKey),
+          matching: find.byType(CassetteTile),
+        ),
       );
+      expect(pendingTile.spinning, isTrue);
+      // Reel loader: the pending mix is a close-up too, like a working row.
+      expect(pendingTile.crop, CassetteCrop.row);
       // It is being made on Home: that is where a tap goes.
       await tester.tap(find.byKey(MixesScreen.pendingKey));
       expect(startMix, 1);

@@ -75,7 +75,10 @@ void main() {
       };
 
       expect(seen, hasLength(48));
-      expect(seen, containsAll(tapePalette.map((entry) => tapeColor(entry.$2))));
+      expect(
+        seen,
+        containsAll(tapePalette.map((entry) => tapeColor(entry.$2))),
+      );
     });
 
     testWidgets('caseColor overrides the seed', (tester) async {
@@ -150,6 +153,78 @@ void main() {
 
       expect(_state(tester).isSpinning, isFalse);
       expect(_painter(tester).turn, 0);
+    });
+  });
+
+  group('CassetteTile crops (reel loader, 2026-11-16)', () {
+    testWidgets('the icon crop is square and paints the app icon\'s window', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const CassetteTile(width: 112, crop: CassetteCrop.icon),
+        theme: MixtapeTheme.dark(),
+      );
+      expect(tester.takeException(), isNull);
+      expect(tester.getSize(find.byType(CassetteTile)), const Size(112, 112));
+      expect(_painter(tester).viewport, const Rect.fromLTWH(108, 22, 78, 78));
+    });
+
+    testWidgets('the row crop keeps a tape\'s own size, zoomed on a hub', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const CassetteTile(width: 68, crop: CassetteCrop.row, shadow: true),
+        theme: MixtapeTheme.light(),
+      );
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.getSize(find.byType(CassetteTile)),
+        const Size(68, 68 * 128 / 200),
+      );
+      expect(_painter(tester).viewport, const Rect.fromLTWH(96, 29, 100, 64));
+    });
+
+    testWidgets('a close-up paints no label', (tester) async {
+      await _pump(
+        tester,
+        const CassetteTile(
+          width: 68,
+          crop: CassetteCrop.row,
+          title: 'Sunday kitchen soul',
+        ),
+        theme: MixtapeTheme.light(),
+      );
+      // Only the foot of its letters would show at the crop's top edge.
+      expect(_painter(tester).paintsLabel, isFalse);
+    });
+
+    testWidgets('the whole cassette is the default', (tester) async {
+      await _pump(
+        tester,
+        const CassetteTile(width: 68),
+        theme: MixtapeTheme.light(),
+      );
+      expect(_painter(tester).viewport, CassetteCrop.whole.viewport);
+    });
+
+    testWidgets('a crop turns, and stands still under reduced motion', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const CassetteTile(width: 34, crop: CassetteCrop.icon, spinning: true),
+        theme: MixtapeTheme.light(),
+      );
+      expect(_state(tester).isSpinning, isTrue);
+      await _pump(
+        tester,
+        const CassetteTile(width: 34, crop: CassetteCrop.icon, spinning: true),
+        theme: MixtapeTheme.light(),
+        disableAnimations: true,
+      );
+      expect(_state(tester).isSpinning, isFalse);
     });
   });
 }

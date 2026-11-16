@@ -758,6 +758,7 @@ class _PendingMixRow extends StatelessWidget {
       width: MixHomeRow.artSize,
       shadow: true,
       spinning: true,
+      crop: CassetteCrop.row,
     ),
     leadingSize: MixHomeRow.artSize,
     verticalPadding: MixHomeRow.verticalPadding,

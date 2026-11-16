@@ -1027,6 +1027,12 @@ void main() {
       expect(find.text(HomeScreen.startingTitle), findsOneWidget);
       expect(find.text(HomeScreen.startingHint), findsOneWidget);
       expect(find.byType(CassetteTile), findsOneWidget);
+      // Reel loader: the app icon's crop, turning.
+      final reel = tester.widget<CassetteTile>(find.byType(CassetteTile));
+      expect(reel.crop, CassetteCrop.icon);
+      expect(reel.width, HomeScreen.startingCassetteWidth);
+      expect(HomeScreen.startingCassetteWidth, 112);
+      expect(reel.spinning, isTrue);
       expect(find.byKey(HomeScreen.hintKey), findsNothing);
       // The prompt is still there, and the field stays open.
       final field = tester.widget<TextField>(

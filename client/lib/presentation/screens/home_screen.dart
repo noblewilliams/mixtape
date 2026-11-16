@@ -82,8 +82,9 @@ class HomeScreen extends ConsumerStatefulWidget {
       'Usually under a minute. You can leave this tab; it will be waiting in '
       'Mixes.';
 
-  /// The starting state's cassette.
-  static const double startingCassetteWidth = 120;
+  /// The starting state's reel: the icon crop (reel loader, 2026-11-16),
+  /// a 46 pt turning hub.
+  static const double startingCassetteWidth = 112;
 
   /// With a playlist attached the pills refine it instead of proposing a
   /// moment; the third one flips the exclude flag rather than filling the
@@ -924,7 +925,9 @@ class _StartingState extends StatelessWidget {
           children: [
             const CassetteTile(
               width: HomeScreen.startingCassetteWidth,
+              crop: CassetteCrop.icon,
               spinning: true,
+              shadow: true,
             ),
             const SizedBox(height: 10),
             Text(HomeScreen.startingTitle, style: tokens.section),
