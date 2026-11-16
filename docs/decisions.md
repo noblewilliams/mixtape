@@ -1,5 +1,29 @@
 # Decision Log
 
+## 2026-11-16 — Genre mixes stay full: genre-true suggestions, a refill floor (founder)
+
+Live G2 tests of "lofi afro house slow living great instrumentals" on the
+founder's account came back with 1 to 3 songs. The genre sound check
+(2026-11-09 every-song-earns-its-place, decision 8) read several genres as
+all-at-once and rejected nearly everything; after that was fixed, the
+suggestions drifted off-genre (ambient piano, electronic) and the library
+had almost no afro house, so the check still left one song. Founder: "do
+both", and start from a much larger pool so trimming still leaves 10 to 17.
+
+- The sound check passes a song that fits any one named genre, close
+  subgenres and sister styles included.
+- When a brief names genres, suggestions must be one of them; mood words
+  shape the picks inside the genre.
+- Genre briefs ask for about twice the mix in one suggestion call (cap 34),
+  with more Apple searches for that turn, so trimming has room.
+- **Amends decision 8:** with propose first, a genre mix the check would
+  leave under its floor (10 songs, or two thirds of a shorter mix) is
+  refilled from the closest rejected songs, and the DJ says how many lean
+  adjacent. Broad briefs are unchanged.
+
+**Reopens if:** refilled songs read as padding in listening checks, or the
+larger pool pushes turns near the 120 s client timeout.
+
 ## 2026-11-16 — Propose first: all of music is the pool, no paid data APIs (founder)
 
 Mixes can only use songs in our own `tracks` table, which holds about 15k
