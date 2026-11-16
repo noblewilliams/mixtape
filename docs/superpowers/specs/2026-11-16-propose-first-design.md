@@ -240,6 +240,21 @@ edit path (`proposeEditSongs`), which now asks for 2 spares too.
   far fewer mixes should come back `limited`. Track that rate before and
   after as the measure that Step 3 worked.
 
+As built (S9, energy-aware interleave): in a blended mix (corpus or
+personal) the feature chain now runs on the blended proposals before
+`interleaveBlend`, which takes the intent's `energyArc` and an energy
+getter: measured (`track_features`), then `track_feature_fallbacks`, then
+the proposal's own estimate (Gate 0 passed, MAE 0.134), read in one query.
+With `rise`, `fall` or `arc` and a usable energy for at least 2/3 of the
+proposed songs, the proposed slots and the curated songs stay exactly
+where the even spread puts them; only which proposed song takes which
+proposed slot changes, matched to the arc's curve scaled to the
+proposals' own energy range (least total distance). Unknown energies take
+the slots left over, in their original order. `steady`, no arc or too few
+known energies is the even spread unchanged, with no extra read. Curated
+order (the curator's order and pins) is never touched; the journey
+assessment remains an assessment.
+
 ## Step 4: rethink catalogue seeding (server, docs)
 
 - Stop seeding the catalogue in sittings from Apple charts just to have

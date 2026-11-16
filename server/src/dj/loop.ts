@@ -2,13 +2,14 @@ import { z } from 'zod'
 import { and, count, desc, eq, gt, isNotNull, isNull, lt, inArray, ne, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
-import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds, userTracks } from '../db/schema'
+import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, trackFeatureFallbacks, mixVersions, userArtistSeeds, userTracks } from '../db/schema'
 import type { Surface } from '../seeds/contracts'
 import { fillForArtist, fillForSeeds, FILL_BUDGET, type FillDeps, type FillResult } from './catalogue-fill'
 import { CHAIN_SUBREQUESTS, fillFeaturesForTurn, type FeaturesChainResult } from '../enrich/features-chain'
 import { artistKey, creditedKeys } from './artist-keys'
 import type { LlmClient, LlmComplete, LlmMessage, LlmRequest } from './llm'
 import { LlmError } from './llm'
+import type { EnergyArc } from './energy-journey'
 import {
   intentSchema,
   opIntentSchema,
@@ -1184,6 +1185,28 @@ export async function fillProposalFeatures(
     : result
 }
 
+// Energy for the blended proposals, for placing them along the arc (S9):
+// measured first, then the fallback row, then the proposal's own estimate
+// (Gate 0 passed, docs/testing/2026-11-16-propose-first-spike.md). One read.
+async function proposalEnergies(db: Db, picks: VerifiedProposal[]): Promise<Map<string, number | null>> {
+  const energies = new Map<string, number | null>(picks.map((p) => [p.trackId, p.estimate?.energy ?? null]))
+  try {
+    const rows = await db
+      .select({ trackId: tracks.id, measured: trackFeatures.energy, fallback: trackFeatureFallbacks.energy })
+      .from(tracks)
+      .leftJoin(trackFeatures, eq(trackFeatures.trackId, tracks.id))
+      .leftJoin(trackFeatureFallbacks, eq(trackFeatureFallbacks.trackId, tracks.id))
+      .where(inArray(tracks.id, [...energies.keys()]))
+    for (const r of rows) {
+      const value = r.measured ?? r.fallback
+      if (value !== null) energies.set(r.trackId, value)
+    }
+  } catch {
+    // Ordering is a nicety: the estimates, or the even spread, stand.
+  }
+  return energies
+}
+
 function appleLeft(tracker: FillTracker): number {
   return Math.max(0, TURN_APPLE_BUDGET - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0) - (tracker.genreChecks ?? 0))
 }
@@ -1785,19 +1808,90 @@ async function curateFitting(...args: Parameters<typeof curate>): Promise<Curate
 // Spreads `proposed` evenly through `curated` (both already in mix order),
 // `total` songs long: the proposed songs fill as much of their share as
 // verified and the catalogue the rest, so neither run bunches at one end.
-export function interleaveBlend<T>(curated: T[], proposed: T[], total: number): T[] {
+//
+// With an energy arc (plan 2026-11-16 propose-first, S9), the slots stay
+// exactly those of the even spread and the curated songs stay put; only
+// which proposed song takes which proposed slot changes, so each sits where
+// its energy best fits the arc's curve. That needs a usable energy for at
+// least 2/3 of the proposed songs; otherwise, and for steady, the even
+// spread as it is. Unknown energies take the slots left over, in order.
+export type BlendEnergy<T> = { energyArc?: EnergyArc | null; energyOf?: (item: T) => number | null | undefined }
+
+export function interleaveBlend<T>(curated: T[], proposed: T[], total: number, energy: BlendEnergy<T> = {}): T[] {
   const p = Math.min(proposed.length, total)
   const c = Math.min(curated.length, total - p)
   const n = p + c
   const out: T[] = []
+  const slots: number[] = []
   let pi = 0
   let ci = 0
   for (let i = 0; i < n; i++) {
     const proposedSlot = Math.floor(((i + 1) * p) / n) > Math.floor((i * p) / n)
-    if ((proposedSlot && pi < p) || ci >= c) out.push(proposed[pi++])
-    else out.push(curated[ci++])
+    if ((proposedSlot && pi < p) || ci >= c) {
+      slots.push(i)
+      out.push(proposed[pi++])
+    } else out.push(curated[ci++])
   }
-  return out
+  const { energyArc, energyOf } = energy
+  if (!energyArc || energyArc === 'steady' || !energyOf || p < 2) return out
+  return placeAlongArc(out, slots, proposed.slice(0, p), energyArc, energyOf)
+}
+
+const usableEnergy = (v: number | null | undefined): v is number =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1
+
+// The arc's shape at x in [0, 1], 0 low and 1 high.
+function arcShape(arc: Exclude<EnergyArc, 'steady'>, x: number): number {
+  return arc === 'rise' ? x : arc === 'fall' ? 1 - x : 1 - Math.abs(2 * x - 1)
+}
+
+function placeAlongArc<T>(
+  out: T[],
+  slots: number[],
+  proposed: T[],
+  arc: Exclude<EnergyArc, 'steady'>,
+  energyOf: (item: T) => number | null | undefined,
+): T[] {
+  const energies = proposed.map((item) => {
+    const e = energyOf(item)
+    return usableEnergy(e) ? e : null
+  })
+  const known = proposed.flatMap((item, i) => (energies[i] === null ? [] : [{ item, energy: energies[i]! }]))
+  if (known.length < 2 || known.length < (2 / 3) * proposed.length) return out
+  const lo = Math.min(...known.map((k) => k.energy))
+  const hi = Math.max(...known.map((k) => k.energy))
+  if (hi - lo <= 0) return out
+  // Targets scaled to the proposals' own range, so the match is about
+  // where each sits relative to the others, not about absolute levels.
+  const last = Math.max(1, out.length - 1)
+  const bySlot = slots
+    .map((pos) => ({ pos, target: lo + (hi - lo) * arcShape(arc, pos / last) }))
+    .sort((a, b) => a.target - b.target || a.pos - b.pos)
+  const ranked = [...known].sort((a, b) => a.energy - b.energy)
+  // In one dimension the cheapest match keeps both lists in order, so it
+  // only remains to choose which slots the known songs take: least total
+  // distance by dynamic programming over (songs placed, slots seen).
+  const k = ranked.length
+  const m = bySlot.length
+  const cost: number[][] = Array.from({ length: k + 1 }, () => new Array<number>(m + 1).fill(Infinity))
+  for (let j = 0; j <= m; j++) cost[0][j] = 0
+  for (let i = 1; i <= k; i++) {
+    for (let j = i; j <= m; j++) {
+      const take = cost[i - 1][j - 1] + Math.abs(ranked[i - 1].energy - bySlot[j - 1].target)
+      cost[i][j] = Math.min(take, cost[i][j - 1])
+    }
+  }
+  const placed = new Map<number, T>()
+  for (let i = k, j = m; i > 0; j--) {
+    if (cost[i][j] === cost[i][j - 1]) continue
+    placed.set(bySlot[j - 1].pos, ranked[i - 1].item)
+    i--
+  }
+  const unknown = proposed.filter((_, i) => energies[i] === null)
+  const result = [...out]
+  let u = 0
+  for (const pos of slots) result[pos] = placed.get(pos) ?? unknown[u++]
+  return result
 }
 
 // Said to the model when the mix verified enough to stand but fewer songs
@@ -2205,14 +2299,18 @@ async function generateFromBrief(
   }
   if (curationError) proposeSpend(turn.tracker).log.curationFailed = true
   const proposedIds = new Set(proposed.map((p) => p.trackId))
+  // The blend takes the first proposals up to the total, whatever the
+  // order it gives them; their features land first so the arc can use them.
+  const blended = proposed.slice(0, Math.max(0, intent.targetCount))
+  if (blended.length > 0) await fillProposalFeatures(db, deps.fill, turn.tracker, blended, deps.turnStopped)
+  const energyOf = intent.energyArc && intent.energyArc !== 'steady' && blended.length > 1
+    ? await proposalEnergies(db, blended)
+    : undefined
   const picks = proposed.length > 0
-    ? interleaveBlend<{ trackId: string; reason: string }>(curated, proposed, intent.targetCount)
+    ? interleaveBlend<{ trackId: string; reason: string }>(curated, proposed, intent.targetCount,
+      energyOf ? { energyArc: intent.energyArc, energyOf: (p) => energyOf.get(p.trackId) ?? null } : {})
     : curated
   const blendedCount = picks.filter((p) => proposedIds.has(p.trackId)).length
-  if (blendedCount > 0) {
-    const pickedIds = new Set(picks.map((p) => p.trackId))
-    await fillProposalFeatures(db, deps.fill, turn.tracker, proposed.filter((p) => pickedIds.has(p.trackId)), deps.turnStopped)
-  }
   const version = await replaceQueue(
     db,
     session.id,

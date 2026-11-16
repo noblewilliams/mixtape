@@ -355,6 +355,24 @@ describe('a personal mix blends proposals', () => {
     for (const r of rows) expect(r.energy).toBe(0.3)
   })
 
+  it('a rise mix places its proposals by energy, from the model\'s estimates (S9)', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 30)
+    const session = await seedSession(db)
+    // Proposed loudest first; no feature chain, so the estimates are all there is.
+    const round = proposals(22).map((p, i) => ({ ...p, energy: Math.round((0.9 - i * 0.03) * 100) / 100 }))
+    const energyOf = new Map(round.map((p) => [p.title, p.energy]))
+    const { fill } = fakeApple(round)
+    const { llm } = scriptedLlm([generate({ targetCount: 10, energyArc: 'rise' })], round)
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'tonight')
+    const placed = result.queue.filter((t) => t.title.startsWith('Song ')).map((t) => energyOf.get(t.title)!)
+    expect(result.queue).toHaveLength(10)
+    expect(placed).toHaveLength(5)
+    expect(placed).toEqual([...placed].sort((a, b) => a - b))
+    expect(placed[0]).toBeLessThan(placed.at(-1)!)
+  })
+
   it('a library short of its share is topped up from the same proposal round, the mix stays full', async () => {
     const db = await createTestDb()
     await seedUser(db)
