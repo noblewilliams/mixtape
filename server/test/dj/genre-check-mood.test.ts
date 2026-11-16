@@ -138,3 +138,12 @@ describe('checkGenresAndMood', () => {
     expect([...result.genreOnly].sort()).toEqual(['a', 'b'])
   })
 })
+
+describe('mood check and instrumentals', () => {
+  it('fails a featured singer on an instrumental request and treats the lyrics field as a hint', async () => {
+    const { MOOD_CHECK_SYSTEM } = await import('../../src/dj/genre-check')
+    expect(MOOD_CHECK_SYSTEM).toMatch(/lead or featured singer fails the mood/)
+    expect(MOOD_CHECK_SYSTEM).toMatch(/Apple holds no lyrics for many sung songs/)
+    expect(MOOD_CHECK_SYSTEM).not.toMatch(/—/)
+  })
+})

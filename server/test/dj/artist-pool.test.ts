@@ -543,3 +543,20 @@ describe('artist prompt with several genres', () => {
     expect(ARTIST_SYSTEM_PROMPT).toMatch(/never crowds out the others/)
   })
 })
+
+describe('featured singers count as vocals', () => {
+  it('reads feat., ft. and featuring in the title or artist as a singer', async () => {
+    const { featuresSinger } = await import('../../src/dj/artist-pool')
+    expect(featuresSinger({ title: 'Thanda (feat. Pixie L)', artist: 'Caiiro' })).toBe(true)
+    expect(featuresSinger({ title: 'Nguwe', artist: 'Culoe De Song ft. Thandiswa Mazwai' })).toBe(true)
+    expect(featuresSinger({ title: 'Song (Featuring Msaki)', artist: 'X' })).toBe(true)
+    expect(featuresSinger({ title: 'Kunye', artist: 'Kususa & Shimza' })).toBe(false)
+    expect(featuresSinger({ title: 'Featherweight', artist: 'Feather Lane' })).toBe(false)
+  })
+
+  it('gives the Apple lookups more room', async () => {
+    const { ARTIST_CONCURRENCY, ARTIST_DEADLINE_MS } = await import('../../src/dj/artist-pool')
+    expect(ARTIST_CONCURRENCY).toBe(6)
+    expect(ARTIST_DEADLINE_MS).toBe(14_000)
+  })
+})

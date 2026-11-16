@@ -36,9 +36,9 @@ export const ARTIST_TOP_SONGS_INSTRUMENTAL = 20
 // Songs any one artist may put in the pool, and so in the mix.
 export const ARTIST_PER_MIX = 3
 // Artists looked up at once (two Apple calls each, one after the other).
-export const ARTIST_CONCURRENCY = 4
+export const ARTIST_CONCURRENCY = 6
 // Wall time for the Apple lookups, checked before each call.
-export const ARTIST_DEADLINE_MS = 10_000
+export const ARTIST_DEADLINE_MS = 14_000
 // Apple calls the pool may make: an artist search and a top-songs page per artist.
 export const ARTIST_POOL_APPLE = 2 * ARTIST_ASK
 // The pool must hold at least this many songs (or the mix's length, when
@@ -227,8 +227,18 @@ function rowsOf(res: unknown): Record<string, unknown>[] {
 
 const upperIsrc = (isrc: string | null | undefined): string | null => (isrc ? isrc.trim().toUpperCase() || null : null)
 
-// 0 without lyrics, 1 unknown, 2 with lyrics.
-const vocalTier = (s: CatalogSong): number => (s.hasLyrics === false ? 0 : s.hasLyrics === true ? 2 : 1)
+// A featured singer in the credits ("feat.", "ft.", "featuring") means
+// vocals, whatever Apple's hasLyrics says: live (2026-11-16), every afro house
+// song in the pool read hasLyrics false, Pixie L and Thandiswa features
+// included, since Apple holds lyrics for few of them.
+const FEATURED = /\b(feat\.?|ft\.?|featuring)\s/i
+export function featuresSinger(s: Pick<CatalogSong, 'title' | 'artist'>): boolean {
+  return FEATURED.test(s.title) || FEATURED.test(s.artist)
+}
+
+// 0 without lyrics, 1 unknown, 2 with lyrics or a featured singer.
+const vocalTier = (s: CatalogSong): number =>
+  featuresSinger(s) || s.hasLyrics === true ? 2 : s.hasLyrics === false ? 0 : 1
 
 const isRateLimit = (e: unknown): boolean => e instanceof AppleCatalogError && (e.category === 'rate_limit' || e.status === 429)
 
@@ -326,7 +336,7 @@ export async function buildArtistPool(db: Db, catalog: AppleCatalogArtistClient,
     // Songs without lyrics first, round-robin kept within each tier. Songs
     // with lyrics stay, last, only when the rest cannot reach the floor.
     order = order.map((o, i) => ({ o, i })).sort((a, b) => vocalTier(a.o.song) - vocalTier(b.o.song) || a.i - b.i).map(({ o }) => o)
-    const quiet = order.filter((o) => o.song.hasLyrics !== true)
+    const quiet = order.filter((o) => vocalTier(o.song) < 2)
     if (quiet.length >= (options.floor ?? 0)) order = quiet
   }
   if (order.length === 0) return result
@@ -343,7 +353,7 @@ export async function buildArtistPool(db: Db, catalog: AppleCatalogArtistClient,
       trackId, title: song.title, artist: song.artist, reason: artist.reason, genre: song.genre ?? null, year: song.releaseYear ?? null,
       genres: song.genres ?? [], hasLyrics: song.hasLyrics ?? null,
     })
-    if (song.hasLyrics === false) result.instrumental += 1
+    if (vocalTier(song) === 0) result.instrumental += 1
   }
   result.used = usedArtists.size
   return result
