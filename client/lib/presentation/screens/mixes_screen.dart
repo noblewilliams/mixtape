@@ -764,7 +764,7 @@ class _PendingMixRow extends StatelessWidget {
     verticalPadding: MixHomeRow.verticalPadding,
     showChevron: false,
     title: prompt.trim(),
-    subtitle: MixHomeRow.workingSubtitle,
+    subtitleWidget: MixHomeRow.workingLine(context),
     isFirst: isFirst,
     onTap: onOpen ?? () {},
   );
