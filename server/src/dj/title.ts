@@ -7,22 +7,37 @@ import { sanitizeForPrompt } from './sanitize'
 export const TITLE_MODEL = 'claude-haiku-4-5-20251001'
 
 // The voice rules both namers share (founder 2026-11-17): a name in the
-// music's own voice, mostly an imperative action ("Move your legs faster
-// than your doubt"), never a description of a scene, in sentence case.
+// music's own voice, an action that opens with a verb: mostly imperative
+// ("Move your legs faster than your doubt"), sometimes present continuous
+// ("Floating through ..."), never noun-first description, in sentence case.
 const NAME_VOICE = [
   'Write it in the voice of the genre and the music asked for: borrow its slang, swagger, places, rituals and attitude',
   '(rap can brag, gospel can testify, afro house can carry Joburg and Lagos nights, jazz can be dry and smoky, punk can shout).',
-  'Make it an action: almost always an imperative addressed to the listener, opening with a verb',
-  '(Move your legs faster than your doubt, Pour another glass for Lagos, Let the rain keep your secrets), never a description.',
+  'Make it an action that opens with a verb, never a description that opens with a noun.',
+  'Either an imperative addressed to the listener (Move your legs faster than your doubt, Pour another glass for Lagos)',
+  'or the present continuous (Chasing the bus past midnight); the last line says which.',
+  'Not "Legs moving faster than your doubt": the verb comes first.',
   'Those examples only show the shape: never reuse their words or images.',
   'Pick a vivid verb that fits this music; rarely open with Let, Keep or Push. Now and then a dare or a question is fine.',
-  'Never paint a scene with a string of "-ing" verbs, and avoid the obvious first idea.',
+  'Avoid the obvious first idea.',
   'Use sentence case like a normal sentence: capitalize only the first word and proper nouns.',
   'Never quote or paraphrase a lyric line from any song, hymn or chant.',
   'Count your words: 3 to 8, never more.',
   'Never use filler words like Vibes, Grooves, Rhythms, Sessions, Mix, Playlist, Beats, Chill or Journey, and never name an artist.',
   'Respond with ONLY the name: no quotes, no dashes, no trailing punctuation, no explanation.',
 ].join(' ')
+
+// Founder 2026-11-17: some names open in the present continuous ("Floating
+// through ..."). Asked for a ratio, the model wrote 1 in 60 that way, so the
+// code picks the form for each name and the prompt's last line says which.
+const PRESENT_CONTINUOUS_SHARE = 1 / 3
+export type Roll = () => number
+
+function verbForm(roll: Roll): string {
+  return roll() < PRESENT_CONTINUOUS_SHARE
+    ? 'This time use the present continuous: open with an -ing verb.'
+    : 'This time use the imperative: open with a plain verb.'
+}
 
 // Founder 2026-11-17: brief-only names run 3 to 8 words in the music's own
 // voice (NAME_VOICE), not 2 to 5 flat words ("Sunset Rhythms Dreaming").
@@ -78,9 +93,9 @@ function sanitizeTitle(raw: string): string {
 // Bounded to a 5s worst case via timeoutMs — well under buildAnthropic's
 // client-level default — so a stalled title call can't stall a turn that's
 // otherwise already finished (see sessions.ts). Never throws.
-export async function generateSessionTitle(complete: LlmComplete, prompt: string, fallback: string): Promise<string> {
+export async function generateSessionTitle(complete: LlmComplete, prompt: string, fallback: string, roll: Roll = Math.random): Promise<string> {
   try {
-    const raw = await complete({ system: TITLE_SYSTEM, prompt, model: TITLE_MODEL, maxTokens: 30, timeoutMs: 5000 })
+    const raw = await complete({ system: `${TITLE_SYSTEM} ${verbForm(roll)}`, prompt, model: TITLE_MODEL, maxTokens: 30, timeoutMs: 5000 })
     const cleaned = sanitizeTitle(raw)
     return cleaned || fallback
   } catch {
@@ -128,10 +143,11 @@ export async function generateMixTitle(
   prompt: string,
   songs: MixTitleSong[],
   fallback: string,
+  roll: Roll = Math.random,
 ): Promise<string> {
   if (songs.length === 0) return fallback
   try {
-    const raw = await complete({ system: MIX_TITLE_SYSTEM, prompt: mixTitlePrompt(prompt, songs), model: TITLE_MODEL, maxTokens: 30, timeoutMs: 5000, maxRetries: 0 })
+    const raw = await complete({ system: `${MIX_TITLE_SYSTEM} ${verbForm(roll)}`, prompt: mixTitlePrompt(prompt, songs), model: TITLE_MODEL, maxTokens: 30, timeoutMs: 5000, maxRetries: 0 })
     return sanitizeTitle(raw) || fallback
   } catch {
     return fallback

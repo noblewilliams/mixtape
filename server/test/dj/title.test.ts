@@ -201,7 +201,21 @@ describe('generateMixTitle', () => {
     for (const system of [seen.system ?? '', briefSystem]) {
       expect(system).toMatch(/imperative/i)
       expect(system).toMatch(/Move your legs faster than your doubt/)
+      expect(system).not.toMatch(/string of "-ing" verbs/)
     }
+  })
+
+  // Founder 2026-11-17: some names open in the present continuous
+  // ("Floating through ..."). The model ignores a ratio, so the code picks
+  // the form per name (about one in three) and says which.
+  it('picks the verb form in code: present continuous about one time in three, imperative otherwise', async () => {
+    const systems: Record<string, string> = {}
+    for (const [label, roll] of [['ing', 0.1], ['imp', 0.9]] as const) {
+      await generateMixTitle(async (o) => ((systems[`mix-${label}`] = o.system), 'Fine'), 'x', SONGS, FALLBACK, () => roll)
+      await generateSessionTitle(async (o) => ((systems[`brief-${label}`] = o.system), 'Fine'), 'x', FALLBACK, () => roll)
+    }
+    for (const k of ['mix-ing', 'brief-ing']) expect(systems[k]).toMatch(/This time use the present continuous/)
+    for (const k of ['mix-imp', 'brief-imp']) expect(systems[k]).toMatch(/This time use the imperative/)
   })
 
   it('sanitizes song fields so a crafted track title cannot break out of its line', async () => {

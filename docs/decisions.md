@@ -30,7 +30,10 @@ Amended (2026-11-17, founder): both namers write 3 to 8 words in sentence
 case, in the voice of the music asked for (its slang, places, rituals and
 attitude), and almost always as an imperative action rather than a
 description: "Move your legs faster than your doubt", not "Legs moving
-faster than your doubt" (founder). Examples in the prompt show the shape
+faster than your doubt" (founder). About one name in three opens in the
+present continuous instead ("Melting into velvet across the table
+tonight"); the code picks the form per name, since asked for a ratio the
+model wrote 1 in 60 that way. Examples in the prompt show the shape
 only; "Let", "Keep" and "Push" openers are discouraged after the model
 reused them and the examples verbatim. Seen: "Brew your coffee while
 Johannesburg dreams", "Drown your phone before it rings". The song namer usually writes its own line from what the songs
