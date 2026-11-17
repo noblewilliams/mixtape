@@ -469,6 +469,23 @@ export const REMAKE_NOT_READY_TEXT =
 // model call, no version and no funnel row.
 export const REMAKE_ALREADY_TEXT = 'This mix is already built from your music.'
 
+// Appended to an edit's result in a personal mix: how many of the songs the
+// edit added are the listener's own. Live (2026-11-17) "swap in some
+// Kendrick" landed two songs from their library and the DJ called both new
+// to them, reading its own earlier reply rather than the listing's marks.
+// Counted from newToYou, as the clients show it. Goes to the MODEL.
+export function editAddedNotice(yours: number, total: number): string {
+  if (total === 1) {
+    return yours === 1
+      ? "note: the song this edit added is the listener's own, not new to them."
+      : 'note: the song this edit added is new to the listener.'
+  }
+  if (yours === total) return `note: all ${total} songs this edit added are the listener's own, none are new to them.`
+  if (yours === 0) return `note: all ${total} songs this edit added are new to the listener.`
+  const be = (n: number): string => (n === 1 ? 'is' : 'are')
+  return `note: of the ${total} songs this edit added, ${yours} ${be(yours)} the listener's own and ${total - yours} ${be(total - yours)} new to them.`
+}
+
 // Appended to a remake's generate_queue result once a personal mix landed.
 // `yours` counts the landed songs not marked new to the listener (the queue
 // view's newToYou, which the clients show), `total` every landed song. Goes
@@ -3127,6 +3144,8 @@ async function executeEditQueue(
     return own
   }
 
+  // The queue before the edit, to tell which songs it added.
+  const beforeIds = new Set((await getActiveQueue(db, session.id)).map((t) => t.trackId))
   try {
     const result = await applyOps(db, session.id, ops, 'dj', provider, undefined,
       needsPool ? { seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
@@ -3151,6 +3170,11 @@ async function executeEditQueue(
     // So is a song proposed for this edit (propose first) they do not own.
     const proposedNew = updatedQueue.filter((t) => t.newToYou && editProposed.includes(t.trackId)).map((t) => t.trackId)
     const outsideAt = outsidePositions(updatedQueue, new Set([...outsideLanded, ...artistNew, ...proposedNew]))
+    // A personal mix only: a not-personal session's newToYou is suppressed,
+    // so its counts would read as all their own.
+    const added = updatedQueue.filter((t) => !beforeIds.has(t.trackId))
+    const personalMix = marksNew(deps) && !corpusPicksLanded && !proposedPicksLanded
+      && !(await db.select({ notPersonal: djSessions.notPersonal }).from(djSessions).where(eq(djSessions.id, session.id)))[0]?.notPersonal
     return {
       resultText: [
         ...(proposedPicksLanded ? [PROPOSED_NOTICE] : []),
@@ -3162,6 +3186,7 @@ async function executeEditQueue(
         ...[...artistShort].map(onlyArtistExhaustedNotice),
         ...[...editShort.values()].map((e) => editOutsideShortNotice(e.missing, e.names)),
         ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
+        ...(personalMix && added.length > 0 ? [editAddedNotice(added.filter((t) => !t.newToYou).length, added.length)] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
         'Updated queue (positions are 0-based):',
         formatQueueListing(updatedQueue, marksNew(deps)),
