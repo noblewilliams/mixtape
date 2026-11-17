@@ -3,7 +3,7 @@
 **Status:** decisions taken 2026-11-16 (founder: "take all five", then
 zero-cost outside APIs; "Write the plan"). S0–S9 done 2026-11-16, each
 reviewed with a fix round where the review found defects; S11 docs current.
-G1 done 2026-11-16 (Worker `f099a2fe`, flag off). G2 done and PROPOSE_FIRST on for everyone 2026-11-17. Next: S10, G3.
+G1 done 2026-11-16 (Worker `f099a2fe`, flag off). G2 done and PROPOSE_FIRST on for everyone 2026-11-17. S10 done 2026-11-17 (not yet deployed). Next: deploy S10, G3.
 - Spec: `../specs/2026-11-16-propose-first-design.md`.
 - Decision: `../../decisions.md` → 2026-11-16 Propose first.
 
@@ -272,6 +272,10 @@ About 2 hours.
   unchanged.
 
 ### S10. Retire `OUTSIDE_PICKS` (after G2)
+
+**Done 2026-11-17.** As built differs from the second bullet: the outside
+pool was removed, not made a third source (it was already off beside
+propose first since S7). Spec as-built note (S10).
 
 About 2 hours.
 - Remove the flag and `PROPOSE_FIRST_USERS` from `src/index.ts`,

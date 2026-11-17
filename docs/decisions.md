@@ -117,6 +117,11 @@ Amended while building (2026-11-16):
   proposals, model energy error 0.134; version words now catch "Dub" and
   "Alt Version".
 
+Amended 2026-11-17 (S10): `OUTSIDE_PICKS` and the `PROPOSE_FIRST_USERS`
+override are retired, and the catalogue's-nearest-songs source is dropped
+rather than added (it was already off beside propose first), so new songs
+come from proposals only. `PROPOSE_FIRST` stays as the kill switch.
+
 ## 2026-11-10 — Proposed mixes no longer pitch adding music (founder)
 
 Every catalogue or proposed mix now shows the add-your-music line under it

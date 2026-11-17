@@ -4,8 +4,9 @@ Date: 2026-11-16. Status: decisions taken 2026-11-16 (founder: "take all
 five", then a zero-cost rule for outside APIs; recorded in
 `../../decisions.md`). Plan: `../plans/2026-11-16-propose-first.md`. S0–S9 built, reviewed and
 committed on `feat/propose-first` 2026-11-16 (Gate 0 passed; report
-`../../testing/2026-11-16-propose-first-spike.md`). Not deployed: migrations
-0052 and 0053, G1, G2 (`PROPOSE_FIRST_USERS`), S10 and G3 are owed.
+`../../testing/2026-11-16-propose-first-spike.md`). G1 and G2 done;
+`PROPOSE_FIRST` on for everyone 2026-11-17. S10 done 2026-11-17 (not yet
+deployed). G3 owed.
 
 Follows `2026-10-21-everyone-gets-a-mix-design.md` (step 4, as reshaped on
 2026-10-22) and `2026-11-09-every-song-earns-its-place-design.md`. Both made
@@ -363,7 +364,8 @@ short as before. A scoped request keeps only proposals and Apple hits
 crediting its artists. Same gates as the blend: propose first active, an
 intent the model chose (never the weak fallback from the listener's
 words), never `ownMusicBrief`, `allowOutside: false` or a remake turn.
-Landed songs are marked new (`outsidePicksNotice`). What is still short is
+Landed songs are marked new (`outsidePicksNotice`, `newToYouNotice` since
+S10). What is still short is
 said once: proposals the sound check dropped by `genreCheckNotice`, the
 rest by `editOutsideShortNotice`, one per scope (named artists, or none);
 a swap with nothing confirmed keeps its original song. The machinery is
@@ -372,6 +374,25 @@ which now asks for 2 spares too. Known limit: a saved "only my own music"
 preference reaches an edit only through the op's own intent
 (`allowOutside: false` set by the model), as for outside picks; an edit
 with no intent of its own never goes outside.
+
+As built (S10, 2026-11-17): `OUTSIDE_PICKS` and `PROPOSE_FIRST_USERS` are
+gone. `proposeFirstEnabled(env)` reads `PROPOSE_FIRST` alone, once per
+request, into `DjDeps.proposeFirst` (no per-listener resolver); `"off"`
+stays the kill switch back to the DJ before propose first (pinned in
+`test/dj/propose-first-off.test.ts`, which replaced
+`outside-picks-flag-off.test.ts`). Source 3 above, the catalogue's nearest
+neighbours (`buildOutsidePool`), was removed, not wired in as the third
+source the plan's S10 described: it ran only with `OUTSIDE_PICKS` on and was already off
+(cap 0) beside propose first since S7, so removing it changes nothing live.
+With it went the outside cap in curation (the `| new` pool field, its
+legend, system intro and cap line), the edit path's outside budget, the
+`outside` flag on pool rows and the outside-picks persona. Kept:
+`DJ_TOOLS_WITH_OUTSIDE` and the propose-first and fill personas,
+`outsideCap`/`OUTSIDE_SHARE` (now only the own-music gate,
+`ownMusicBrief`), the `| new` listing marks (on when propose first is
+active), and the new-songs notice, renamed `newToYouNotice`. Songs a
+listener does not own now come only from proposals (and artist-only
+mixes' catalogue songs).
 
 ## Step 3: sequencing uses the new features (server)
 
