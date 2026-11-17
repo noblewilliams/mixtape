@@ -1,5 +1,31 @@
 # Decision Log
 
+## 2026-11-16 — Mix titles come from the songs, never from lyrics (founder)
+
+Brief-only titles were flat and repeated: five mixes from one "lofi afro
+house" brief were all "Sunset Rhythms ..." or "Sunset ... Grooves". The
+founder asked for titles drawn from the songs, "pulling an obscure lyric".
+A quoted lyric would display lyric text, which the 2026-08-29 lyrics stance
+forbids, so the founder chose (a) plus (b) and left that stance untouched:
+
+- A first turn that comes back with songs is named from them: the fast
+  title model sees the brief and each song's title, artist and album, and
+  lifts one song or album title (or a fragment of one) when it sums up the
+  mix, otherwise writes its own phrase for the places, imagery and
+  references the songs share. Never a lyric line, never an artist name,
+  never filler words (Vibes, Grooves, Sessions), never two titles joined.
+- The founder accepted the latency: the song-based call waits for the picks
+  (about 0.6 s measured on 12 production mixes, 5 s cap). The brief-only
+  title still runs alongside the turn and is the fallback on any failure; a
+  chat-only first turn or a rename skips the song call. Album sessions keep
+  the brief-only title.
+- Measured on production mixes: "Sunset Rhythms Dreaming" became "Sunset In
+  Pretoria", "Wet Streets & Neon Lights" became "Ships In the Rain", a run
+  playlist became "Propulsive Melancholy".
+
+Code: `server/src/dj/title.ts` (`generateMixTitle`), `routes/sessions.ts`
+(`createMixTurn`). Amends 2026-08-30 session titles.
+
 ## 2026-11-16 — Genre mixes stay full: genre-true suggestions, a refill floor (founder)
 
 Live G2 tests of "lofi afro house slow living great instrumentals" on the
@@ -833,6 +859,7 @@ Founder + friends via TestFlight. App Store polish (onboarding, review-proofing)
 
 ## 2026-08-30 — Session titles: Haiku-generated, not the truncated prompt
 `POST /sessions` names each session with a short 2–5 word title from `claude-haiku-4-5-20251001`, run concurrently with the DJ turn so latency is bounded to 5s worst case (a per-request timeout, not the turn's own duration); falls back to the truncated-prompt title on any failure/empty/garbage output — a title must never fail a session. The generated title lands on the row even when the turn itself fails, so a retried session isn't stuck showing the truncated fallback. This is a naming call, not curation, so it doesn't touch the Sonnet-only curation rule above.
+Amended (2026-11-16): a first turn with songs is renamed from those songs once they are picked (Mix titles come from the songs).
 
 ## 2026-08-30 — P3 CLOSED: founder device smoke passed end-to-end
 Full loop verified on the iPhone against prod: new prompt → curated queue → refinement turns → reorder/swipe → Play in Apple Music → Save as playlist (verified in Music) → archive/unarchive. Findings fixed during the smoke: (1) save "failures" were the flat 20s Dart timeout expiring while the native addItem chain (sequential, order-preserving, one network round trip per track) was still finishing — timeout now scales per track and snackbars carry Apple's real error; (2) playlists were attributed to "Runner" (Xcode product name) — now `authorDisplayName` = the user's account name (GET /me, editable + remembered in the save dialog, fallback "mixtape") with description "made by mixtape"; (3) session titles shipped mid-smoke (entry above) and backfilled onto the two pre-existing prod sessions. Deferred polish recorded in the P3b plan: undo-on-dismiss, sync terminal-state notice, auth-lifecycle cluster. Next: P2.5 (features 59.9% < 80% gate), then P4.
