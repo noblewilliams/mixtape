@@ -903,8 +903,11 @@ void main() {
       expect(find.byType(HomePanel), findsOneWidget);
       // The dock's mini-player replaces Home's own (task 2.1).
       expect(find.byType(PlaybackMini), findsNothing);
-      // Three idea pills, and the hint above them.
-      expect(find.byType(IdeaPill), findsNWidgets(2));
+      // The routine pill and every starter on one row, the hint above them.
+      expect(
+        find.byType(IdeaPill),
+        findsNWidgets(1 + MixPromptInput.examples.length),
+      );
       expect(
         tester.getRect(find.byKey(HomeScreen.hintKey)).bottom,
         lessThan(tester.getRect(find.byType(HomePanel)).top),
@@ -945,12 +948,12 @@ void main() {
         final composer = tester.getRect(find.byType(MixPromptInput));
         final chipRect = tester.getRect(chip);
         final track = tester.getRect(find.byKey(SegmentedToggle.trackKey));
-        // One row, above the composer, under the handle.
+        // One row, above the composer, at the top of the panel.
         expect(chipRect.bottom, lessThanOrEqualTo(composer.top));
         expect(track.bottom, lessThanOrEqualTo(composer.top));
         expect(
           track.top,
-          greaterThan(tester.getRect(find.byKey(HomePanel.handleKey)).bottom),
+          greaterThan(tester.getRect(find.byKey(HomePanel.surfaceKey)).top),
         );
         expect(
           chipRect.center.dy,
@@ -1176,7 +1179,10 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(find.byKey(const Key('prompt-field')), findsOneWidget);
-        expect(find.byType(IdeaPill), findsNWidgets(2));
+        expect(
+          find.byType(IdeaPill),
+          findsNWidgets(1 + MixPromptInput.examples.length),
+        );
         if (output.isNotEmpty) {
           final boundary = tester.renderObject<RenderRepaintBoundary>(
             find.byKey(boundaryKey),
@@ -1296,13 +1302,13 @@ void main() {
           reason: 'the row keeps its height so nothing jumps',
         );
         expect(hint(tester), 'What kind of record are you in the mood for…');
-        for (final pill in const [
-          'Rainy evening, start to finish',
-          'Something I have never heard',
-        ]) {
+        for (final pill in HomeScreen.albumStarters) {
           expect(find.widgetWithText(IdeaPill, pill), findsOneWidget);
         }
-        expect(find.byType(IdeaPill), findsNWidgets(2));
+        expect(
+          find.byType(IdeaPill),
+          findsNWidgets(HomeScreen.albumStarters.length),
+        );
 
         await tester.enterText(
           find.byKey(const Key('prompt-field')),
@@ -1771,8 +1777,11 @@ void main() {
           queue: [],
         );
       };
-      api.onGetSession = (id) async =>
-          SessionDetail(session: _session(id: id), messages: [], queue: []);
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
       return api;
     }
 

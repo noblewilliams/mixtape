@@ -2,10 +2,10 @@
 // implementation.md` tasks 3.1 and 3.2; frames H1/H2 in
 // `docs/mockups/2026-09-17-mobile-shell-r3.html` and the Home states board).
 //
-// The panel owns the drag handle, the composer, the failure line and the
-// board's three idea pills of equal weight: the routine suggestion first when
-// one is eligible, starter prompts otherwise. Pills fill the field and never
-// send.
+// The panel owns the composer (with its static hint), the failure line and
+// one row of idea pills drifting in a loop: the routine suggestion first when
+// one is eligible, then every starter prompt. Pills fill the field and never
+// send. Widget tests see the row still (`test/flutter_test_config.dart`).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/suggestions_provider.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/idea_marquee.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
 import 'package:mixtape/presentation/widgets/foundation/liquid_glass_surface.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
@@ -22,12 +23,9 @@ import 'package:mixtape/presentation/widgets/routine_suggestions.dart';
 
 import '../../screens/routine_suggestions_test.dart' show FakeSuggestions;
 
-/// The starter prompts the panel shows: the composer's own rotating examples,
-/// minus the one it opens on.
-List<String> get _starters => [
-  for (final example in MixPromptInput.examples)
-    if (example != MixPromptInput.initialPlaceholder) example,
-].take(2).toList();
+/// The starter prompts the panel shows: all of the composer's examples, since
+/// the field's hint is no longer one of them.
+List<String> get _starters => MixPromptInput.examples;
 
 class _Harness {
   _Harness({FakeSuggestions? api})
@@ -155,47 +153,54 @@ void main() {
     );
   });
 
-  testWidgets('wrapped pill rows sit 4 pt apart', (tester) async {
-    // Three shrink-wrapped pills wrap onto three rows; 4 pt keeps them one
-    // group (smoke round three, note 6).
+  testWidgets('the pills sit on one row, 8 pt apart', (tester) async {
+    // Home tidy, 2026-11-17: one sideways row instead of wrapped rows.
     await _pumpPanel(tester);
     await tester.pumpAndSettle();
 
-    final wrap = tester.widget<Wrap>(find.byKey(HomePanel.pillsKey));
-    expect(wrap.spacing, HomePanel.pillGap, reason: 'horizontal is unchanged');
-    expect(wrap.runSpacing, 4);
-
+    expect(find.byKey(IdeaMarquee.rowKey), findsOneWidget);
     final rects = find
         .byType(IdeaPill)
         .evaluate()
         .map((e) => tester.getRect(find.byWidget(e.widget)))
         .toList();
-    expect(rects.length, 2);
-    // Every pill that starts a new row clears the one above it by 4 pt.
-    var rows = 0;
+    expect(rects.length, 1 + _starters.length);
     for (var i = 1; i < rects.length; i++) {
-      if (rects[i].top <= rects[i - 1].top + 0.5) continue;
-      rows += 1;
+      expect(rects[i].top, moreOrLessEquals(rects[0].top, epsilon: 0.5));
       expect(
-        rects[i].top - rects[i - 1].bottom,
-        closeTo(4, 0.5),
-        reason: 'the gap between pill rows',
+        rects[i].left - rects[i - 1].right,
+        moreOrLessEquals(HomePanel.pillGap, epsilon: 0.5),
       );
     }
-    expect(rows, greaterThan(0), reason: 'the pills do wrap at this width');
   });
 
-  testWidgets('the panel draws a handle, the composer and two pills', (
+  testWidgets('the row runs to the glass edges; the first pill lines up', (
     tester,
   ) async {
     await _pumpPanel(tester);
     await tester.pumpAndSettle();
 
-    expect(find.byKey(HomePanel.handleKey), findsOneWidget);
+    final panel = tester.getRect(find.byKey(HomePanel.surfaceKey));
+    final row = tester.getRect(find.byKey(IdeaMarquee.rowKey));
+    expect(row.left, moreOrLessEquals(panel.left, epsilon: 0.5));
+    expect(row.right, moreOrLessEquals(panel.right, epsilon: 0.5));
+    final first = tester.getRect(find.byType(IdeaPill).first);
+    expect(
+      first.left,
+      moreOrLessEquals(panel.left + HomePanel.sidePadding, epsilon: 0.5),
+    );
+  });
+
+  testWidgets('the panel draws the composer and a row of pills', (
+    tester,
+  ) async {
+    await _pumpPanel(tester);
+    await tester.pumpAndSettle();
+
     expect(find.byType(MixPromptInput), findsOneWidget);
     expect(find.byKey(const Key('prompt-field')), findsOneWidget);
     final pills = _pills(tester);
-    expect(pills.length, 2);
+    expect(pills.length, 1 + _starters.length);
     expect(pills.first.label, FakeSuggestions.eligible.title);
     expect(pills[1].label, _starters[0]);
     // The composer sits above the pills.
@@ -215,7 +220,7 @@ void main() {
     await tester.pump();
 
     var pills = _pills(tester);
-    expect(pills.length, 2);
+    expect(pills.length, 1 + _starters.length);
     expect(pills.first.skeleton, isTrue);
     expect(pills[1].skeleton, isFalse);
     expect(pills[1].label, _starters[0]);
@@ -227,16 +232,13 @@ void main() {
     expect(pills.first.label, FakeSuggestions.eligible.title);
   });
 
-  testWidgets('with nothing eligible the slot becomes a second starter', (
+  testWidgets('with nothing eligible the row is the starters alone', (
     tester,
   ) async {
     await _pumpPanel(tester, api: FakeSuggestions()..enabled = false);
     await tester.pumpAndSettle();
 
     final pills = _pills(tester);
-    expect(pills.length, 2);
-    // The two known starters keep their places and a third joins them at the
-    // end, so nothing moves when the routine resolves to nothing.
     expect(pills.map((pill) => pill.label), _starters);
     expect(pills.any((pill) => pill.skeleton), isFalse);
     expect(find.byKey(RoutinePillSlot.pillKey), findsNothing);
@@ -249,6 +251,8 @@ void main() {
     final harness = await _pumpPanel(tester);
     await tester.pumpAndSettle();
 
+    // The row scrolls sideways; bring the pill into view first.
+    await tester.ensureVisible(find.text(_starters[0]));
     await tester.tap(find.text(_starters[0]));
     await tester.pumpAndSettle();
 
@@ -283,6 +287,8 @@ void main() {
 
     expect(_pills(tester).every((pill) => pill.dimmed), isTrue);
     // Still usable: the board's swap replaces the draft.
+    // The row scrolls sideways; bring the pill into view first.
+    await tester.ensureVisible(find.text(_starters[0]));
     await tester.tap(find.text(_starters[0]));
     await tester.pumpAndSettle();
     expect(harness.controller.text, _starters[0]);
@@ -591,15 +597,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(_pills(tester).length, 2);
+    expect(_pills(tester).length, 1 + _starters.length);
   });
 
-  testWidgets('the rotating placeholder never repeats a visible pill', (
-    tester,
-  ) async {
+  testWidgets('the hint is a static "Ask for anything"', (tester) async {
     await _pumpPanel(tester);
     await tester.pumpAndSettle();
-    final shown = _pills(tester).map((pill) => pill.label).toSet();
 
     String hint() =>
         (tester
@@ -609,12 +612,11 @@ void main() {
                 as Text)
             .data!;
 
-    expect(shown, isNotEmpty);
-    expect(shown, isNot(contains(hint())));
-    // One full turn of the rotation and then some.
-    for (var i = 0; i < 8; i++) {
+    expect(hint(), HomePanel.restingPlaceholder);
+    // Where the rotation would have turned several times over.
+    for (var i = 0; i < 4; i++) {
       await tester.pump(const Duration(seconds: 5));
-      expect(shown, isNot(contains(hint())));
+      expect(hint(), HomePanel.restingPlaceholder);
     }
   });
 
@@ -676,13 +678,13 @@ void main() {
     await tester.pumpAndSettle();
 
     // Tall enough at 200% with the keyboard up that the panel does scroll:
-    // the handle rides up with the content.
-    final before = tester.getRect(find.byKey(HomePanel.handleKey));
-    await tester.drag(find.byKey(HomePanel.handleKey), const Offset(0, -80));
+    // the composer rides up with the content.
+    final before = tester.getRect(find.byType(MixPromptInput));
+    await tester.drag(find.byType(MixPromptInput), const Offset(0, -80));
     await tester.pumpAndSettle();
 
     expect(
-      tester.getRect(find.byKey(HomePanel.handleKey)).top,
+      tester.getRect(find.byType(MixPromptInput)).top,
       lessThan(before.top),
     );
     expect(escaped, isEmpty);
@@ -693,6 +695,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(_pills(tester).length, 2);
+    expect(_pills(tester).length, 1 + _starters.length);
   });
 }

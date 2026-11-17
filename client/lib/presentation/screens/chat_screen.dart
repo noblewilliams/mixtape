@@ -1297,7 +1297,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                               : null,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: ComposerPlusButton.gap),
                       Expanded(
                         child: MixPromptInput(
                           key: _composerKey,
@@ -1337,7 +1337,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       // In line with the field, past the + beside it.
                       padding: EdgeInsets.only(
                         top: 8,
-                        left: ComposerPlusButton.size + 8 + 2,
+                        left:
+                            ComposerPlusButton.extent +
+                            ComposerPlusButton.gap +
+                            2,
                         right: 2,
                       ),
                       child: DjPausedNote(),

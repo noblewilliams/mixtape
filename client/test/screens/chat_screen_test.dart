@@ -1481,10 +1481,11 @@ void main() {
       expect(find.byKey(const Key('chat-shape-chip')), findsNothing);
       expect(find.byType(InspirationChip), findsNothing);
       final plus = find.byKey(const Key('chat-plus'));
-      // As tall as the compact composer's surface, and level with it.
+      // As tall as the compact composer's surface, and level with it; the
+      // drawn circle inside is smaller.
       expect(
         tester.getSize(plus),
-        const Size.square(ComposerPlusButton.size),
+        const Size(ComposerPlusButton.extent, MixPromptInput.minHeight),
       );
       expect(
         tester.getRect(plus).bottom,

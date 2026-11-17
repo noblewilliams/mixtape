@@ -4,11 +4,12 @@
 /// `.grab`, `.pills` and `.errline` on the Home states board; plan tasks 3.1
 /// and 3.2).
 ///
-/// Glass inset from both screen edges, rounded on all four corners, with a
-/// drag-handle glyph, holding the compact Mix | Album and Shape row (album
-/// picks board H1 to H4), the composer, the start-failure line and at most
-/// two idea pills of equal weight (or, after the album nudge, the line that
-/// says so). It floats at the bottom of the screen
+/// Glass inset from both screen edges, rounded on all four corners, holding
+/// the compact Mix | Album and Shape row (album picks board H1 to H4), the
+/// composer with its static "Ask for anything" hint, the start-failure line
+/// and one edge-to-edge row of idea pills drifting in a slow loop (or, after
+/// the album nudge, the line that says so). The drag-handle glyph went in the
+/// 2026-11-17 tidy: nothing dragged it. It floats at the bottom of the screen
 /// above the dock and rides the keyboard, so it is drawn outside the scroll
 /// view Home's open space lives in.
 library;
@@ -19,6 +20,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'composer_plus_button.dart';
+import 'foundation/idea_marquee.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/liquid_glass_surface.dart';
 import 'foundation/text_action.dart';
@@ -122,10 +124,14 @@ class HomePanel extends StatefulWidget {
   /// Home never invents a second set of prompts.
   final List<String> starterPrompts;
 
-  /// The placeholder the composer shows instead of its rotating hints, which
-  /// the starters also leave out. With a playlist attached the board reads
-  /// `Something like <name>, but…`.
+  /// The composer's hint. Absent, it is [restingPlaceholder]; with a
+  /// playlist attached the board reads `Something like <name>, but…`. The
+  /// starters leave out whichever prompt it is.
   final String? placeholder;
+
+  /// The hint Home rests on: one quiet line, not a rotating example that
+  /// competes with the pills below it (2026-11-17).
+  static const String restingPlaceholder = 'Ask for anything';
 
   /// With a playlist attached, the pills become refinements of it and the
   /// routine suggestion stands down — the board shows exactly three.
@@ -161,25 +167,17 @@ class HomePanel extends StatefulWidget {
   /// `.bpanel.kb`: the gap the panel keeps above the keyboard.
   static const double keyboardGap = 14;
 
-  /// `.grab`.
-  static const double handleWidth = 36;
-  static const double handleHeight = 5;
-  static const Color handleColor = Color.fromRGBO(127, 120, 130, 0.45);
+  /// The panel's top padding: the compact row's own 44 pt band supplies the
+  /// rest of the space above it.
+  static const double topPadding = 6;
 
-  /// `.pills`: 8 pt between pills on a row, 12 pt above the row.
+  /// Above the composer when there is no compact row.
+  static const double bareTopPadding = 14;
+
+  /// `.pills`: 8 pt between pills, 10 pt above the row.
   static const double pillGap = 8;
 
-  /// The gap between pill rows. Now that pills shrink-wrap, three of them wrap
-  /// onto three rows; 4 pt keeps them reading as one group rather than as a
-  /// list (smoke round three, note 6).
-  static const double pillRunGap = 4;
-
-  static const double pillsTopGap = 12;
-
-  /// Keep Home to two suggestions.
-  static const int maxPills = 2;
-
-  static const Key handleKey = Key('home-panel-handle');
+  static const double pillsTopGap = 10;
 
   /// The compact row above the composer.
   static const Key modeRowKey = Key('home-panel-mode-row');
@@ -249,12 +247,20 @@ class _HomePanelState extends State<HomePanel> {
     widget.focusNode?.requestFocus();
   }
 
-  /// The first two placeholders that are not the one the field is showing.
+  /// Every starter but the one the field is showing as its hint.
   List<String> get _starters => [
     for (final prompt in widget.starterPrompts)
-      if (prompt != (widget.placeholder ?? MixPromptInput.initialPlaceholder))
-        prompt,
-  ].take(HomePanel.maxPills).toList();
+      if (prompt != _placeholder) prompt,
+  ];
+
+  String get _placeholder => widget.placeholder ?? HomePanel.restingPlaceholder;
+
+  /// The composer's sections keep the panel's side padding; the pill row runs
+  /// to the glass's edges and fades out there.
+  Widget _inset(Widget child) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: HomePanel.sidePadding),
+    child: child,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -312,11 +318,9 @@ class _HomePanelState extends State<HomePanel> {
               fallbackTint: tokens.panel,
               allowNative: !widget.obscured,
               child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  HomePanel.sidePadding,
-                  8,
-                  HomePanel.sidePadding,
-                  bottom,
+                padding: EdgeInsets.only(
+                  top: hasRow ? HomePanel.topPadding : HomePanel.bareTopPadding,
+                  bottom: bottom,
                 ),
                 // The panel's own overflow is its own business: a scroll in here
                 // must not minimise the shell's dock.
@@ -327,73 +331,56 @@ class _HomePanelState extends State<HomePanel> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Center(
-                          child: Container(
-                            key: HomePanel.handleKey,
-                            width: HomePanel.handleWidth,
-                            height: HomePanel.handleHeight,
-                            // With the row below it, its invisible 9 pt hit
-                            // band supplies most of the board's 12 pt gap.
-                            margin: EdgeInsets.only(
-                              top: 2,
-                              bottom: hasRow ? 4 : 12,
-                            ),
-                            decoration: const BoxDecoration(
-                              color: HomePanel.handleColor,
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(3),
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (hasRow) _modeRow(),
+                        if (hasRow) _inset(_modeRow()),
                         // The attached playlist at the panel's leading edge,
                         // over the +, not over the field.
                         if (widget.attachment != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: widget.attachment,
+                          _inset(
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: widget.attachment,
+                              ),
                             ),
                           ),
-                        _composerRow(
-                          MixPromptInput(
-                            key: widget.composerKey,
-                            controller: widget.controller,
-                            focusNode: widget.focusNode,
-                            busy: false,
-                            working: widget.busy,
-                            paused: widget.paused,
-                            // Drawn under the whole row (below), so the +
-                            // stays level with the field.
-                            showPausedNote: widget.leading == null,
-                            onStop: widget.onStop,
-                            onSubmit: widget.onSubmit,
-                            placeholder: widget.placeholder,
-                            sendLabel: widget.sendLabel,
-                            // The pills hold these; the rotating hint skips
-                            // them so the field never repeats a pill below
-                            // it. Refinements are not prompts, so they reserve
-                            // nothing.
-                            reservedExamples: widget.refinements == null
-                                ? starters
-                                : const [],
+                        _inset(
+                          _composerRow(
+                            MixPromptInput(
+                              key: widget.composerKey,
+                              controller: widget.controller,
+                              focusNode: widget.focusNode,
+                              busy: false,
+                              working: widget.busy,
+                              paused: widget.paused,
+                              // Drawn under the whole row (below), so the +
+                              // stays level with the field.
+                              showPausedNote: widget.leading == null,
+                              onStop: widget.onStop,
+                              onSubmit: widget.onSubmit,
+                              placeholder: _placeholder,
+                              sendLabel: widget.sendLabel,
+                            ),
                           ),
                         ),
                         if (widget.paused && widget.leading != null)
-                          const Padding(
-                            // In line with the field, past the + beside it.
-                            padding: EdgeInsets.only(
-                              top: 8,
-                              left: ComposerPlusButton.size + 8 + 2,
-                              right: 2,
+                          _inset(
+                            const Padding(
+                              // In line with the field, past the + beside it.
+                              padding: EdgeInsets.only(
+                                top: 8,
+                                left:
+                                    ComposerPlusButton.extent +
+                                    ComposerPlusButton.gap +
+                                    2,
+                                right: 2,
+                              ),
+                              child: DjPausedNote(),
                             ),
-                            child: DjPausedNote(),
                           ),
-                        if (error != null) _errorLine(tokens, error),
+                        if (error != null) _inset(_errorLine(tokens, error)),
                         if (widget.switched)
-                          _switchedLine(tokens)
+                          _inset(_switchedLine(tokens))
                         else
                           // A pill fills the field and focuses it: part of
                           // the field, so a tap on one does not first put
@@ -403,42 +390,25 @@ class _HomePanelState extends State<HomePanel> {
                               padding: const EdgeInsets.only(
                                 top: HomePanel.pillsTopGap,
                               ),
-                              // With a playlist attached the three pills are refinements
-                              // of it, and no routine suggestion competes with them.
+                              // With a playlist attached the three pills are
+                              // refinements of it, and no routine suggestion
+                              // competes with them.
                               child: widget.refinements != null
                                   ? _refinementPills(dimmed: dimmed)
-                                  : !widget.routineSuggestion
-                                  ? Wrap(
+                                  : IdeaMarquee(
                                       key: HomePanel.pillsKey,
-                                      spacing: HomePanel.pillGap,
-                                      runSpacing: HomePanel.pillRunGap,
+                                      inset: HomePanel.sidePadding,
+                                      gap: HomePanel.pillGap,
+                                      // Nothing drifts under a draft or a
+                                      // mix being made.
+                                      running: !dimmed,
                                       children: [
+                                        if (widget.routineSuggestion &&
+                                            pill != null)
+                                          pill,
                                         for (
                                           var i = 0;
                                           i < starters.length;
-                                          i++
-                                        )
-                                          _starterPill(
-                                            i,
-                                            starters[i],
-                                            dimmed: dimmed,
-                                          ),
-                                      ],
-                                    )
-                                  : Wrap(
-                                      key: HomePanel.pillsKey,
-                                      spacing: HomePanel.pillGap,
-                                      runSpacing: HomePanel.pillRunGap,
-                                      children: [
-                                        if (pill != null) pill,
-                                        for (
-                                          var i = 0;
-                                          i <
-                                                  (pill == null
-                                                      ? HomePanel.maxPills
-                                                      : HomePanel.maxPills -
-                                                            1) &&
-                                              i < starters.length;
                                           i++
                                         )
                                           _starterPill(
@@ -471,7 +441,7 @@ class _HomePanelState extends State<HomePanel> {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Padding(padding: const EdgeInsets.only(bottom: 2), child: leading),
-        const SizedBox(width: 8),
+        const SizedBox(width: ComposerPlusButton.gap),
         Expanded(child: composer),
       ],
     );
@@ -529,10 +499,11 @@ class _HomePanelState extends State<HomePanel> {
   );
 
   /// The attached playlist's three refinements, in the board's order.
-  Widget _refinementPills({required bool dimmed}) => Wrap(
+  Widget _refinementPills({required bool dimmed}) => IdeaMarquee(
     key: HomePanel.pillsKey,
-    spacing: HomePanel.pillGap,
-    runSpacing: HomePanel.pillRunGap,
+    still: true,
+    inset: HomePanel.sidePadding,
+    gap: HomePanel.pillGap,
     children: [
       for (var i = 0; i < widget.refinements!.length; i++)
         IdeaPill(

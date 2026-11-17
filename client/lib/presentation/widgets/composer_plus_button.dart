@@ -16,8 +16,17 @@ class ComposerPlusButton extends StatelessWidget {
   /// the button dimmed and inert.
   final void Function(BuildContext anchor)? onPressed;
 
-  /// As tall as the composer's surface, which it sits level with.
-  static const double size = MixPromptInput.minHeight;
+  /// The drawn circle: a quiet key beside the field rather than a second
+  /// field-sized control (Home panel tidy, 2026-11-17).
+  static const double size = 28;
+
+  /// The space it takes in the row: as tall as the composer's surface, which
+  /// it sits level with and is centred on, and a little wider than the circle
+  /// so the touch target stays generous.
+  static const double extent = 34;
+
+  /// The gap between it and the composer's focus ring.
+  static const double gap = 6;
 
   @override
   Widget build(BuildContext context) {
@@ -35,15 +44,21 @@ class ComposerPlusButton extends StatelessWidget {
           onTap: enabled ? () => onPressed!(anchor) : null,
           child: Opacity(
             opacity: enabled ? 1 : 0.5,
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: tokens.field,
-                border: Border.all(color: tokens.hairline),
+            child: SizedBox(
+              width: extent,
+              height: MixPromptInput.minHeight,
+              child: Center(
+                child: Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: tokens.field,
+                    border: Border.all(color: tokens.hairline),
+                  ),
+                  child: Icon(Icons.add_rounded, size: 18, color: tokens.plum),
+                ),
               ),
-              child: Icon(Icons.add_rounded, size: 22, color: tokens.plum),
             ),
           ),
         ),

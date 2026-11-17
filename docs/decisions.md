@@ -2082,3 +2082,18 @@ behaviour). **Open:** the mini-player in vertical-bar mode still floats at
 the bottom (candidate: `UITabBarController.bottomAccessory`). **Reopens if:**
 a plugin needs Flutter at the window root, or tab moves disturb Flutter's
 lifecycle on device.
+
+## 2026-11-17 — Home's panel: one drifting idea row, a static hint, a smaller + (founder)
+
+The founder found Home's bottom panel too busy. The idea pills are now one
+edge-to-edge row (`IdeaMarquee`) holding the routine suggestion and every
+starter prompt, drifting slowly sideways in a loop. A finger stops it and
+drags it; it stays still under a draft, while a mix starts, under reduced
+motion and under VoiceOver navigation. A playlist's three refinements use the
+same row without the drift. The composer's hint on Home is a fixed "Ask for
+anything" in place of the rotating examples, so the pills no longer have to
+avoid repeating it. The + beside the composer (Home and conversations) is a
+28 pt circle in a 34 x 40 pt slot, down from 40 pt. The decorative drag handle
+is gone, since nothing dragged it. The space under the pills is the dock's
+reserved mini-player band and stays as it is. Widget tests see the row still
+(`test/flutter_test_config.dart`).
