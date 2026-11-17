@@ -7,11 +7,15 @@ import { sanitizeForPrompt } from './sanitize'
 export const TITLE_MODEL = 'claude-haiku-4-5-20251001'
 
 // The voice rules both namers share (founder 2026-11-17): a name in the
-// music's own voice, not a description of a scene, in sentence case.
+// music's own voice, mostly an imperative action ("Move your legs faster
+// than your doubt"), never a description of a scene, in sentence case.
 const NAME_VOICE = [
   'Write it in the voice of the genre and the music asked for: borrow its slang, swagger, places, rituals and attitude',
   '(rap can brag, gospel can testify, afro house can carry Joburg and Lagos nights, jazz can be dry and smoky, punk can shout).',
-  'Make it dynamic, not a description: a line someone would say, a dare, a promise, a question, an inside joke, a fragment with a pulse.',
+  'Make it an action: almost always an imperative addressed to the listener, opening with a verb',
+  '(Move your legs faster than your doubt, Pour another glass for Lagos, Let the rain keep your secrets), never a description.',
+  'Those examples only show the shape: never reuse their words or images.',
+  'Pick a vivid verb that fits this music; rarely open with Let, Keep or Push. Now and then a dare or a question is fine.',
   'Never paint a scene with a string of "-ing" verbs, and avoid the obvious first idea.',
   'Use sentence case like a normal sentence: capitalize only the first word and proper nouns.',
   'Never quote or paraphrase a lyric line from any song, hymn or chant.',
