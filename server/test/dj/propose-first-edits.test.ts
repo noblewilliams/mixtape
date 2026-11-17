@@ -9,6 +9,7 @@ import {
   namedArtistsNotFoundNotice,
   outsidePicksNotice,
   type DjDeps,
+  editAddedNotice,
 } from '../../src/dj/loop'
 import { PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL } from '../../src/dj/propose'
 import type { FillDeps } from '../../src/dj/catalogue-fill'
@@ -155,16 +156,19 @@ describe('propose first: edits reach songs they do not own', () => {
     expect(text).toContain(outsidePicksNotice([1]))
     expect(text).not.toContain(namedArtistsNotFoundNotice(['Kendrick Lamar']))
     expect(text).toMatch(/K Song \d+ — Kendrick Lamar \| new/)
+    expect(text).toContain(editAddedNotice(0, 1))
   })
 
   it('with Kendrick in the library, the library row is used and nothing is proposed', async () => {
     const { db, session } = await standingMix()
     await seedSongs(db, 3, () => 'Kendrick Lamar', 'Owned K')
-    const { result, requests, searches } = await editTurn(db, session.id, swapKendrick(), { proposed: kendrick(3), confirmed: kendrick(3) })
+    const { result, requests, searches, text } = await editTurn(db, session.id, swapKendrick(), { proposed: kendrick(3), confirmed: kendrick(3) })
 
     expect(result.queue[1].artist).toBe('Kendrick Lamar')
     expect(result.queue[1].title).toMatch(/^Owned K /)
     expect(result.queue[1].newToYou).toBe(false)
+    // The DJ is told plainly it is theirs (live, it called owned songs new).
+    expect(text).toContain(editAddedNotice(1, 1))
     expect(proposalRequests(requests)).toHaveLength(0)
     expect(searches).toHaveLength(0)
   })
@@ -368,5 +372,15 @@ describe('propose first edits: budget, spares and dedupe', () => {
     const { requests, searches } = await editTurn(db, session.id, swapKendrick(), { proposed: kendrick(3), confirmed: kendrick(3), turn: { remake: true } })
     expect(proposalRequests(requests)).toHaveLength(0)
     expect(searches).toHaveLength(0)
+  })
+})
+
+describe('editAddedNotice', () => {
+  it('counts own and new songs plainly', () => {
+    expect(editAddedNotice(2, 2)).toBe("note: all 2 songs this edit added are the listener's own, none are new to them.")
+    expect(editAddedNotice(0, 3)).toBe('note: all 3 songs this edit added are new to the listener.')
+    expect(editAddedNotice(1, 3)).toBe("note: of the 3 songs this edit added, 1 is the listener's own and 2 are new to them.")
+    expect(editAddedNotice(1, 1)).toContain("listener's own, not new")
+    expect(editAddedNotice(0, 1)).toContain('new to the listener')
   })
 })
