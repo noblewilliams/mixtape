@@ -15,6 +15,7 @@ import 'dart:math' as math;
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/rendering.dart' show RenderCustomSingleChildLayoutBox;
 
 import '../../../data/api/failure_kind.dart';
 
@@ -230,7 +231,7 @@ class EmptyStateSliver extends StatelessWidget {
       hasScrollBody: false,
       child: Padding(
         padding: EdgeInsets.only(top: topOffset, bottom: dockInset),
-        child: CustomSingleChildLayout(
+        child: _CassetteAnchoredLayout(
           delegate: _CassetteAnchored(
             anchor: EmptyState.cassetteHeight,
             // Where this box's own bottom falls on the screen, which is the
@@ -243,6 +244,40 @@ class EmptyStateSliver extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A [CustomSingleChildLayout] that reports its child's own height as its
+/// intrinsic height. The plain one reports 0, so on a short screen (the
+/// closed iPhone Duo in landscape) [SliverFillRemaining] never grew past the
+/// space left under the header and the block overflowed instead of scrolling.
+class _CassetteAnchoredLayout extends SingleChildRenderObjectWidget {
+  const _CassetteAnchoredLayout({required this.delegate, super.child});
+
+  final SingleChildLayoutDelegate delegate;
+
+  @override
+  RenderCustomSingleChildLayoutBox createRenderObject(BuildContext context) =>
+      _RenderCassetteAnchored(delegate: delegate);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    RenderCustomSingleChildLayoutBox renderObject,
+  ) {
+    renderObject.delegate = delegate;
+  }
+}
+
+class _RenderCassetteAnchored extends RenderCustomSingleChildLayoutBox {
+  _RenderCassetteAnchored({required super.delegate});
+
+  @override
+  double computeMinIntrinsicHeight(double width) =>
+      child?.getMinIntrinsicHeight(width) ?? 0;
+
+  @override
+  double computeMaxIntrinsicHeight(double width) =>
+      child?.getMaxIntrinsicHeight(width) ?? 0;
 }
 
 /// Puts the block's first [anchor] pixels — the cassette — across [target] on

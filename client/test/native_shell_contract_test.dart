@@ -73,13 +73,26 @@ void main() {
     expect(dock, contains('bringSubviewToFront'));
     expect(dock, contains('UIImpactFeedbackGenerator'));
     // The board's 22 pt margins, pinned by hand: a bare bar is edge-to-edge.
-    expect(
-      dock,
-      contains(
-        'tabBar.leadingAnchor.constraint(equalTo: hostView.leadingAnchor, '
-        'constant: 22)',
-      ),
-    );
+    // Measured from the safe area's sides, so a system bar standing on a
+    // side edge (iPhone Duo) pushes the dock over with the content.
+    for (final view in ['tabBar', 'miniPlayer']) {
+      expect(
+        dock,
+        contains(
+          '$view.leadingAnchor.constraint(\n'
+          '        equalTo: hostView.safeAreaLayoutGuide.leadingAnchor, '
+          'constant: 22)',
+        ),
+      );
+      expect(
+        dock,
+        contains(
+          '$view.trailingAnchor.constraint(\n'
+          '        equalTo: hostView.safeAreaLayoutGuide.trailingAnchor, '
+          'constant: -22)',
+        ),
+      );
+    }
     // A route inside a mix wins over a mini-player update.
     expect(dock, contains('isRouteHidden'));
     // Cancelled fades must not apply their completion.
@@ -88,6 +101,35 @@ void main() {
     expect(appDelegate, contains('ShellDock('));
     expect(appDelegate, contains('#available(iOS 26'));
     expect(appDelegate, contains('hostView: window'));
+  });
+
+  // 2026-11-17 (founder): on iOS 27.1 the window's root is a tab controller
+  // whose own tab bar the system stands in the iPhone Duo's vertical bar.
+  test('the tabs move into the system vertical bar on iOS 27.1', () {
+    expect(dock, contains('class ShellTabController: UITabBarController'));
+    expect(dock, contains('@available(iOS 27.1, *)'));
+    expect(dock, contains('traitCollection.verticalBarEdge != .unspecified'));
+    expect(
+      dock,
+      contains('UITraitCollection.systemTraitsAffectingVerticalBarEdge'),
+    );
+    // One Flutter controller moves between the tab slots, and a move never
+    // tells it it disappeared.
+    expect(
+      dock,
+      contains(
+        'override var shouldAutomaticallyForwardAppearanceMethods: Bool '
+        '{ false }',
+      ),
+    );
+    expect(dock, contains('window.rootViewController = host'));
+    // The bare dock stands down while the tabs are in the vertical bar, and
+    // Flutter is told where they are.
+    expect(dock, contains('let showBare = !isVertical'));
+    expect(dock, contains('"verticalBarChanged"'));
+    expect(dock, contains('case "isVerticalBar":'));
+    // Mixtape's ink, not the system blue.
+    expect(dock, contains('host.view.tintColor = host.tabBar.tintColor'));
   });
 
   test('the dock answers and watches reduced transparency and motion', () {

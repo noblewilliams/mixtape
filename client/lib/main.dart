@@ -110,7 +110,7 @@ class MixtapeApp extends ConsumerWidget {
       ),
       home: showFoundationGallery && kDebugMode
           ? const FoundationGalleryScreen()
-          : debugPreview == 'mixes' && kDebugMode
+          : (debugPreview == 'mixes' || debugPreview == 'shell') && kDebugMode
           ? const MixesPreview()
           : switch (root) {
               _Root.unknown => const Scaffold(

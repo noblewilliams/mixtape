@@ -64,6 +64,7 @@ class GradientBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final bleedLeft = GradientBleed.leftOf(context);
     final bleed = GradientBleed.rightOf(context);
     return Stack(
       fit: StackFit.passthrough,
@@ -72,7 +73,7 @@ class GradientBackground extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         Positioned(
-          left: 0,
+          left: -bleedLeft,
           top: 0,
           right: -bleed,
           bottom: 0,
@@ -91,22 +92,33 @@ class GradientBackground extends StatelessWidget {
   }
 }
 
-/// How far a [GradientBackground] below this reaches past its trailing edge.
+/// How far a [GradientBackground] below this reaches past its left and right
+/// edges.
 ///
-/// The wide-screen shell sets it to the side rail's extent: a screen inside
-/// the content column then paints the same gradient, at the same scale, as
-/// the shell paints behind the rail, so no seam shows where the column
-/// starts.
+/// The wide-screen shell adds the side rail's extent on the right, and
+/// [PageInsets] adds a page's horizontal safe-area insets: a screen inside
+/// then paints the same gradient, at the same scale, as the one behind the
+/// rail or the system bar, so no seam shows where the page starts.
 class GradientBleed extends InheritedWidget {
-  const GradientBleed({super.key, required this.right, required super.child});
+  const GradientBleed({
+    super.key,
+    this.left = 0,
+    required this.right,
+    required super.child,
+  });
 
+  final double left;
   final double right;
+
+  static double leftOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<GradientBleed>()?.left ?? 0;
 
   static double rightOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<GradientBleed>()?.right ?? 0;
 
   @override
-  bool updateShouldNotify(GradientBleed oldWidget) => oldWidget.right != right;
+  bool updateShouldNotify(GradientBleed oldWidget) =>
+      oldWidget.left != left || oldWidget.right != right;
 }
 
 /// Paints [base] then [glows]. Its fields are public so widget tests can read

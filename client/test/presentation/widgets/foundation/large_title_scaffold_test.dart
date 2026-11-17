@@ -89,6 +89,8 @@ Future<void> _collapse(WidgetTester tester, ScrollController controller) async {
 
 void main() {
   _leadingTests();
+  _trailingBesideTitleTests();
+  _titleLineTests();
   group('LargeTitleScaffold', () {
     testWidgets('shows the large title and no small bar at offset 0', (
       tester,
@@ -444,41 +446,160 @@ void main() {
 }
 
 void _leadingTests() {
-  testWidgets('a leading cluster is pinned above the title and survives collapse', (tester) async {
-    tester.view.physicalSize = const Size(390, 844);
+  testWidgets(
+    'a leading cluster is pinned above the title and survives collapse',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var backs = 0;
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: Scaffold(
+            body: LargeTitleScaffold(
+              title: 'Playlist',
+              controller: controller,
+              leading: GlassCluster(
+                children: [
+                  GlassButton(
+                    icon: Icons.chevron_left,
+                    label: 'Back',
+                    onPressed: () => backs++,
+                  ),
+                ],
+              ),
+              trailing: GlassCluster(
+                children: [
+                  GlassButton(
+                    icon: Icons.more_horiz,
+                    label: 'More',
+                    onPressed: () {},
+                  ),
+                ],
+              ),
+              slivers: [SliverToBoxAdapter(child: SizedBox(height: 2000))],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(LargeTitleScaffold.pinnedRowKey);
+      expect(row, findsOneWidget);
+      final title = find.text('Playlist').first;
+      expect(
+        tester.getTopLeft(title).dy,
+        greaterThan(tester.getBottomLeft(row).dy),
+      );
+      await tester.tap(find.bySemanticsLabel('Back'));
+      expect(backs, 1);
+      controller.jumpTo(600);
+      await tester.pumpAndSettle();
+      expect(find.byKey(LargeTitleScaffold.smallBarKey), findsOneWidget);
+      await tester.tap(find.bySemanticsLabel('Back'), warnIfMissed: true);
+      expect(backs, 2);
+    },
+  );
+}
+
+/// Mixes' header (2026-11-17, founder): the ⋯ shares the title's row, so a
+/// tab's title sits at the same height on every tab, and the segmented
+/// control takes the row under it.
+void _trailingBesideTitleTests() {
+  testWidgets('trailing stays beside the title, the accessory goes below', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(382, 678);
     tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    var backs = 0;
-    final controller = ScrollController();
-    addTearDown(controller.dispose);
-    await tester.pumpWidget(MaterialApp(
-      theme: MixtapeTheme.light(),
-      home: Scaffold(
-        body: LargeTitleScaffold(
-          title: 'Playlist',
-          controller: controller,
-          leading: GlassCluster(children: [
-            GlassButton(icon: Icons.chevron_left, label: 'Back', onPressed: () => backs++),
-          ]),
-          trailing: GlassCluster(children: [
-            GlassButton(icon: Icons.more_horiz, label: 'More', onPressed: () {}),
-          ]),
-          slivers: [SliverToBoxAdapter(child: SizedBox(height: 2000))],
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: LargeTitleScaffold(
+          title: _title,
+          trailing: const SizedBox(key: Key('more'), width: 34, height: 34),
+          titleAccessory: const SizedBox(
+            key: Key('control'),
+            width: 220,
+            height: 34,
+          ),
+          accessoriesBelowTitle: true,
+          trailingBesideTitle: true,
+          slivers: const [SliverToBoxAdapter(child: SizedBox(height: 900))],
         ),
       ),
-    ));
-    await tester.pumpAndSettle();
-    final row = find.byKey(LargeTitleScaffold.pinnedRowKey);
-    expect(row, findsOneWidget);
-    final title = find.text('Playlist').first;
-    expect(tester.getTopLeft(title).dy, greaterThan(tester.getBottomLeft(row).dy));
-    await tester.tap(find.bySemanticsLabel('Back'));
-    expect(backs, 1);
-    controller.jumpTo(600);
-    await tester.pumpAndSettle();
-    expect(find.byKey(LargeTitleScaffold.smallBarKey), findsOneWidget);
-    await tester.tap(find.bySemanticsLabel('Back'), warnIfMissed: true);
-    expect(backs, 2);
+    );
+
+    final title = tester.getRect(find.text(_title));
+    final more = tester.getRect(find.byKey(const Key('more')));
+    final control = tester.getRect(find.byKey(const Key('control')));
+    expect(find.byKey(LargeTitleScaffold.pinnedRowKey), findsNothing);
+    // On the title's row, at its trailing end.
+    expect(more.top, lessThan(title.bottom));
+    expect(more.bottom, greaterThan(title.top));
+    expect(more.right, 382 - MixtapeMetrics.screenSidePadding);
+    // Under the title, from the leading margin.
+    expect(control.top, greaterThanOrEqualTo(title.bottom));
+    expect(control.left, MixtapeMetrics.screenSidePadding);
+    // The title starts where an unpinned tab's does.
+    expect(
+      title.top,
+      lessThan(
+        MixtapeMetrics.largeTitleTopPadding + LargeTitleScaffold.barHeight,
+      ),
+    );
+  });
+}
+
+/// Every tab's title on one line (2026-11-17): whatever shares or follows
+/// the title row, the title's baseline does not move.
+void _titleLineTests() {
+  Future<Rect> titleRectWith(
+    WidgetTester tester, {
+    Widget? trailing,
+    Widget? accessory,
+    bool below = false,
+    bool beside = false,
+  }) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: LargeTitleScaffold(
+          key: UniqueKey(),
+          title: _title,
+          trailing: trailing,
+          titleAccessory: accessory,
+          accessoriesBelowTitle: below,
+          trailingBesideTitle: beside,
+          slivers: const [SliverToBoxAdapter(child: SizedBox(height: 900))],
+        ),
+      ),
+    );
+    return tester.getRect(find.text(_title));
+  }
+
+  testWidgets('the title sits on one line whatever the header carries', (
+    tester,
+  ) async {
+    const button = SizedBox(width: 34, height: 34);
+    const pill = SizedBox(width: 160, height: 36);
+    final plain = await titleRectWith(tester);
+    final below = await titleRectWith(tester, accessory: pill, below: true);
+    final beside = await titleRectWith(
+      tester,
+      trailing: button,
+      accessory: pill,
+      below: true,
+      beside: true,
+    );
+    expect(below.top, plain.top);
+    expect(beside.top, plain.top);
   });
 }

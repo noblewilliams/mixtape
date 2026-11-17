@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/widgets/foundation/liquid_glass_surface.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
@@ -206,6 +207,7 @@ ProviderContainer shellContainer({
   PlaybackController? player,
   bool fakeMiniPlayer = false,
   bool isPad = false,
+  bool verticalBar = false,
   String? chosenService = 'apple',
   MusicPlatformStore? platformStore,
   List<Override> extra = const [],
@@ -225,6 +227,7 @@ ProviderContainer shellContainer({
       authProvider.overrideWith(() => auth ?? TestAuth(AuthStatus.session)),
       nativeDockAvailableProvider.overrideWith((ref) => nativeDock),
       isPadProvider.overrideWith((ref) => isPad),
+      verticalBarProvider.overrideWith(() => _FixedVerticalBar(verticalBar)),
       if (player != null) playbackProvider.overrideWithValue(player),
       if (fakeMiniPlayer)
         miniPlayerStateProvider.overrideWith(FakeMiniPlayer.new),
@@ -235,16 +238,37 @@ ProviderContainer shellContainer({
   return container;
 }
 
+/// The iPhone Duo as its simulator reports it. Where the status column
+/// stands on a side edge (closed in portrait, open in landscape) it arrives
+/// as an 84 pt side inset with no top inset.
+const Size duoOpenLandscape = Size(951, 669);
+const FakeViewPadding duoOpenLandscapePadding = FakeViewPadding(
+  right: 84,
+  bottom: 34,
+);
+const Size duoClosedPortrait = Size(466, 678);
+const FakeViewPadding duoClosedPortraitPadding = FakeViewPadding(
+  right: 84,
+  bottom: 34,
+);
+const Size duoOpenPortrait = Size(669, 951);
+const FakeViewPadding duoOpenPortraitPadding = FakeViewPadding(
+  top: 82,
+  bottom: 34,
+);
+
 Future<void> pumpShell(
   WidgetTester tester,
   ProviderContainer container, {
   Brightness brightness = Brightness.light,
   Size window = const Size(402, 874),
+  FakeViewPadding padding = FakeViewPadding.zero,
 }) async {
-  // A phone in portrait unless a test asks otherwise: the default 800x600
-  // test surface is wide enough to dock to the side.
+  // A phone in portrait unless a test asks otherwise.
   tester.view.physicalSize = window;
   tester.view.devicePixelRatio = 1;
+  tester.view.padding = padding;
+  tester.view.viewPadding = padding;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     UncontrolledProviderScope(
@@ -395,7 +419,8 @@ void main() {
       await pumpShell(
         tester,
         shellContainer(chosenService: 'skipped'),
-        window: const Size(1024, 768),
+        window: duoOpenLandscape,
+        padding: duoOpenLandscapePadding,
       );
       expect(find.text(WhereYouListenSheet.headline), findsOneWidget);
       expect(find.byType(SideRail), findsOneWidget);
@@ -1104,19 +1129,19 @@ void main() {
     });
   });
 
-  group('wide screens', () {
-    Future<void> setWindow(WidgetTester tester, Size size) async {
-      tester.view.physicalSize = size;
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-    }
-
-    const wide = Size(1024, 768);
-
-    iosWidgets('an unfolded or landscape window docks to the side', (
-      tester,
-    ) async {
-      await pumpShell(tester, shellContainer(nativeDock: true), window: wide);
+  // 2026-11-17 (founder): the shell docks to the side wherever the system
+  // stands its bar on a side edge (closed iPhone Duo in portrait, any phone
+  // in landscape), and keeps the bottom dock wherever the status bar runs
+  // across the top (any phone in portrait, the open Duo in portrait). In
+  // landscape the rail sits on the left, low; in portrait on the right.
+  group('side rail', () {
+    iosWidgets('a side-edge bar docks the tabs to the side', (tester) async {
+      await pumpShell(
+        tester,
+        shellContainer(nativeDock: true),
+        window: duoOpenLandscape,
+        padding: duoOpenLandscapePadding,
+      );
 
       expect(find.byType(SideRail), findsOneWidget);
       expect(find.byType(FrostedDock), findsNothing);
@@ -1125,8 +1150,94 @@ void main() {
       expect(callsTo('show'), isEmpty);
     });
 
+    iosWidgets('without the vertical bar the closed Duo docks to the side '
+        'too', (tester) async {
+      await pumpShell(
+        tester,
+        shellContainer(nativeDock: true),
+        window: duoClosedPortrait,
+        padding: duoClosedPortraitPadding,
+      );
+
+      expect(find.byType(SideRail), findsOneWidget);
+      // On the right, clear of the status column beside it.
+      final tabs = tester.getRect(find.byKey(SideRail.tabsKey));
+      expect(tabs.left, greaterThan(duoClosedPortrait.width / 2));
+      expect(tabs.right, lessThanOrEqualTo(duoClosedPortrait.width - 84));
+    });
+
+    iosWidgets('the rail always stands on the right, low', (tester) async {
+      await pumpShell(
+        tester,
+        shellContainer(),
+        window: duoOpenLandscape,
+        padding: duoOpenLandscapePadding,
+      );
+
+      final tabs = tester.getRect(find.byKey(SideRail.tabsKey));
+      expect(tabs.left, greaterThan(duoOpenLandscape.width / 2));
+      // Down by the thumb: its bottom on the safe area's, less the margin.
+      expect(tabs.bottom, closeTo(duoOpenLandscape.height - 34 - 12, 1));
+    });
+
+    // iOS 27.1: the system stands the native tabs in its vertical bar, so
+    // Flutter draws no rail, keeps the native tabs wanted, and leaves no room
+    // for a bottom dock.
+    iosWidgets('in the system vertical bar Flutter draws no rail', (
+      tester,
+    ) async {
+      await pumpShell(
+        tester,
+        shellContainer(nativeDock: true, verticalBar: true),
+        window: duoClosedPortrait,
+        padding: duoClosedPortraitPadding,
+      );
+
+      expect(find.byType(SideRail), findsNothing);
+      expect(find.byType(FrostedDock), findsNothing);
+      expect(callsTo('show'), isNotEmpty);
+      final media = MediaQuery.of(tester.element(find.byType(HomeScreen)));
+      expect(media.padding.bottom, lessThan(kFrostedDockHeight));
+    });
+
+    iosWidgets('the open Duo in portrait keeps the bottom dock', (
+      tester,
+    ) async {
+      await pumpShell(
+        tester,
+        shellContainer(),
+        window: duoOpenPortrait,
+        padding: duoOpenPortraitPadding,
+      );
+
+      expect(find.byType(SideRail), findsNothing);
+      expect(find.byType(FrostedDock), findsOneWidget);
+    });
+
+    iosWidgets('the rail is Liquid Glass', (tester) async {
+      await pumpShell(
+        tester,
+        shellContainer(),
+        window: duoOpenLandscape,
+        padding: duoOpenLandscapePadding,
+      );
+
+      expect(
+        find.descendant(
+          of: find.byKey(SideRail.tabsKey),
+          matching: find.byType(LiquidGlassSurface),
+        ),
+        findsOneWidget,
+      );
+    });
+
     iosWidgets('the rail switches tabs', (tester) async {
-      await pumpShell(tester, shellContainer(), window: wide);
+      await pumpShell(
+        tester,
+        shellContainer(),
+        window: duoOpenLandscape,
+        padding: duoOpenLandscapePadding,
+      );
 
       await tester.tap(
         find.descendant(
@@ -1140,7 +1251,12 @@ void main() {
     });
 
     iosWidgets('the rail stays beside a pushed route', (tester) async {
-      await pumpShell(tester, shellContainer(), window: wide);
+      await pumpShell(
+        tester,
+        shellContainer(),
+        window: duoOpenLandscape,
+        padding: duoOpenLandscapePadding,
+      );
 
       await pushInsideTab(tester, 'inside a mix');
 
@@ -1148,38 +1264,34 @@ void main() {
       expect(find.byType(SideRail), findsOneWidget);
     });
 
-    iosWidgets('folding back to a phone width restores the bottom dock', (
-      tester,
-    ) async {
-      await pumpShell(tester, shellContainer(nativeDock: true), window: wide);
+    iosWidgets('rotating to portrait restores the bottom dock', (tester) async {
+      await pumpShell(
+        tester,
+        shellContainer(nativeDock: true),
+        window: duoOpenLandscape,
+        padding: duoOpenLandscapePadding,
+      );
       calls.clear();
 
-      await setWindow(tester, const Size(400, 860));
+      tester.view.physicalSize = duoOpenPortrait;
+      tester.view.padding = duoOpenPortraitPadding;
+      tester.view.viewPadding = duoOpenPortraitPadding;
       await tester.pumpAndSettle();
 
       expect(find.byType(SideRail), findsNothing);
       expect(callsTo('show'), isNotEmpty);
     });
 
-    iosWidgets('an iPad keeps the standard bottom dock at any width', (
-      tester,
-    ) async {
+    iosWidgets('an iPad keeps the standard bottom dock', (tester) async {
       await pumpShell(
         tester,
         shellContainer(nativeDock: true, isPad: true),
-        window: wide,
+        window: const Size(1024, 768),
+        padding: const FakeViewPadding(left: 20, right: 20),
       );
 
       expect(find.byType(SideRail), findsNothing);
       expect(callsTo('show'), isNotEmpty);
-    });
-
-    iosWidgets('the rail sits on the trailing edge', (tester) async {
-      await pumpShell(tester, shellContainer(), window: wide);
-
-      final rail = tester.getRect(find.byType(SideRail));
-      expect(rail.right, wide.width);
-      expect(rail.left, greaterThan(wide.width / 2));
     });
 
     iosWidgets('a phone in portrait keeps the bottom dock', (tester) async {
@@ -1189,4 +1301,13 @@ void main() {
       expect(find.byType(FrostedDock), findsOneWidget);
     });
   });
+}
+
+class _FixedVerticalBar extends VerticalBarNotifier {
+  _FixedVerticalBar(this.value);
+
+  final bool value;
+
+  @override
+  bool build() => value;
 }

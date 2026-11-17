@@ -1,10 +1,19 @@
-/// The wide-iPhone dock: the same four tabs and mini-player as the bottom
-/// dock, stood on end down the trailing edge.
+/// The side dock: the same four tabs and mini-player as the bottom dock,
+/// stood on end down a side edge.
 ///
-/// Drawn on an iPhone whose window is at least [kSideRailBreakpoint] wide —
-/// an unfolded foldable, or any iPhone in landscape — where a bottom bar would
-/// waste the short axis. An iPad keeps the standard bottom dock. Below the breakpoint the shell keeps the bottom dock
-/// (native `UITabBar` on iOS 26, [FrostedDock] elsewhere).
+/// Drawn on an iPhone whose system bar stands on a side edge rather than
+/// across the top: the iPhone Duo closed (its status column is on a side in
+/// both orientations), the Duo open in landscape, and any iPhone in
+/// landscape. Wherever the status bar runs across the top (any iPhone in
+/// portrait, the open Duo in portrait) the shell keeps the bottom dock
+/// (native `UITabBar` on iOS 26, [FrostedDock] elsewhere). An iPad keeps the
+/// bottom dock everywhere.
+///
+/// On iOS 27.1 and later the iPhone Duo needs none of this: the system stands
+/// the native tabs in its vertical bar. This rail is the fallback wherever
+/// that bar does not exist (earlier iOS, other iPhones in landscape). It
+/// always stands on the right, low, its tabs at the bottom (founder,
+/// 2026-11-17), in the app's Liquid Glass.
 library;
 
 import 'package:flutter/cupertino.dart';
@@ -12,16 +21,13 @@ import 'package:flutter/material.dart';
 
 import '../../../data/shell/mini_player_state.dart';
 import '../../theme/mixtape_theme.dart';
-import 'frosted_surface.dart';
+import 'liquid_glass_surface.dart';
 import 'square_art.dart';
 
-/// Window width, in logical points, from which the shell docks to the side.
-/// Every iPhone in portrait sits under it (≤ 440 pt); every iPhone in
-/// landscape and an unfolded foldable sit over it. (iPads never use it.)
-const double kSideRailBreakpoint = 600;
-
-/// Whether the shell should dock to the side for this window.
-bool useSideRail(Size size) => size.width >= kSideRailBreakpoint;
+/// Whether the shell should dock to the side: the window's own insets (not a
+/// page's, which have consumed them) put the system's bar on a side edge.
+bool useSideRail(EdgeInsets windowPadding) =>
+    windowPadding.left > 0 || windowPadding.right > 0;
 
 /// The rail's own width; the content column starts after it.
 const double kSideRailWidth = 72;
@@ -93,25 +99,32 @@ class SideRail extends StatelessWidget {
               // A landscape phone leaves ~370 pt of height: tabs and the
               // mini-player must both fit without scrolling the rail.
               final compact = constraints.maxHeight < 460;
-              return Column(
-                children: [
-                  const Spacer(),
-                  _Tabs(
-                    key: tabsKey,
-                    currentIndex: currentIndex,
-                    onTap: onTap,
-                    compact: compact,
-                  ),
-                  const Spacer(),
-                  if (mini.visible)
-                    _RailMiniPlayer(
+              final tabs = _Tabs(
+                key: tabsKey,
+                currentIndex: currentIndex,
+                onTap: onTap,
+                compact: compact,
+              );
+              final player = mini.visible
+                  ? _RailMiniPlayer(
                       key: miniPlayerKey,
                       mini: mini,
                       compact: compact,
                       onTap: onMiniTap,
                       onPlayPause: onMiniPlayPause,
                       onNext: onMiniNext,
-                    ),
+                    )
+                  : null;
+              // Low: everything gathers at the bottom, the tabs last, by the
+              // thumb, with the mini-player just above them.
+              return Column(
+                children: [
+                  const Spacer(),
+                  if (player != null) ...[
+                    player,
+                    const SizedBox(height: _railMargin),
+                  ],
+                  tabs,
                 ],
               );
             },
@@ -137,7 +150,7 @@ class _Tabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return FrostedSurface(
+    return LiquidGlassSurface(
       borderRadius: BorderRadius.circular(36),
       child: Padding(
         padding: const EdgeInsets.all(4),
@@ -265,7 +278,7 @@ class _RailMiniPlayer extends StatelessWidget {
         onTap: onNext,
       ),
     ];
-    return FrostedSurface(
+    return LiquidGlassSurface(
       borderRadius: BorderRadius.circular(36),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 10, 4, 4),

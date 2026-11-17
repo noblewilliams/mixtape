@@ -31,6 +31,7 @@ import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart'
     show QueueScreen;
 import 'package:mixtape/presentation/widgets/foundation/large_title_scaffold.dart';
+import 'package:mixtape/presentation/widgets/mix_select_mode.dart';
 import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
 import 'package:mixtape/presentation/widgets/foundation/swipe_actions.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
@@ -306,12 +307,13 @@ Future<void> _pump(
 
 void main() {
   group('the DJ at work (device smoke 2026-11-13)', () {
-    CassetteTile tileOf(WidgetTester tester, String id) => tester.widget<CassetteTile>(
-      find.descendant(
-        of: find.byKey(Key('session-$id')),
-        matching: find.byType(CassetteTile),
-      ),
-    );
+    CassetteTile tileOf(WidgetTester tester, String id) =>
+        tester.widget<CassetteTile>(
+          find.descendant(
+            of: find.byKey(Key('session-$id')),
+            matching: find.byType(CassetteTile),
+          ),
+        );
 
     testWidgets('a mix with a turn out turns, then wears a dot when it lands', (
       tester,
@@ -462,13 +464,25 @@ void main() {
 
       SemanticsData data(String key) =>
           tester.getSemantics(find.byKey(Key(key))).getSemanticsData();
-      expect(data('active-mixes').flagsCollection.isSelected.toBoolOrNull(), isTrue);
-      expect(data('listen-later-mixes').flagsCollection.isSelected.toBoolOrNull(), isFalse);
+      expect(
+        data('active-mixes').flagsCollection.isSelected.toBoolOrNull(),
+        isTrue,
+      );
+      expect(
+        data('listen-later-mixes').flagsCollection.isSelected.toBoolOrNull(),
+        isFalse,
+      );
 
       await tester.tap(find.byKey(const Key('listen-later-mixes')));
       await tester.pumpAndSettle();
-      expect(data('active-mixes').flagsCollection.isSelected.toBoolOrNull(), isFalse);
-      expect(data('listen-later-mixes').flagsCollection.isSelected.toBoolOrNull(), isTrue);
+      expect(
+        data('active-mixes').flagsCollection.isSelected.toBoolOrNull(),
+        isFalse,
+      );
+      expect(
+        data('listen-later-mixes').flagsCollection.isSelected.toBoolOrNull(),
+        isTrue,
+      );
       handle.dispose();
     });
 
@@ -1022,19 +1036,47 @@ void main() {
       );
     }
 
-    testWidgets('at 390 pt the two segments sit beside the title', (
+    // 2026-11-17 (founder): the ⋯ shares the title's row, so Mixes' title
+    // sits as high as every other tab's, and the control takes the row under
+    // the title at every width.
+    testWidgets('the ⋯ shares the title row; the control sits under it', (
       tester,
     ) async {
       final (title, control) = await layoutAt(tester, 390);
-      expect(title.right, lessThanOrEqualTo(control.left));
-      expect(control.right, closeTo(370, 0.5));
-      expect(control.bottom, closeTo(title.bottom, 12));
+      final more = tester.getRect(find.byKey(MixSelect.moreKey));
+      expect(find.byKey(LargeTitleScaffold.pinnedRowKey), findsNothing);
+      expect(more.top, lessThan(title.bottom));
+      expect(more.bottom, greaterThan(title.top));
+      expect(more.right, closeTo(370, 0.5));
+      expect(control.top, greaterThanOrEqualTo(title.bottom));
+      expect(control.left, 20);
       expect(
         tester
             .widget<LargeTitleScaffold>(find.byType(LargeTitleScaffold))
             .accessoriesBelowTitle,
-        isFalse,
+        isTrue,
       );
+    });
+
+    testWidgets('select mode keeps the header still: Select all and Done take '
+        'the title row, the control\'s row keeps its room', (tester) async {
+      final (title, _) = await layoutAt(tester, 390);
+      final firstRow = tester.getRect(find.byType(MixHomeRow).first);
+      await tester.tap(find.byKey(MixSelect.moreKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MixSelect.selectMixesKey));
+      await tester.pumpAndSettle();
+
+      expect(tester.getRect(find.text('Mixes')).topLeft, title.topLeft);
+      expect(tester.getRect(find.byType(MixHomeRow).first).top, firstRow.top);
+      final selectAll = tester.getRect(find.byKey(MixSelect.selectAllKey));
+      final done = tester.getRect(find.byKey(MixSelect.doneKey));
+      for (final button in [selectAll, done]) {
+        expect(button.top, lessThan(title.bottom));
+        expect(button.bottom, greaterThan(title.top));
+      }
+      expect(selectAll.right, lessThanOrEqualTo(done.left));
+      expect(done.right, closeTo(370, 0.5));
     });
 
     testWidgets('where they would squeeze the title they drop below it, '
@@ -1455,19 +1497,22 @@ void main() {
       final now = DateTime.now();
       final api = FakeDjApi();
       api.onListSessions = () async => [
-          _session(id: 'a', title: 'Sunday Reset', updatedAt: now),
-          _session(
-            id: 'b',
-            title: 'Smooth Cruise',
-            updatedAt: now.subtract(const Duration(days: 1)),
-          ),
-        ];
+        _session(id: 'a', title: 'Sunday Reset', updatedAt: now),
+        _session(
+          id: 'b',
+          title: 'Smooth Cruise',
+          updatedAt: now.subtract(const Duration(days: 1)),
+        ),
+      ];
       api.onListSharedMixes = () async => [
-          share(savedAt: now.subtract(const Duration(hours: 2))),
-        ];
+        share(savedAt: now.subtract(const Duration(hours: 2))),
+      ];
       await _pump(tester, _makeContainer(api));
 
-      expect(top(tester, 'Sunday Reset'), lessThan(top(tester, 'Late drive, windows down')));
+      expect(
+        top(tester, 'Sunday Reset'),
+        lessThan(top(tester, 'Late drive, windows down')),
+      );
       expect(
         top(tester, 'Late drive, windows down'),
         lessThan(top(tester, 'Smooth Cruise')),
@@ -1475,7 +1520,13 @@ void main() {
       final row = find.byKey(SharedMixHomeRow.rowKey('AbCdEfGhIjKlMnOpQrStUv'));
       expect(row, findsOneWidget);
       expect(
-        find.descendant(of: row, matching: find.textContaining('From Ada · 2h ago', findRichText: true)),
+        find.descendant(
+          of: row,
+          matching: find.textContaining(
+            'From Ada · 2h ago',
+            findRichText: true,
+          ),
+        ),
         findsOneWidget,
       );
       final tile = tester.widget<CassetteTile>(
@@ -1490,8 +1541,8 @@ void main() {
       final api = FakeDjApi();
       api.onListSessions = () async => [_session(title: 'Mine')];
       api.onListSharedMixes = () async => [
-          share(name: null, savedAt: DateTime.now()),
-        ];
+        share(name: null, savedAt: DateTime.now()),
+      ];
       await _pump(tester, _makeContainer(api));
       expect(
         find.textContaining('From a friend', findRichText: true),
@@ -1522,7 +1573,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       const token = 'AbCdEfGhIjKlMnOpQrStUv';
-      expect(find.byKey(SharedMixHomeRow.removeActionKey(token)), findsOneWidget);
+      expect(
+        find.byKey(SharedMixHomeRow.removeActionKey(token)),
+        findsOneWidget,
+      );
       expect(find.text('Remove'), findsOneWidget);
       expect(find.text('Archive'), findsNothing);
       expect(find.text('More'), findsNothing);
@@ -1566,14 +1620,25 @@ void main() {
       await tester.longPress(find.text('Late drive, windows down'));
       await tester.pumpAndSettle();
       final menu = find.byKey(mixtapeMenuKey);
-      expect(find.descendant(of: menu, matching: find.text('Remove')), findsOneWidget);
+      expect(
+        find.descendant(of: menu, matching: find.text('Remove')),
+        findsOneWidget,
+      );
       expect(
         find.descendant(of: menu, matching: find.byIcon(MixMenuIcons.eject)),
         findsOneWidget,
       );
-      expect(find.descendant(of: menu, matching: find.text('Rename')), findsNothing);
-      expect(find.descendant(of: menu, matching: find.text('Archive')), findsNothing);
-      await tester.tap(find.descendant(of: menu, matching: find.text('Remove')));
+      expect(
+        find.descendant(of: menu, matching: find.text('Rename')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: menu, matching: find.text('Archive')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.descendant(of: menu, matching: find.text('Remove')),
+      );
       await tester.pumpAndSettle();
       expect(api.removedShares, ['AbCdEfGhIjKlMnOpQrStUv']);
     });
@@ -1626,9 +1691,7 @@ void main() {
       expect(find.text('Mine'), findsOneWidget);
     });
 
-    testWidgets('showing the Mixes tab reads the shares again', (
-      tester,
-    ) async {
+    testWidgets('showing the Mixes tab reads the shares again', (tester) async {
       var reads = 0;
       final api = FakeDjApi();
       api.onListSessions = () async => [_session(title: 'Mine')];
@@ -1672,9 +1735,9 @@ void main() {
     testWidgets('shared rows are not in Archived', (tester) async {
       final api = FakeDjApi();
       api.onListSessions = () async => [
-          _session(id: 'a', title: 'Mine'),
-          _session(id: 'z', title: 'Old', status: 'archived'),
-        ];
+        _session(id: 'a', title: 'Mine'),
+        _session(id: 'z', title: 'Old', status: 'archived'),
+      ];
       api.onListSharedMixes = () async => [share(savedAt: DateTime.now())];
       await _pump(tester, _makeContainer(api));
       await _revealArchived(tester);

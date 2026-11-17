@@ -38,6 +38,19 @@ class ShellDock: NSObject {
   /// route currently allows it on screen.
   private var isMiniWanted = false
 
+  /// iOS 27.1+: the window's root, whose own tab bar the system stands in
+  /// the vertical bar (see `ShellTabController`). Nil below that.
+  private var verticalHost: UIViewController?
+
+  /// The tabs are in the vertical bar right now, so the bare dock stands
+  /// down.
+  private var isVertical: Bool {
+    if #available(iOS 27.1, *), let host = verticalHost as? ShellTabController {
+      return host.isVertical
+    }
+    return false
+  }
+
   init(hostView: UIView, binaryMessenger: FlutterBinaryMessenger) {
     self.hostView = hostView
     self.channel = FlutterMethodChannel(
@@ -49,8 +62,61 @@ class ShellDock: NSObject {
 
     configureTabBar()
     installInHostView()
+    installVerticalHost()
     bindChannel()
     observeAccessibility()
+  }
+
+  /// Makes a `ShellTabController` the window's root, with Flutter inside it,
+  /// so the system can carry the tabs in the vertical bar.
+  private func installVerticalHost() {
+    guard #available(iOS 27.1, *),
+      let window = hostView as? UIWindow,
+      let flutter = window.rootViewController as? FlutterViewController
+    else { return }
+    let host = ShellTabController(flutter: flutter, items: Self.makeItems())
+    applyTint(to: host.tabBar)
+    // The vertical bar takes its tint from the controller's view, not the
+    // bar's own (it draws the system blue otherwise).
+    host.view.tintColor = host.tabBar.tintColor
+    host.onTabSelected = { [weak self] index in
+      guard let self else { return }
+      self.hapticGenerator.impactOccurred()
+      self.hapticGenerator.prepare()
+      self.tabBar.selectedItem = self.tabBar.items?[index]
+      self.channel.invokeMethod("tabChanged", arguments: index)
+    }
+    host.onLayout = { [weak self] in self?.applyBarePlacement() }
+    host.onPlacementChanged = { [weak self] vertical in
+      guard let self else { return }
+      self.applyBarePlacement()
+      self.channel.invokeMethod("verticalBarChanged", arguments: vertical)
+    }
+    window.rootViewController = host
+    verticalHost = host
+    DispatchQueue.main.async { [weak self] in self?.bringToFront() }
+  }
+
+  /// In the vertical bar the bare dock's tab bar stands down; back at the
+  /// bottom it returns if the route allows it.
+  private func applyBarePlacement() {
+    // The root's view is the window's lowest subview, but swapping roots and
+    // rotating can put it back over the dock.
+    bringToFront()
+    guard !isRouteHidden else { return }
+    let showBare = !isVertical
+    // Idempotent: this runs on every layout pass, and must not cut short a
+    // fade already heading the same way.
+    guard tabBar.isHidden == showBare || (showBare && tabBar.alpha < 1) else { return }
+    tabBar.layer.removeAllAnimations()
+    tabBar.isHidden = !showBare
+    tabBar.alpha = showBare ? 1 : 0
+  }
+
+  private func setVerticalTabsWanted(_ wanted: Bool) {
+    if #available(iOS 27.1, *), let host = verticalHost as? ShellTabController {
+      host.setTabsWanted(wanted)
+    }
   }
 
   deinit {
@@ -62,6 +128,31 @@ class ShellDock: NSObject {
   /// The four approved tabs, in shell order. Tags mirror the Dart tab indices
   /// so `didSelect(item.tag)` and `setTab(index)` stay consistent.
   private func configureTabBar() {
+    tabBar.items = Self.makeItems()
+    tabBar.selectedItem = tabBar.items?.first
+    tabBar.delegate = self
+    applyTint(to: tabBar)
+    hapticGenerator.prepare()
+  }
+
+  /// The tabs' tint, shared by the bare dock and the vertical bar's tabs.
+  private func applyTint(to bar: UITabBar) {
+    // Default appearance, deliberately: iOS 26 dresses a UITabBar in its own
+    // Liquid Glass only while the appearance is untouched.
+    bar.tintColor = UIColor { traits in
+      traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.949, green: 0.933, blue: 0.945, alpha: 1)
+        : UIColor(red: 0.110, green: 0.102, blue: 0.118, alpha: 1)
+    }
+    bar.unselectedItemTintColor = UIColor { traits in
+      traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.596, green: 0.573, blue: 0.604, alpha: 1)
+        : UIColor(red: 0.522, green: 0.494, blue: 0.525, alpha: 1)
+    }
+  }
+
+  /// A fresh set each call: a `UITabBarItem` belongs to one bar.
+  static func makeItems() -> [UITabBarItem] {
     let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
 
     let home = UITabBarItem(
@@ -91,24 +182,7 @@ class ShellDock: NSObject {
     )
     you.tag = 3
 
-    tabBar.items = [home, mixes, library, you]
-    tabBar.selectedItem = home
-    tabBar.delegate = self
-
-    // Default appearance, deliberately: iOS 26 dresses a UITabBar in its own
-    // Liquid Glass only while the appearance is untouched.
-    tabBar.tintColor = UIColor { traits in
-      traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.949, green: 0.933, blue: 0.945, alpha: 1)
-        : UIColor(red: 0.110, green: 0.102, blue: 0.118, alpha: 1)
-    }
-    tabBar.unselectedItemTintColor = UIColor { traits in
-      traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.596, green: 0.573, blue: 0.604, alpha: 1)
-        : UIColor(red: 0.522, green: 0.494, blue: 0.525, alpha: 1)
-    }
-
-    hapticGenerator.prepare()
+    return [home, mixes, library, you]
   }
 
   // MARK: - Layout
@@ -126,16 +200,21 @@ class ShellDock: NSObject {
       // pinned by hand to match the mini-player and the Flutter FrostedDock
       // pill. If iOS 26 turns out to inset the floating bar itself, the extra
       // inset will show at the device gate — drop these two constraints then.
-      tabBar.leadingAnchor.constraint(equalTo: hostView.leadingAnchor, constant: 22),
-      tabBar.trailingAnchor.constraint(equalTo: hostView.trailingAnchor, constant: -22),
+      // Measured from the safe area's sides, not the window's: a system bar
+      // can stand on one side edge for a whole pose (iPhone Duo), and the
+      // dock then centres under the content beside it, as Flutter's pages do.
+      tabBar.leadingAnchor.constraint(
+        equalTo: hostView.safeAreaLayoutGuide.leadingAnchor, constant: 22),
+      tabBar.trailingAnchor.constraint(
+        equalTo: hostView.safeAreaLayoutGuide.trailingAnchor, constant: -22),
       tabBar.bottomAnchor.constraint(equalTo: hostView.bottomAnchor),
 
       // The board's floating pill: 22 pt side margins, 52 pt tall, 7 pt above
       // the bar. It stays put when the bar minimises.
       miniPlayer.leadingAnchor.constraint(
-        equalTo: hostView.leadingAnchor, constant: 22),
+        equalTo: hostView.safeAreaLayoutGuide.leadingAnchor, constant: 22),
       miniPlayer.trailingAnchor.constraint(
-        equalTo: hostView.trailingAnchor, constant: -22),
+        equalTo: hostView.safeAreaLayoutGuide.trailingAnchor, constant: -22),
       miniPlayer.bottomAnchor.constraint(
         equalTo: tabBar.topAnchor, constant: -7),
       miniPlayer.heightAnchor.constraint(equalToConstant: 52),
@@ -174,6 +253,7 @@ class ShellDock: NSObject {
   /// Fades both pieces away — a pushed route inside a mix owns the screen.
   func hide() {
     isRouteHidden = true
+    setVerticalTabsWanted(false)
     animate {
       self.tabBar.alpha = 0
       self.miniPlayer.alpha = 0
@@ -191,10 +271,12 @@ class ShellDock: NSObject {
   func show() {
     isRouteHidden = false
     isMinimized = false
-    tabBar.isHidden = false
+    setVerticalTabsWanted(true)
+    let showBare = !isVertical
+    tabBar.isHidden = !showBare
     if isMiniWanted { miniPlayer.isHidden = false }
     animate {
-      self.tabBar.alpha = 1
+      self.tabBar.alpha = showBare ? 1 : 0
       self.tabBar.transform = .identity
       self.miniPlayer.alpha = self.isMiniWanted ? 1 : 0
     } completion: { finished in
@@ -235,6 +317,9 @@ class ShellDock: NSObject {
     let style: UIUserInterfaceStyle = isDark ? .dark : .light
     tabBar.overrideUserInterfaceStyle = style
     miniPlayer.overrideUserInterfaceStyle = style
+    if #available(iOS 27.1, *), let host = verticalHost as? ShellTabController {
+      host.tabBar.overrideUserInterfaceStyle = style
+    }
   }
 
   /// 200 ms, or instantly under Reduce Motion.
@@ -305,7 +390,13 @@ class ShellDock: NSObject {
           return
         }
         self.tabBar.selectedItem = items[index]
+        if #available(iOS 27.1, *), let host = self.verticalHost as? ShellTabController {
+          host.select(index: index)
+        }
         result(nil)
+
+      case "isVerticalBar":
+        result(self.isVertical)
 
       case "show":
         self.show()
@@ -900,4 +991,147 @@ final class NativeSegmentedPlatformView: NSObject, FlutterPlatformView {
     channel.invokeMethod(
       "valueChanged", arguments: ["index": control.selectedSegmentIndex])
   }
+}
+
+// MARK: - Vertical bar host (iOS 27.1+)
+
+/// The window's root on iOS 27.1 and later, so the system can stand the tabs
+/// in the vertical bar: the column the iPhone Duo keeps its status items in
+/// whenever one of its side edges holds them (closed, or open in landscape).
+/// Only a `UITabBarController`'s own tab bar is placed there, and only in
+/// the system's Liquid Glass; a bare `UITabBar` never is.
+///
+/// Flutter is ONE view controller, so the four tabs share it: each tab's
+/// view controller is an empty slot, and the Flutter controller moves into
+/// whichever slot is selected. Slots forward no appearance calls, so a move
+/// never tells Flutter it disappeared (which would pause the app's
+/// lifecycle); the one real appearance is forwarded by hand when Flutter is
+/// first embedded.
+///
+/// Wherever iOS uses no vertical bar (every pose of every other iPhone, the
+/// Duo open in portrait) this controller's tab bar stays hidden and
+/// `ShellDock`'s bottom dock carries on exactly as before.
+@available(iOS 27.1, *)
+final class ShellTabController: UITabBarController, UITabBarControllerDelegate {
+  private let flutter: UIViewController
+  private var slots: [FlutterSlot] = []
+
+  /// A tab chosen in the vertical bar, by its index.
+  var onTabSelected: ((Int) -> Void)?
+
+  /// The tabs moved into or out of the vertical bar.
+  var onPlacementChanged: ((Bool) -> Void)?
+
+  /// Flutter's own wish for the tabs (`show`/`hide` on `mixtape/shell`).
+  private var tabsWanted = false
+
+  init(flutter: UIViewController, items: [UITabBarItem]) {
+    self.flutter = flutter
+    super.init(nibName: nil, bundle: nil)
+    slots = items.map { item in
+      let slot = FlutterSlot()
+      slot.tabBarItem = item
+      return slot
+    }
+    setViewControllers(slots, animated: false)
+    delegate = self
+    tabBarMinimizeBehavior = .never
+    registerForTraitChanges(UITraitCollection.systemTraitsAffectingVerticalBarEdge) {
+      (self: Self, _: UITraitCollection) in
+      self.placementDidChange()
+    }
+    // UITabBarController loads its view inside `super.init`, before the slots
+    // exist, so Flutter is embedded here rather than in `viewDidLoad`.
+    embedFlutter(in: slots[0], firstTime: true)
+    applyTabBarVisibility(animated: false)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+  /// Whether the system currently stands the tabs in the vertical bar.
+  var isVertical: Bool { traitCollection.verticalBarEdge != .unspecified }
+
+  /// Flutter asked for the tabs (`show`) or for none (`hide`).
+  func setTabsWanted(_ wanted: Bool) {
+    tabsWanted = wanted
+    applyTabBarVisibility(animated: true)
+  }
+
+  /// Flutter switched tabs itself.
+  func select(index: Int) {
+    guard index >= 0, index < slots.count, index != selectedIndex else { return }
+    selectedIndex = index
+    embedFlutter(in: slots[index], firstTime: false)
+  }
+
+  private var lastVertical: Bool?
+
+  /// Every layout pass, after the placement is re-read.
+  var onLayout: (() -> Void)?
+
+  // A belt to the trait registration's braces: a fold or a rotation always
+  // lays the controller out again, so the placement is re-read here too, and
+  // the bare dock re-derives its visibility. A `show()` from Flutter that
+  // lands mid-unfold reads the old placement; this pass corrects it.
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    placementDidChange()
+    onLayout?()
+  }
+
+  private func placementDidChange() {
+    let vertical = isVertical
+    applyTabBarVisibility(animated: false)
+    guard vertical != lastVertical else { return }
+    lastVertical = vertical
+    onPlacementChanged?(vertical)
+  }
+
+  /// Shown only in the vertical bar, and only while Flutter wants the tabs;
+  /// at the bottom the bare dock does the job.
+  private func applyTabBarVisibility(animated: Bool) {
+    let hidden = !(tabsWanted && isVertical)
+    guard isTabBarHidden != hidden else { return }
+    setTabBarHidden(hidden, animated: animated && !UIAccessibility.isReduceMotionEnabled)
+  }
+
+  private func embedFlutter(in slot: FlutterSlot, firstTime: Bool) {
+    guard flutter.parent !== slot else { return }
+    if flutter.parent != nil {
+      flutter.willMove(toParent: nil)
+      flutter.view.removeFromSuperview()
+      flutter.removeFromParent()
+    }
+    slot.addChild(flutter)
+    flutter.view.frame = slot.view.bounds
+    flutter.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    if firstTime { flutter.beginAppearanceTransition(true, animated: false) }
+    slot.view.addSubview(flutter.view)
+    if firstTime { flutter.endAppearanceTransition() }
+    flutter.didMove(toParent: slot)
+  }
+
+  func tabBarController(
+    _ tabBarController: UITabBarController,
+    didSelect viewController: UIViewController
+  ) {
+    guard let slot = viewController as? FlutterSlot,
+      let index = slots.firstIndex(of: slot)
+    else { return }
+    embedFlutter(in: slot, firstTime: false)
+    onTabSelected?(index)
+  }
+
+  // The status bar follows Flutter, wherever it sits.
+  override var childForStatusBarStyle: UIViewController? { flutter }
+  override var childForStatusBarHidden: UIViewController? { flutter }
+}
+
+/// One tab's view controller: an empty stage the shared Flutter controller
+/// stands on while this tab is selected. It forwards no appearance calls (see
+/// `ShellTabController`).
+@available(iOS 27.1, *)
+final class FlutterSlot: UIViewController {
+  override var shouldAutomaticallyForwardAppearanceMethods: Bool { false }
 }
