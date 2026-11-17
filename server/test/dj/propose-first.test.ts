@@ -169,9 +169,9 @@ describe('PROPOSE_FIRST flag', () => {
     expect(proposeFirstEnabled({ PROPOSE_FIRST_USERS: '' }, 'u1')).toBe(false)
   })
 
-  it('ships off in wrangler.jsonc, with no listener list as a var', () => {
+  it('ships on in wrangler.jsonc (cutover 2026-11-17), with no listener list as a var', () => {
     const config = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8')
-    expect(config).toMatch(/"PROPOSE_FIRST":\s*"off"/)
+    expect(config).toMatch(/"PROPOSE_FIRST":\s*"on"/)
     expect(config).not.toMatch(/"PROPOSE_FIRST_USERS":/)
   })
 
