@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { djSessions, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
 import { runDjTurn, type DjDeps } from '../../src/dj/loop'
@@ -16,6 +17,7 @@ import type { CatalogSong } from '../../src/musickit/catalog'
 import { MOOD_CHECK_SYSTEM } from '../../src/dj/genre-check'
 import type { LlmClient, LlmRequest, LlmTurn } from '../../src/dj/llm'
 import type { Intent } from '../../src/dj/contracts'
+import type { LyricsKey, LyricsResult } from '../../src/enrich/lrclib'
 
 // Genre briefs draw from artists' real songs (2026-11-16): with propose
 // first, a personal genre blend asks the model for artists, not song
@@ -63,6 +65,8 @@ type AppleOpts = {
   lyricsOf?: (artist: string, j: number) => boolean | null
   shape?: (artist: string, own: CatalogSong[]) => CatalogSong[]
   proposals?: Proposed[]
+  // LRCLIB, for the instrumental vocal check (dj/vocal-check.ts).
+  lyrics?: (key: LyricsKey) => Promise<LyricsResult | null>
 }
 
 function fakeApple(known: string[], opts: AppleOpts = {}) {
@@ -96,7 +100,7 @@ function fakeApple(known: string[], opts: AppleOpts = {}) {
   const fill: FillDeps = {
     catalog,
     defaultStorefront: 'us',
-    enrich: { storefront: 'us', itunes: async () => null, features: async () => null, lyrics: async () => null, embed: async () => UNIT },
+    enrich: { storefront: 'us', itunes: async () => null, features: async () => null, lyrics: opts.lyrics ?? (async () => null), embed: async () => UNIT },
   }
   return { fill, artistSearches, topSongs, songSearches, limits }
 }
@@ -192,6 +196,7 @@ async function genreTurn(opts: {
   before?: (db: TestDb) => Promise<void>
   shape?: (artist: string, own: CatalogSong[]) => CatalogSong[]
   input?: Record<string, unknown>
+  lyrics?: AppleOpts['lyrics']
 }) {
   const db = await createTestDb()
   await seedUser(db)
@@ -200,6 +205,7 @@ async function genreTurn(opts: {
   const session = await seedSession(db)
   const apple = fakeApple(opts.known ?? ARTISTS, {
     songsPer: opts.songsPer, genreOf: opts.genreOf, genresOf: opts.genresOf, lyricsOf: opts.lyricsOf, shape: opts.shape, proposals: opts.script?.proposed,
+    lyrics: opts.lyrics,
   })
   const check = checker(opts.passes ?? isHit, opts.mood)
   const genres = opts.genres === null ? {} : { genres: opts.genres ?? ['afro house', 'lofi'] }
@@ -558,5 +564,92 @@ describe('featured singers count as vocals', () => {
     const { ARTIST_CONCURRENCY, ARTIST_DEADLINE_MS } = await import('../../src/dj/artist-pool')
     expect(ARTIST_CONCURRENCY).toBe(4)
     expect(ARTIST_DEADLINE_MS).toBe(14_000)
+  })
+})
+
+// Live 2026-11-17: "Phezulu" by Zakes Bantwini & Skye Wanda reached a "lofi
+// afro house ... great instrumentals" mix. Apple lists it without lyrics and
+// its credit has no "feat.", so an instrumental brief now checks every
+// outside song on LRCLIB (dj/vocal-check.ts) before the mood check.
+describe('an instrumental brief checks its outside songs on LRCLIB', () => {
+  const lineTitles = (prompt: string) => Array.from(prompt.matchAll(/^\d+ \| (.+?) — /gm)).map((m) => m[1])
+  const hitOf = (title: string) => Number(title.match(/ Hit (\d+)$/)?.[1])
+  // Song 0 of each artist has lyrics on LRCLIB, song 1 is flagged
+  // instrumental, the rest LRCLIB does not know.
+  function lrclib(text = 'la la la') {
+    const keys: LyricsKey[] = []
+    const lyrics = async (key: LyricsKey): Promise<LyricsResult | null> => {
+      keys.push(key)
+      const j = hitOf(key.title)
+      return j === 0 ? { lyrics: text, instrumental: false } : j === 1 ? { lyrics: null, instrumental: true } : null
+    }
+    return { keys, lyrics }
+  }
+
+  it('drops songs with lyrics, puts flagged instrumentals first and keeps the unknown after them', async () => {
+    const { keys, lyrics } = lrclib()
+    const { result, moodChecks, logged } = await genreTurn({ input: { instrumental: true }, songsPer: 20, lyricsOf: () => false, lyrics })
+    // Apple says no lyrics for all: the pool is songs 0 to 2 of each artist.
+    expect(keys).toHaveLength(36)
+    expect(keys[0]).toMatchObject({ album: 'Album', durationMs: 200_000 })
+    const pool = lineTitles(moodChecks[0])
+    expect(pool).toHaveLength(24)
+    expect(pool.some((t) => hitOf(t) === 0)).toBe(false)
+    expect(pool.slice(0, 12).every((t) => hitOf(t) === 1)).toBe(true)
+    expect(pool.slice(12).every((t) => hitOf(t) === 2)).toBe(true)
+    expect(result.queue).toHaveLength(15)
+    expect(result.queue.some((t) => hitOf(t.title) === 0)).toBe(false)
+    expect(result.queue.filter((t) => hitOf(t.title) === 1)).toHaveLength(12)
+    const propose = logged.propose as { lyricsChecked: number; vocalDropped: number }
+    expect(propose.lyricsChecked).toBe(36)
+    expect(propose.vocalDropped).toBe(12)
+  })
+
+  it('a song with lyrics never refills the floor', async () => {
+    const { lyrics } = lrclib()
+    // Only the flagged instrumentals pass mood; the floor (10) refills from
+    // genre-true rejects, never from a song LRCLIB says has lyrics.
+    const { result } = await genreTurn({ input: { instrumental: true }, songsPer: 20, lyricsOf: () => false, lyrics, mood: (t) => hitOf(t) === 1, targetCount: 20 })
+    expect(result.queue.length).toBeGreaterThan(0)
+    expect(result.queue.some((t) => hitOf(t.title) === 0)).toBe(false)
+  })
+
+  it('a credited singer (Artist & Vocalist) LRCLIB does not know ranks after the single-artist unknowns', async () => {
+    const shape = (artist: string, own: CatalogSong[]) => artist === 'Afro A'
+      ? own.map((s, j) => (j === 2 ? { ...s, artist: 'Afro A & Skye Wanda' } : s))
+      : own
+    const { lyrics } = lrclib()
+    const { moodChecks } = await genreTurn({ input: { instrumental: true }, songsPer: 20, lyricsOf: () => false, lyrics, shape })
+    const pool = lineTitles(moodChecks[0])
+    expect(pool.at(-1)).toBe('Afro A Hit 2')
+  })
+
+  it('no lyric text reaches a prompt, a log line or the database', async () => {
+    const marker = 'ZQX LYRIC LINE'
+    const { lyrics } = lrclib(`${marker} sung all night`)
+    const logs: unknown[][] = []
+    const spies = (['log', 'warn', 'error', 'info', 'debug'] as const).map((m) => vi.spyOn(console, m).mockImplementation((...args: unknown[]) => { logs.push(args) }))
+    let turn: Awaited<ReturnType<typeof genreTurn>>
+    try {
+      turn = await genreTurn({ input: { instrumental: true }, songsPer: 20, lyricsOf: () => false, lyrics })
+    } finally {
+      for (const s of spies) s.mockRestore()
+    }
+    const { db, requests, checks } = turn
+    expect(JSON.stringify(requests)).not.toContain(marker)
+    expect(JSON.stringify(checks)).not.toContain(marker)
+    expect(JSON.stringify(logs)).not.toContain(marker)
+    for (const table of ['tracks', 'track_meanings', 'queue_tracks', 'dj_messages', 'dj_sessions', 'mix_versions']) {
+      const rows = await db.execute(sql.raw(`SELECT * FROM ${table}`))
+      expect(JSON.stringify(rows)).not.toContain(marker)
+    }
+  })
+
+  it('a brief without instrumental makes no LRCLIB request and logs no vocal counts', async () => {
+    const { keys, lyrics } = lrclib()
+    const { logged } = await genreTurn({ lyrics })
+    expect(keys).toHaveLength(0)
+    expect(logged.propose).not.toHaveProperty('lyricsChecked')
+    expect(logged.propose).not.toHaveProperty('vocalDropped')
   })
 })

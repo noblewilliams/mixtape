@@ -349,6 +349,28 @@ every other path is as before.
   calls with bigger pages; the check now sends every pool song (up to 36
   lines) and answers two short lists, roughly a second as before.
 
+As built (instrumental vocal check, 2026-11-17): live, "Phezulu" by Zakes
+Bantwini & Skye Wanda reached a "lofi afro house ... great instrumentals"
+mix: Apple lists most dance songs without lyrics and the credit has no
+"feat.". Only with `intent.instrumental === true`, the outside songs (the
+artist pool and verified proposals: the blend, top-ups, shortfall, spares,
+and the insufficient-seeds proposed mix) are checked on LRCLIB before
+selection (`dj/vocal-check.ts`, `vocalScreen` in `dj/loop.ts`). One row
+read per batch for album and duration (three at most), then `fetchLyrics` 6 at once inside one 4 s
+turn deadline and `TURN_LYRICS_BUDGET` (40 songs x 2 requests = 80); the
+blend's check runs beside the library curation. Only the status is read:
+lyrics present is vocal, the instrumental flag is instrumental, anything
+else unknown; lyric text is dropped in the lookup's callback, never stored,
+logged or put in a prompt. Vocal songs (and `featuresSinger` credits, no
+lookup) are dropped, so never a floor refill; known instrumentals lead,
+then unknown, with multi-artist credits ("&", ",", " x ") after
+single-artist ones and songs Apple lists with lyrics last. Per-turn cache
+on the tracker, so a retry looks nothing up twice. The mood check prompt
+now says a credited singer ("Artist & Vocalist") counts as vocals. Turn
+log: `propose.lyricsChecked`, `propose.vocalDropped`. Worst case 159 + 80
++ 3 = 242 subrequests. Every other brief makes no LRCLIB request.
+Not covered: personal edits (swap or extend) on an instrumental mix.
+
 As built (S8, edits): a personal listener's swap or extend goes outside
 their music only when it cannot be covered from it: a named or artist-only
 scope with no songs to draw on (after the existing catalogue and Apple

@@ -146,4 +146,13 @@ describe('mood check and instrumentals', () => {
     expect(MOOD_CHECK_SYSTEM).toMatch(/Apple holds no lyrics for many sung songs/)
     expect(MOOD_CHECK_SYSTEM).not.toMatch(/—/)
   })
+
+  // Live 2026-11-17: "Phezulu" by Zakes Bantwini & Skye Wanda, a singer
+  // credited beside the artist with no "feat.".
+  it('counts a credited collaborator who is a singer as vocals', async () => {
+    const { MOOD_CHECK_SYSTEM } = await import('../../src/dj/genre-check')
+    expect(MOOD_CHECK_SYSTEM).toMatch(/credited collaborator who is a singer/)
+    expect(MOOD_CHECK_SYSTEM).toMatch(/"Artist & Vocalist"/)
+    expect(MOOD_CHECK_SYSTEM).not.toMatch(/—/)
+  })
 })

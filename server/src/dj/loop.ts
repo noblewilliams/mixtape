@@ -28,7 +28,8 @@ import {
 import { buildPool, hasPersonalCandidates, listenerPlaysSql, musicReady, onSpotifySql, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
 import { checkGenres, checkGenresAndMood, GENRE_CHECK_SYSTEM, type GenreCandidate } from './genre-check'
-import { ARTIST_DEADLINE_MS, ARTIST_MIN, ARTIST_POOL_APPLE, ARTIST_POOL_MIN_SONGS, buildArtistPool, proposeArtists, type ArtistPoolSong, type ProposedArtist } from './artist-pool'
+import { checkVocals, LYRICS_CHECK_DEADLINE_MS, rankInstrumental, TURN_LYRICS_BUDGET, type VocalStatus } from './vocal-check'
+import { ARTIST_DEADLINE_MS, ARTIST_MIN, ARTIST_POOL_APPLE, ARTIST_POOL_MIN_SONGS, buildArtistPool, featuresSinger, proposeArtists, type ArtistPoolSong, type ProposedArtist } from './artist-pool'
 import {
   MIN_VERIFIED,
   PROPOSE_EXTRA,
@@ -1060,7 +1061,9 @@ type FillLog = { inserted: number; enriched: number; subrequests: number; appleE
 // `features`: the per-turn feature chain's counts, when it ran.
 // `adjacent`: songs a genre blend's floor kept that the sound check rejected.
 // `artists`: a personal genre blend's artist pool (dj/artist-pool.ts).
-type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' | 'edit'; curationFailed?: true; features?: FeaturesChainResult; adjacent?: number; artists?: ArtistsLog }
+// `lyricsChecked`, `vocalDropped`: an instrumental brief's LRCLIB vocal check
+// (dj/vocal-check.ts), songs looked up and songs dropped as vocal. Counts only.
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' | 'edit'; curationFailed?: true; features?: FeaturesChainResult; adjacent?: number; artists?: ArtistsLog; lyricsChecked?: number; vocalDropped?: number }
 
 // The artist pool's part of the turn log: counts and codes only. `asked`:
 // artists the model named; `used`: those with songs in the pool; `songs`:
@@ -1124,6 +1127,10 @@ type FillTracker = {
   // of candidates longer than the blend's share.
   artistApple?: number
   artistPool?: true
+  // An instrumental brief's LRCLIB vocal check (vocalScreen): requests
+  // charged, time spent, each song's status, lookups made and songs
+  // dropped, across the turn, so a retry never looks a song up twice.
+  lyrics?: { spent: number; ms: number; status: Map<string, VocalStatus>; checked: number; dropped: Set<string> }
   turnStartedAt: number
 }
 
@@ -1204,6 +1211,60 @@ export const TURN_FEATURES_BUDGET = VERIFY_MAX * (CHAIN_SUBREQUESTS.reccobeats +
 // Model calls and database a measured turn made besides Apple (see
 // TURN_APPLE_BUDGET above).
 export const TURN_OTHER_SUBREQUESTS = 26
+// The vocal check's row reads (album and duration), beside its LRCLIB
+// allowance (TURN_LYRICS_BUDGET, dj/vocal-check.ts): one per batch it
+// checks, at most three in a generate (the blend, its top-up, the spares).
+export const LYRICS_OTHER_SUBREQUESTS = 3
+
+// An instrumental brief's outside songs, checked on LRCLIB before selection
+// (2026-11-17, dj/vocal-check.ts): songs with lyrics or a featured singer
+// dropped (never a floor refill either), flagged instrumentals first, the
+// unknown after, multi-artist credits after single ones. Any other brief
+// gets `picks` back untouched, with no lookup. One allowance and one time
+// box for the turn, as fillProposalFeatures. Never throws.
+async function vocalScreen<T extends VerifiedProposal & { hasLyrics?: boolean | null }>(
+  db: Db,
+  fill: FillDeps | undefined,
+  tracker: Pick<FillTracker, 'lyrics' | 'spend'>,
+  intent: Intent,
+  picks: T[],
+): Promise<T[]> {
+  if (intent.instrumental !== true || picks.length === 0) return picks
+  const state = (tracker.lyrics ??= { spent: 0, ms: 0, status: new Map(), checked: 0, dropped: new Set() })
+  const todo = picks.filter((p) => !state.status.has(p.trackId) && !featuresSinger(p))
+  if (todo.length > 0 && fill) {
+    const now = fill.now ?? Date.now
+    const began = now()
+    try {
+      // The row as the cron would read it, for LRCLIB's exact match.
+      const rows = await db
+        .select({ id: tracks.id, title: tracks.title, artist: tracks.artist, album: tracks.album, durationMs: tracks.durationMs })
+        .from(tracks)
+        .where(inArray(tracks.id, todo.map((p) => p.trackId)))
+      const byId = new Map(rows.map((r) => [r.id, r]))
+      const songs = todo.flatMap((p) => {
+        const r = byId.get(p.trackId)
+        return r ? [r] : []
+      })
+      const result = await checkVocals(songs, fill.enrich.lyrics, {
+        deadlineMs: Math.max(0, LYRICS_CHECK_DEADLINE_MS - state.ms),
+        budget: Math.max(0, TURN_LYRICS_BUDGET - state.spent),
+      })
+      state.spent += result.subrequests
+      state.checked += result.checked
+      for (const [id, status] of result.status) state.status.set(id, status)
+    } catch {
+      // A failed read leaves them unknown: kept, after the known instrumentals.
+    }
+    state.ms += now() - began
+  }
+  const { kept, dropped } = rankInstrumental(picks, state.status)
+  for (const id of dropped) state.dropped.add(id)
+  const log = proposeSpend(tracker).log
+  log.lyricsChecked = state.checked
+  log.vocalDropped = state.dropped.size
+  return kept
+}
 
 // The parts of the turn's tracker the chain reads and writes.
 export type FeaturesTracker = Pick<FillTracker, 'features' | 'spend'>
@@ -2154,7 +2215,8 @@ async function executeProposedQueue(
   // A named genre's sound check (decision 8) on the verified proposals,
   // before the cut. The tracker keeps the raw list, so a conflict retry
   // checks it again rather than trusting an earlier attempt's answer.
-  const genreCheck = await genreFilter(deps, turn.tracker, intent.genres, state.verified, proposalCandidate)
+  const genreCheck = await genreFilter(deps, turn.tracker, intent.genres,
+    await vocalScreen(db, fill, turn.tracker, intent, state.verified), proposalCandidate)
   const genreLines = genreCheck.dropped > 0
     ? [genreCheckNotice({ dropped: genreCheck.dropped, genres: intent.genres ?? [], failed: genreCheck.failed })]
     : []
@@ -2477,6 +2539,8 @@ async function generateFromBrief(
     blending
       ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker, blendTarget,
         personalBlend ? { listener: 'personal', owned, ...artistsBlend } : undefined)
+        // Checked for vocals while the curation still runs (an instrumental brief only).
+        .then((p) => vocalScreen(db, deps.fill, turn.tracker, intent, p))
       : Promise.resolve([]),
   ])
   const curated = [...curatedCheck.kept]
@@ -2503,14 +2567,15 @@ async function generateFromBrief(
     const heldSongs = new Set([...curatedSongs, ...proposed.map(songKey)])
     const want = shortfall - proposed.length
     if (blending) {
-      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want + genreSpares(intent, want), held, heldSongs, deps.step))
+      proposed.push(...await vocalScreen(db, deps.fill, turn.tracker, intent,
+        await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want + genreSpares(intent, want), held, heldSongs, deps.step)))
     } else {
       const exclude = curated.flatMap((p) => {
         const t = byId.get(p.trackId)
         return t ? [{ title: t.title, artist: t.artist }] : []
       })
-      proposed.push(...await shortfallProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget,
-        turn.tracker, want, exclude, held, heldSongs, early))
+      proposed.push(...await vocalScreen(db, deps.fill, turn.tracker, intent, await shortfallProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget,
+        turn.tracker, want, exclude, held, heldSongs, early)))
     }
   }
   // The proposals, blend and shortfall alike, pass the same check: at most
@@ -2532,7 +2597,8 @@ async function generateFromBrief(
   if (personalBlend && gap > 0) {
     const held = new Set([...curatedIds, ...checkedIds])
     const heldSongs = new Set([...curatedSongs, ...checkedSongs])
-    const spares = await topUpFromBlend(db, deps.fill!, intent, turn.tracker, gap + genreSpares(intent, gap), held, heldSongs, deps.step)
+    const spares = await vocalScreen(db, deps.fill, turn.tracker, intent,
+      await topUpFromBlend(db, deps.fill!, intent, turn.tracker, gap + genreSpares(intent, gap), held, heldSongs, deps.step))
     const sparesCheck = await genreFilter(deps, turn.tracker, intent.genres, spares, proposalCandidate)
     sparesFailed = sparesCheck.failed
     sparesRejected = sparesCheck.rejected

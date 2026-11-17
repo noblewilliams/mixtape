@@ -31,9 +31,10 @@ import { tracks } from '../../src/db/schema'
 import { fillFeaturesForTurn, CHAIN_SUBREQUESTS } from '../../src/enrich/features-chain'
 import { createDeezerTempoClient } from '../../src/enrich/deezer-tempo'
 import { STAGE_SUBREQUESTS } from '../../src/dj/catalogue-fill'
-import { ARTIST_POOL_OTHER_SUBREQUESTS, TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS, WIDE_TURN_APPLE_BUDGET } from '../../src/dj/loop'
+import { ARTIST_POOL_OTHER_SUBREQUESTS, LYRICS_OTHER_SUBREQUESTS, TURN_APPLE_BUDGET, TURN_FEATURES_BUDGET, TURN_OTHER_SUBREQUESTS, WIDE_TURN_APPLE_BUDGET } from '../../src/dj/loop'
 import { ARTIST_ASK, ARTIST_POOL_APPLE, ARTIST_TOP_SONGS_INSTRUMENTAL } from '../../src/dj/artist-pool'
 import { MAX_TOP_SONGS_LIMIT } from '../../src/musickit/catalog'
+import { checkVocals, LRCLIB_PER_SONG, LYRICS_CHECK_MAX, TURN_LYRICS_BUDGET } from '../../src/dj/vocal-check'
 import { GENRE_POOL_MAX, VERIFY_MAX, WIDE_VERIFY_MAX } from '../../src/dj/propose'
 
 const DURATION_MS = 200_000
@@ -274,6 +275,21 @@ describe('enrichment subrequest budget', () => {
     // 61 + 26 + 66 + 6 = 159, well under the 900 held for a paid-plan invocation.
     const worst = WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET + ARTIST_POOL_OTHER_SUBREQUESTS
     expect(worst).toBe(159)
+    expect(worst).toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
+  })
+
+  it('an instrumental brief\'s LRCLIB vocal check (2026-11-17) charges two requests a song and stays well inside the budget', async () => {
+    // The lyrics lookup's worst case is the exact get missing, then the search.
+    const { calls, deps } = worstCase()
+    const songs = Array.from({ length: 5 }, (_, i) => ({ id: `t${i}`, title: `Song ${i}`, artist: 'Artist', album: 'Album', durationMs: DURATION_MS }))
+    const result = await checkVocals(songs, deps.lyrics, { deadlineMs: 4_000, budget: TURN_LYRICS_BUDGET })
+    expect(calls).toHaveLength(5 * LRCLIB_PER_SONG)
+    expect(result.subrequests).toBe(calls.length)
+    expect(LYRICS_CHECK_MAX).toBe(40)
+    expect(TURN_LYRICS_BUDGET).toBe(80)
+    // 159 + 80 LRCLIB + 3 row reads = 242, well under the 900.
+    const worst = WIDE_TURN_APPLE_BUDGET + TURN_OTHER_SUBREQUESTS + TURN_FEATURES_BUDGET + ARTIST_POOL_OTHER_SUBREQUESTS + TURN_LYRICS_BUDGET + LYRICS_OTHER_SUBREQUESTS
+    expect(worst).toBe(242)
     expect(worst).toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
   })
 })

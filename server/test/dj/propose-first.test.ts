@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '../helpers/db'
@@ -136,13 +136,14 @@ async function notPersonal(db: TestDb, sessionId: string) {
 
 const generate = (input: Record<string, unknown>) => ({ name: 'generate_queue', input: { themes: 'late evening, warm', ...input } })
 
-async function personalTurn(opts: { library?: number; input: Record<string, unknown>; deps?: Partial<DjDeps>; brief?: string; genre?: string }) {
+async function personalTurn(opts: { library?: number; input: Record<string, unknown>; deps?: Partial<DjDeps>; brief?: string; genre?: string; lyrics?: FillDeps['enrich']['lyrics'] }) {
   const db = await createTestDb()
   await seedUser(db)
   await seedLibrary(db, opts.library ?? 30, 'u1', opts.genre)
   const session = await seedSession(db)
   const round = proposals(22)
   const { fill, searches } = fakeApple(round)
+  if (opts.lyrics) fill.enrich.lyrics = opts.lyrics
   const { llm, requests } = scriptedLlm([generate(opts.input)], round)
   const deps: DjDeps = { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true, ...opts.deps }
   const result = await runDjTurn(db, deps, { id: session.id, userId: 'u1' }, opts.brief ?? 'something for tonight')
@@ -723,5 +724,53 @@ describe('a genre brief comes back full (floor)', () => {
     expect(askedFor(req)).toBe(Math.floor(15 * 0.75) + PROPOSE_EXTRA)
     expect(searches.length).toBeLessThanOrEqual(VERIFY_MAX)
     expect(toolResults(requests)[0]).not.toMatch(/lean adjacent/)
+  })
+})
+
+// Instrumental briefs check verified proposals on LRCLIB too (2026-11-17,
+// dj/vocal-check.ts): a song with lyrics is dropped, a flagged instrumental
+// leads, and an unknown stays after it.
+describe('an instrumental brief checks verified proposals on LRCLIB', () => {
+  const n = (title: string) => Number(title.replace('Song ', ''))
+  // Song 0 and 3 have lyrics, songs 1 and 4 are flagged instrumental, the rest unknown.
+  function lrclib() {
+    const titles: string[] = []
+    const lyrics = async (key: { title: string }) => {
+      titles.push(key.title)
+      const i = n(key.title)
+      return i === 0 || i === 3 ? { lyrics: 'words', instrumental: false } : i === 1 || i === 4 ? { lyrics: null, instrumental: true } : null
+    }
+    return { titles, lyrics }
+  }
+
+  it('drops proposals with lyrics and puts flagged instrumentals first', async () => {
+    const { titles, lyrics } = lrclib()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    let turn: Awaited<ReturnType<typeof personalTurn>>
+    let logged: { propose: { vocalDropped: number; lyricsChecked: number } }
+    try {
+      turn = await personalTurn({ input: { targetCount: 10, instrumental: true }, lyrics })
+      logged = JSON.parse(log.mock.calls.find((c) => c[0] === 'dj turn')![1] as string)
+    } finally {
+      log.mockRestore()
+    }
+    const { result } = turn
+    expect(titles.length).toBeGreaterThan(0)
+    const proposed = result.queue.filter((t) => t.title.startsWith('Song ')).map((t) => n(t.title))
+    expect(proposed).not.toContain(0)
+    expect(proposed).not.toContain(3)
+    expect(proposed).toContain(1)
+    expect(proposed).toContain(4)
+    // Known instrumentals lead the proposals.
+    expect(proposed.slice(0, 2).sort()).toEqual([1, 4])
+    expect(logged.propose.vocalDropped).toBe(2)
+    expect(logged.propose.lyricsChecked).toBe(titles.length)
+  })
+
+  it('a brief without instrumental makes no LRCLIB request', async () => {
+    const { titles, lyrics } = lrclib()
+    const { result } = await personalTurn({ input: { targetCount: 10 }, lyrics })
+    expect(titles).toHaveLength(0)
+    expect(result.queue.some((t) => t.title === 'Song 0')).toBe(true)
   })
 })
