@@ -26,13 +26,18 @@ forbids, so the founder chose (a) plus (b) and left that stance untouched:
 Code: `server/src/dj/title.ts` (`generateMixTitle`), `routes/sessions.ts`
 (`createMixTurn`). Amends 2026-08-30 session titles.
 
-Amended (2026-11-17, founder): the brief-only name (the fallback, and the
-name of a chat-only first turn) runs 4 to 7 words and reads as a small
-scene ("Rain Tapping Morse Code on the Window"), not 2 to 5 flat words. The
-prompt says the brief is material to title, never to answer, and an answer
-over 9 words is discarded as a reply rather than a name (one real brief,
-"extend my running playlist", drew "I appreciate the request, but ...").
-About 0.8 s per call measured.
+Amended (2026-11-17, founder): both namers write 3 to 8 words in sentence
+case, in the voice of the music asked for (its slang, places, rituals and
+attitude), as a line someone would say rather than a description of a
+scene: "Roof don catch fire at midnight", "Rain kept us honest till
+sunrise". The song namer usually writes its own line from what the songs
+share and lifts a song or album title only when one of 3 or more words
+sums up the mix ("Sunset in Pretoria"). The brief is material to name,
+never to answer; an answer over 10 words is discarded as a reply (one real
+brief, "extend my running playlist", drew "I appreciate the request, but
+..."). The song-based call has no retry, so it adds at most 5 s after the
+picks (usually under 1 s); the parallel brief-only call keeps the SDK's one
+retry. Known limit: Haiku does not always lowercase a lifted title.
 
 ## 2026-11-16 — Genre mixes stay full: genre-true suggestions, a refill floor (founder)
 

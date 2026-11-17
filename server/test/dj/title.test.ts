@@ -79,9 +79,9 @@ describe('generateSessionTitle', () => {
     expect(capturedTimeoutMs).toBe(5000)
   })
 
-  // Founder 2026-11-17: brief-only names were too short and flat ("Sunset
-  // Rhythms Dreaming"); they run 4 to 7 words and aim for creative.
-  it('asks for a 4 to 7 word creative name, with filler words banned and no em dashes in its rules', async () => {
+  // Founder 2026-11-17: names run 3 to 8 words, in sentence case, in the
+  // voice of the music asked for rather than describing a scene.
+  it('asks for a 3 to 8 word name in sentence case and the voice of the genre, with filler words banned and no em dashes in its rules', async () => {
     let system = ''
     let maxTokens: number | undefined
     const complete: LlmComplete = async (opts) => {
@@ -90,7 +90,9 @@ describe('generateSessionTitle', () => {
       return 'Fine'
     }
     await generateSessionTitle(complete, 'x', FALLBACK)
-    expect(system).toMatch(/4 to 7 words/)
+    expect(system).toMatch(/3 to 8 words/)
+    expect(system).toMatch(/sentence case/i)
+    expect(system).toMatch(/genre/i)
     expect(system).not.toMatch(/2-5 word/)
     expect(system).toMatch(/Vibes/)
     expect(system).not.toContain('—')
@@ -101,6 +103,11 @@ describe('generateSessionTitle', () => {
     const complete: LlmComplete = async () => "I appreciate the request, but I don't have access to your playlist"
     expect(await generateSessionTitle(complete, 'extend my running playlist', FALLBACK)).toBe(FALLBACK)
     expect(await generateMixTitle(complete, 'x', [{ title: 'A', artist: 'B', album: null }], FALLBACK)).toBe(FALLBACK)
+  })
+
+  it('keeps an 8-word title and drops anything past 10 words as a reply', async () => {
+    expect(await generateSessionTitle(async () => 'one two three four five six seven eight', 'x', FALLBACK)).toBe('one two three four five six seven eight')
+    expect(await generateSessionTitle(async () => 'a b c d e f g h i j k', 'x', FALLBACK)).toBe(FALLBACK)
   })
 
   it('tells the model the brief is something to title, never something to answer', async () => {
@@ -157,11 +164,12 @@ describe('generateMixTitle', () => {
     }
   })
 
-  it('stays on the fast title model with the 5s bound', async () => {
-    const { seen, complete } = capture()
-    await generateMixTitle(complete, 'x', SONGS, FALLBACK)
-    expect(seen.model).toBe(TITLE_MODEL)
-    expect(seen.timeoutMs).toBe(5000)
+  it('stays on the fast title model with a hard 5s bound: no retry, since the mix waits on it', async () => {
+    let opts: Parameters<LlmComplete>[0] | undefined
+    await generateMixTitle(async (o) => ((opts = o), 'Fine'), 'x', SONGS, FALLBACK)
+    expect(opts?.model).toBe(TITLE_MODEL)
+    expect(opts?.timeoutMs).toBe(5000)
+    expect(opts?.maxRetries).toBe(0)
   })
 
   it('tells the model to draw on song and album titles and imagery, never lyrics, with no em dashes in its rules', async () => {
@@ -173,6 +181,14 @@ describe('generateMixTitle', () => {
     expect(system).toMatch(/lyric/i)
     expect(system).toMatch(/never/i)
     expect(system).not.toContain('—')
+  })
+
+  it('asks for 3 to 8 words in sentence case, in the voice of the genre', async () => {
+    const { seen, complete } = capture()
+    await generateMixTitle(complete, 'x', SONGS, FALLBACK)
+    expect(seen.system).toMatch(/3 to 8 words/)
+    expect(seen.system).toMatch(/sentence case/i)
+    expect(seen.system).toMatch(/genre/i)
   })
 
   it('sanitizes song fields so a crafted track title cannot break out of its line', async () => {
