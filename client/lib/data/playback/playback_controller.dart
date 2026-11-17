@@ -355,6 +355,24 @@ class PlaybackController extends ChangeNotifier {
     };
   }
 
+  /// Listening evidence not yet sent, oldest first (tests only).
+  @visibleForTesting
+  List<Map<String, dynamic>> get pendingEvents => List.unmodifiable(_pending);
+
+  /// Mix [id] was deleted (select and delete mixes, approved 2026-11-16).
+  ///
+  /// Its unsent listens go now: the server answers a batch naming a deleted
+  /// mix with 404, and [_flush] drops the whole queue on a 404, other mixes'
+  /// listens with it. When it is the mix on the player, the player lets go
+  /// of it as [release] does, so nothing links back to a mix that is gone;
+  /// the music itself is not stopped (board S5).
+  void forgetSession(String id) {
+    final before = _pending.length;
+    _pending.removeWhere((event) => event['sessionId'] == id);
+    if (_pending.length != before) _persist();
+    if (sessionId == id) release();
+  }
+
   /// Forgets a mix the app's player could not start, once it has gone to the
   /// Music app instead: no mini-player, no Now Playing left holding a
   /// failure for a mix that is playing somewhere else.

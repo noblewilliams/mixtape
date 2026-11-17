@@ -69,7 +69,12 @@ class DjSession {
     this.caseColor,
     this.kind = SessionKind.mix,
     this.pick,
+    this.shared = false,
   });
+
+  /// The mix has a live, unrevoked share link (`GET /sessions`, added for
+  /// select and delete mixes 2026-11-16). Older servers omit it: false.
+  final bool shared;
 
   final String? caseColor;
   final String id;
@@ -104,6 +109,7 @@ class DjSession {
     String? caseColor,
     SessionKind? kind,
     AlbumSummary? pick,
+    bool? shared,
   }) => DjSession(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -114,6 +120,7 @@ class DjSession {
     caseColor: caseColor ?? this.caseColor,
     kind: kind ?? this.kind,
     pick: pick ?? this.pick,
+    shared: shared ?? this.shared,
   );
 
   factory DjSession.fromJson(Map<String, dynamic> json) => DjSession(
@@ -128,6 +135,7 @@ class DjSession {
     pick: json['pick'] == null
         ? null
         : AlbumSummary.fromJson(json['pick'] as Map<String, dynamic>),
+    shared: json['shared'] as bool? ?? false,
   );
 }
 

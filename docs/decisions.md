@@ -1943,6 +1943,24 @@ connection" for a server that didn't answer (2026-11-16).
 **Reopens if:** Apple's page is blocked somewhere listeners are, or a probe
 on every ambiguous failure shows up as a delay people notice.
 
+## 2026-11-16 — Mixes can be deleted, permanently, in select mode
+
+Listeners tick several mixes and archive or delete them at once (board
+`docs/mockups/2026-11-16-select-delete-mixes.html`, approval
+`docs/mockups/approved/2026-11-16-select-delete-mixes.md`). Delete is a real
+delete, not a hidden flag: `POST /sessions/delete { ids }` removes the
+sessions and everything cascading from them (messages, queue, versions, events,
+shares and others' saves of them), so the taste signals those mixes carried go
+too. Chosen over a soft delete because "delete" should mean it. One request per
+action, all or nothing; ids the listener doesn't own are skipped silently. A
+running turn is asked to stop first (bounded 5 s wait). Anonymous listeners are
+refused (`403 sign_in_required`) because the three-mix cap counts existing
+rows, and deleting would reset it. `GET /sessions` rows carry `shared` (a live
+share link) so the confirm can warn that links stop working. Clients send at
+most 100 ids per call and drop every requested id from their list, counting
+only what came back deleted. **Reopens if:** taste quality visibly drops
+for people who prune heavily, or anonymous listeners need to delete.
+
 ## 2026-11-16 — DJ paused: one server flag closes the composer everywhere
 
 When the model is unavailable to us (Anthropic credits spent, an outage), the

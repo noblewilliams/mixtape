@@ -121,8 +121,12 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     _rebuild();
   }
 
+  /// A screen's select-mode toolbar holds the bottom ([dockTakeoverProvider]).
+  bool _takenOver = false;
+
   /// Whether the bottom dock should be on screen right now.
-  bool get _bottomDockWanted => !_wide && !_routeAbove && !_listenSheetUp;
+  bool get _bottomDockWanted =>
+      !_wide && !_routeAbove && !_listenSheetUp && !_takenOver;
 
   Brightness? _appearance;
   final List<StreamSubscription<Object?>> _subscriptions = [];
@@ -442,6 +446,12 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     ref.listen<MiniPlayerState>(miniPlayerStateProvider, (previous, next) {
       _tell((dock) => dock.setMiniPlayer(next));
     });
+    _takenOver = ref.watch(dockTakeoverProvider);
+    ref.listen<bool>(dockTakeoverProvider, (previous, next) {
+      if (previous == next) return;
+      _takenOver = next;
+      _applyBottomDock();
+    });
 
     // The dock's glass resolves against the system appearance, so the app's
     // resolved brightness has to be pushed down on every theme change.
@@ -478,8 +488,13 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
                     // Every toast in the app renders in this Scaffold — it is
                     // the app-level messenger's root, whatever tab asked — so
                     // only here can a toast learn where the dock is.
-                    clearance: resolved && !wide && _bottomDockWanted
+                    clearance: !resolved || wide
+                        ? null
+                        : _bottomDockWanted
                         ? ShellScreen.toastClearance(miniVisible: mini.visible)
+                        // The select toolbar sits where the tab bar does.
+                        : _takenOver
+                        ? ShellScreen.toastClearance(miniVisible: false)
                         : null,
                     child: Scaffold(
                       backgroundColor: Colors.transparent,
@@ -529,6 +544,7 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
                       !nativeDock &&
                       !_routeAbove &&
                       !_listenSheetUp &&
+                      !_takenOver &&
                       !wide)
                     Positioned(
                       left: 0,

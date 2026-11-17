@@ -10,7 +10,7 @@ import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/playback/listening_meter.dart';
 
 class FakeApi implements PlaybackApi {
-  bool enabled = true, fail = false;
+  bool enabled = true, fail = false, sendFails = false;
   int revision = 1;
   final batches = <List<Map<String, dynamic>>>[];
   @override
@@ -34,6 +34,7 @@ class FakeApi implements PlaybackApi {
       preferences();
   @override
   Future<void> send(int revision, List<Map<String, dynamic>> events) async {
+    if (sendFails) throw Exception('offline');
     batches.add(events);
   }
 }
@@ -327,6 +328,64 @@ void main() {
       expect(player.failureCode, isNull);
       expect(player.unavailableIndex, isNull);
       expect(player.sample.status, 'stopped');
+      player.dispose();
+      await bridge.events.close();
+    });
+  });
+
+  group('a deleted mix (select and delete mixes, 2026-11-16)', () {
+    Future<void> listenThrough(PlaybackController player) async {
+      for (var t = 0; t <= 60000; t += 1000) {
+        player.meter.sample(
+          PlayerSample(index: 0, positionMs: t.toDouble(), status: 'playing'),
+          t,
+        );
+      }
+      await player.stop();
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    test('its unsent listens go, and only its own', () async {
+      final api = FakeApi()..sendFails = true, bridge = FakeBridge();
+      final player = PlaybackController(api, bridge);
+      await player.start('gone', 1, 'Gone', [song]);
+      await listenThrough(player);
+      await player.start('kept', 1, 'Kept', [song]);
+      await listenThrough(player);
+      expect(
+        player.pendingEvents.map((e) => e['sessionId']).toSet(),
+        {'gone', 'kept'},
+      );
+
+      player.forgetSession('gone');
+
+      expect(player.pendingEvents.map((e) => e['sessionId']).toSet(), {'kept'});
+      player.dispose();
+      await bridge.events.close();
+    });
+
+    test('playing it, the player lets go of the mix but the music keeps on', () async {
+      final api = FakeApi(), bridge = FakeBridge();
+      final player = PlaybackController(api, bridge);
+      await player.start('gone', 1, 'Gone', [song]);
+
+      player.forgetSession('gone');
+
+      expect(player.sessionId, isNull);
+      expect(bridge.stops, 0);
+      player.dispose();
+      await bridge.events.close();
+    });
+
+    test('another mix playing is left alone', () async {
+      final api = FakeApi(), bridge = FakeBridge();
+      final player = PlaybackController(api, bridge);
+      await player.start('kept', 1, 'Kept', [song]);
+
+      player.forgetSession('gone');
+
+      expect(player.sessionId, 'kept');
+      expect(player.tracks, isNotEmpty);
       player.dispose();
       await bridge.events.close();
     });

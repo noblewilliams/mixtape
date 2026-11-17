@@ -54,7 +54,9 @@ import '../widgets/shared_mix_row.dart';
 import 'archived_mixes_screen.dart';
 import 'chat_screen.dart';
 import 'mix_archive_feedback.dart';
+import 'mix_select_flow.dart';
 import 'shared_mix_screen.dart';
+import '../widgets/mix_select_mode.dart';
 
 const _removeFailedMessage = 'Couldn’t remove it from Listen later. Try again.';
 const _restoreFailedMessage =
@@ -118,7 +120,25 @@ class MixesScreen extends ConsumerStatefulWidget {
   ConsumerState<MixesScreen> createState() => _MixesScreenState();
 }
 
-class _MixesScreenState extends ConsumerState<MixesScreen> {
+class _MixesScreenState extends ConsumerState<MixesScreen>
+    with MixSelectFlow<MixesScreen> {
+  // Select mode (approved 2026-11-16): the Active list's own mixes.
+  @override
+  List<DjSession> get selectableSessions =>
+      nonArchivedSessions(ref.read(sessionsProvider).value ?? const []);
+
+  /// A turn out, or a new mix on its first turn that the list now lists
+  /// (the row that turns its reels as the pending one adopted).
+  @override
+  Set<String> get workingIds {
+    final activity = ref.read(mixActivityProvider);
+    final adopted = activity.pending?.adopt(selectableSessions);
+    return {...activity.working.keys, ?adopted};
+  }
+
+  @override
+  bool get archivedList => false;
+
   MixesSegment _segment = MixesSegment.active;
   bool _refreshFailed = false;
   bool _shelfRefreshFailed = false;
@@ -332,6 +352,12 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
     // The shelf's segment left (signed out of albums, the server turned them
     // off): fall back to Active rather than show a segment that isn't there.
     if (!albumsOn && _onShelf) _segment = MixesSegment.active;
+    pruneSelection();
+    exitSelectOnTabChange(context);
+    final showControl = albumsOn && !selecting;
+    final canSelect =
+        !_onShelf &&
+        nonArchivedSessions(sessionsAsync.value ?? const []).isNotEmpty;
 
     return NotificationListener<ScrollNotification>(
       onNotification: _onScroll,
@@ -354,40 +380,64 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
           ),
           child: Scaffold(
             backgroundColor: Colors.transparent,
-            body: SwipeActionsGroup(
-              child: LargeTitleScaffold(
-                controller: _scroll,
-                title: 'Mixes',
-                accessoriesBelowTitle:
-                    albumsOn &&
-                    !_MixesSegmentedControl.fitsBesideTitle(context, 'Mixes'),
-                titleAccessory: albumsOn
-                    ? _MixesSegmentedControl(
-                        segment: _segment,
-                        onChanged: (value) => setState(() => _segment = value),
-                      )
-                    : null,
-                onRefresh: _refresh,
-                slivers: [
-                  if (_refreshFailed && !_onShelf)
-                    _RefreshFailedBanner(
-                      title: 'Couldn’t refresh your mixes.',
-                      body: 'Showing your last loaded mixes.',
-                      onRetry: _refresh,
-                    ),
-                  if (_shelfRefreshFailed && _onShelf)
-                    _RefreshFailedBanner(
-                      key: const Key('listen-later-refresh-failed'),
-                      title: 'Couldn’t refresh your Listen later shelf.',
-                      body: 'Showing your last loaded shelf.',
-                      onRetry: _refresh,
-                    ),
-                  if (_onShelf)
-                    _shelf(ref.watch(listenLaterProvider), sessionsAsync.value)
-                  else
-                    ..._body(sessionsAsync),
-                ],
-              ),
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                SwipeActionsGroup(
+                  child: LargeTitleScaffold(
+                    controller: _scroll,
+                    title: 'Mixes',
+                    // The ⋯ (select mode's way in, board S1) and, while
+                    // selecting, Select all and Done: one pinned row whose room
+                    // stays, so the title never jumps.
+                    pinTrailing: true,
+                    leading: selecting ? selectAllButton() : null,
+                    trailing: selecting
+                        ? doneButton()
+                        : canSelect
+                        ? moreButton()
+                        : null,
+                    accessoriesBelowTitle:
+                        showControl &&
+                        !_MixesSegmentedControl.fitsBesideTitle(
+                          context,
+                          'Mixes',
+                        ),
+                    // Listen later has no select mode: the control hides.
+                    titleAccessory: showControl
+                        ? _MixesSegmentedControl(
+                            segment: _segment,
+                            onChanged: (value) =>
+                                setState(() => _segment = value),
+                          )
+                        : null,
+                    onRefresh: _refresh,
+                    slivers: [
+                      if (_refreshFailed && !_onShelf)
+                        _RefreshFailedBanner(
+                          title: 'Couldn’t refresh your mixes.',
+                          body: 'Showing your last loaded mixes.',
+                          onRetry: _refresh,
+                        ),
+                      if (_shelfRefreshFailed && _onShelf)
+                        _RefreshFailedBanner(
+                          key: const Key('listen-later-refresh-failed'),
+                          title: 'Couldn’t refresh your Listen later shelf.',
+                          body: 'Showing your last loaded shelf.',
+                          onRetry: _refresh,
+                        ),
+                      if (_onShelf)
+                        _shelf(
+                          ref.watch(listenLaterProvider),
+                          sessionsAsync.value,
+                        )
+                      else
+                        ..._body(sessionsAsync),
+                    ],
+                  ),
+                ),
+                if (selecting) selectToolbar(context),
+              ],
             ),
           ),
         ),
@@ -463,10 +513,16 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
           curve: Curves.easeOutCubic,
           alignment: Alignment.topCenter,
           child: showArchived
-              ? _ArchivedRow(
-                  key: _archivedRow,
-                  count: archivedCount,
-                  onOpen: _openArchived,
+              ? IgnorePointer(
+                  ignoring: selecting,
+                  child: Opacity(
+                    opacity: selecting ? MixSelect.offOpacity : 1,
+                    child: _ArchivedRow(
+                      key: _archivedRow,
+                      count: archivedCount,
+                      onOpen: _openArchived,
+                    ),
+                  ),
                 )
               : const SizedBox(width: double.infinity),
         ),
@@ -476,11 +532,19 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
     Widget pendingSliver() => SliverPadding(
       padding: widget.bottomInset.copyWith(bottom: 0),
       sliver: SliverToBoxAdapter(
-        child: _PendingMixRow(
-          prompt: pending!.prompt,
-          isFirst: !showArchived,
-          onOpen: widget.onStartMix,
-        ),
+        child: selecting
+            ? MixSelectOffRow(
+                child: _PendingMixRow(
+                  prompt: pending!.prompt,
+                  isFirst: !showArchived,
+                  onOpen: widget.onStartMix,
+                ),
+              )
+            : _PendingMixRow(
+                prompt: pending!.prompt,
+                isFirst: !showArchived,
+                onOpen: widget.onStartMix,
+              ),
       ),
     );
 
@@ -522,13 +586,17 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
             final entry = entries[index];
             if (entry is SharedMixEntry) {
               final mix = entry.mix;
-              return SharedMixHomeRow(
-                key: _entryKey(entry),
+              final row = SharedMixHomeRow(
+                key: selecting ? null : _entryKey(entry),
                 mix: mix,
                 isFirst: first,
                 onOpen: () => _openShared(mix.token),
                 onRemove: () => _removeShared(mix.token),
               );
+              // Shared mixes are the sender's: dimmed, no circle (board S2).
+              return selecting
+                  ? MixSelectOffRow(key: _entryKey(entry), child: row)
+                  : row;
             }
             final session = (entry as OwnMixEntry).session;
             return MixHomeRow(
@@ -549,6 +617,11 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
                   .setCaseColor(session.id, color),
               onArchive: () => _setArchived(session.id, archived: true),
               onRestore: () => _setArchived(session.id, archived: false),
+              onSelect: () => enterSelect(session.id),
+              selecting: selecting,
+              selected: isSelected(session.id),
+              fading: isDeleting(session.id),
+              onToggleSelected: () => toggleSelected(session.id),
             );
           },
         ),

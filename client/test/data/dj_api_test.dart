@@ -65,6 +65,45 @@ DjApi _api({required http.Client inner, Duration timeout = const Duration(second
     );
 
 void main() {
+  group('deleteSessions (select and delete mixes, 2026-11-16)', () {
+    test('POSTs the ids to /sessions/delete and returns what was deleted', () async {
+      String? seenMethod;
+      Uri? seenUrl;
+      Object? seenBody;
+      final inner = MockClient((req) async {
+        seenMethod = req.method;
+        seenUrl = req.url;
+        seenBody = jsonDecode(req.body);
+        return http.Response(jsonEncode({'deleted': ['a']}), 200);
+      });
+
+      final deleted = await _api(inner: inner).deleteSessions(['a', 'b']);
+
+      expect(seenMethod, 'POST');
+      expect(seenUrl.toString(), 'http://x/sessions/delete');
+      expect(seenBody, {'ids': ['a', 'b']});
+      expect(deleted, ['a']);
+    });
+
+    test('403 sign_in_required is its own exception', () async {
+      final inner = MockClient(
+        (_) async => http.Response(jsonEncode({'error': 'sign_in_required'}), 403),
+      );
+      await expectLater(
+        _api(inner: inner).deleteSessions(['a']),
+        throwsA(isA<SignInRequiredException>()),
+      );
+    });
+
+    test('a server error passes through as ApiException', () async {
+      final inner = MockClient((_) async => http.Response('nope', 500));
+      await expectLater(
+        _api(inner: inner).deleteSessions(['a']),
+        throwsA(isA<ApiException>()),
+      );
+    });
+  });
+
   group('the shape rides the turn (2026-11-15)', () {
     test('a message carries energyArc; none when there is no shape', () async {
       final bodies = <Map<String, dynamic>>[];
@@ -399,6 +438,20 @@ void main() {
       expect(seenUrl.toString(), 'http://x/sessions');
       expect(sessions.map((s) => s.id), ['a', 'b']);
       expect(sessions[1].status, 'archived');
+    });
+
+    test('rows carry shared; an older server omits it and reads false', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({
+              'sessions': [
+                {..._session(id: 'a'), 'shared': true},
+                _session(id: 'b'),
+              ],
+            }),
+            200,
+          ));
+      final sessions = await _api(inner: inner).listSessions();
+      expect(sessions.map((s) => s.shared), [true, false]);
     });
   });
 

@@ -26,6 +26,7 @@ class LargeTitleScaffold extends StatefulWidget {
     required this.slivers,
     this.leading,
     this.trailing,
+    this.pinTrailing = false,
     this.titleAccessory,
     this.accessoriesBelowTitle = false,
     this.controller,
@@ -46,6 +47,12 @@ class LargeTitleScaffold extends StatefulWidget {
   /// Bottom-aligned beside the title — normally a `GlassCluster`. Pinned on
   /// the [leading] row instead when a leading cluster is given.
   final Widget? trailing;
+
+  /// Keeps the pinned top row even without [leading], with [trailing] at its
+  /// end (Mixes' ⋯, select and delete mixes 2026-11-16). The row's room is
+  /// kept while [trailing] is null too, so the title never jumps when the
+  /// buttons come and go.
+  final bool pinTrailing;
 
   /// Bottom-aligned beside the title — normally a segmented control.
   final Widget? titleAccessory;
@@ -207,6 +214,8 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
     }
   }
 
+  bool get _pinned => widget.leading != null || widget.pinTrailing;
+
   @override
   Widget build(BuildContext context) {
     _scheduleMeasure();
@@ -247,7 +256,7 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
                 : _collapsedBar(context, padding.top),
           ),
         ),
-        if (widget.leading != null)
+        if (_pinned)
           Positioned(
             top: padding.top,
             left: content.left,
@@ -257,7 +266,7 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
               key: LargeTitleScaffold.pinnedRowKey,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                widget.leading!,
+                ?widget.leading,
                 const Spacer(),
                 if (widget.trailing != null) widget.trailing!,
               ],
@@ -288,8 +297,8 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
       ),
     );
 
-    // With a pinned leading row the trailing cluster lives up there.
-    final pinned = widget.leading != null;
+    // With a pinned row the trailing cluster lives up there.
+    final pinned = _pinned;
     final accessories = <Widget>[
       if (accessory != null) accessory,
       if (trailing != null && !pinned) trailing,
@@ -406,7 +415,7 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
                     child: Center(
                       child: Padding(
                         padding: EdgeInsets.symmetric(
-                          horizontal: widget.leading != null ? 104 : 56,
+                          horizontal: _pinned ? 104 : 56,
                         ),
                         child: Text(
                           widget.title,

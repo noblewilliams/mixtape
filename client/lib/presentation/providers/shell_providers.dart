@@ -48,6 +48,36 @@ final selectedTabProvider = NotifierProvider<SelectedTabNotifier, int>(
   SelectedTabNotifier.new,
 );
 
+/// Screens holding the bottom of the screen in place of the dock (select
+/// mode's toolbar on Mixes and Archived, approved 2026-11-16): while any
+/// holds it the dock (tab bar and mini-player) gives way, native or Flutter,
+/// so a toolbar never stacks on it. Toasts float clear of the toolbar instead.
+class DockTakeoverNotifier extends Notifier<bool> {
+  final Set<Object> _holders = {};
+
+  @override
+  bool build() {
+    // User-scoped: a sign-out hands the next listener their dock back.
+    ref.watch(authProvider);
+    _holders.clear();
+    return false;
+  }
+
+  void hold(Object holder) {
+    _holders.add(holder);
+    state = true;
+  }
+
+  void release(Object holder) {
+    _holders.remove(holder);
+    state = _holders.isNotEmpty;
+  }
+}
+
+final dockTakeoverProvider = NotifierProvider<DockTakeoverNotifier, bool>(
+  DockTakeoverNotifier.new,
+);
+
 /// True only where the real `UITabBar` dock is installed (iOS 26). False
 /// everywhere else, and the Flutter [FrostedDock] draws the same geometry.
 ///

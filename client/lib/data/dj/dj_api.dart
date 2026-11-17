@@ -98,6 +98,16 @@ class ShareNameRequiredException implements Exception {
   String toString() => 'ShareNameRequiredException';
 }
 
+/// `POST /sessions/delete` answered 403 `sign_in_required`: an anonymous
+/// listener can archive mixes but not delete them (select and delete mixes,
+/// approved 2026-11-16).
+class SignInRequiredException implements Exception {
+  const SignInRequiredException();
+
+  @override
+  String toString() => 'SignInRequiredException';
+}
+
 /// `POST /sessions/:id/share` answered 422 `empty_mix`: nothing to share.
 class EmptyMixException implements Exception {
   const EmptyMixException();
@@ -452,6 +462,22 @@ class DjApi {
     ShareLinkResult.fromJson,
     _shareCreateError,
   );
+
+  /// The wire half of [DjApiDeleteSessions.deleteSessions].
+  Future<List<String>> _deleteSessions(List<String> ids) async {
+    try {
+      return await _call(
+        () => _client.postJson('/sessions/delete', {'ids': ids}),
+        (json) => (json['deleted'] as List).cast<String>(),
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode == 403 &&
+          _tryDecode(e.body)?['error'] == 'sign_in_required') {
+        throw const SignInRequiredException();
+      }
+      rethrow;
+    }
+  }
 
   Future<void> _stopSharing(String sessionId) =>
       _callVoid(() => _client.deleteJson('/sessions/$sessionId/share'));
@@ -900,6 +926,30 @@ extension DjApiSharedMixes on DjApi {
   Future<void> stopSharing(String sessionId) => switch (this) {
     final DjSharedMixes s => s.stopSharing(sessionId),
     _ => _stopSharing(sessionId),
+  };
+}
+
+/// What a [DjApi] stand-in implements to answer
+/// [DjApiDeleteSessions.deleteSessions] itself.
+abstract interface class DjSessionDeleter {
+  Future<List<String>> deleteSessions(List<String> ids);
+}
+
+/// Permanent delete of the listener's own mixes (select and delete mixes,
+/// approved 2026-11-16): `POST /sessions/delete` with `{ids}` (1 to 100).
+/// Answers the ids actually deleted; ids that are not the listener's are
+/// skipped server-side, not refused. All or nothing: a failure deletes none.
+///
+/// Exits, beyond [DjApi]'s usual ones: [SignInRequiredException] for an
+/// anonymous listener (403 `sign_in_required`).
+///
+/// An extension for the reason [DjApiRemake] gives. A stand-in implements
+/// [DjSessionDeleter]; any other stand-in refuses, as nothing was deleted.
+extension DjApiDeleteSessions on DjApi {
+  Future<List<String>> deleteSessions(List<String> ids) => switch (this) {
+    final DjSessionDeleter deleter => deleter.deleteSessions(ids),
+    _ when _builtByDjApi[this] == true => _deleteSessions(ids),
+    _ => Future.error(UnsupportedError('deleteSessions not wired')),
   };
 }
 

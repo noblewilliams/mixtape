@@ -495,6 +495,24 @@ void main() {
       expect(callsTo('show'), isNotEmpty);
     });
 
+    iosWidgets('a select toolbar holding the bottom takes the dock\'s place '
+        '(select and delete mixes, 2026-11-16)', (tester) async {
+      final container = shellContainer();
+      await pumpShell(tester, container);
+      calls.clear();
+      final holder = Object();
+
+      container.read(dockTakeoverProvider.notifier).hold(holder);
+      await tester.pumpAndSettle();
+      expect(find.byType(FrostedDock), findsNothing);
+      expect(callsTo('hide'), hasLength(1));
+
+      container.read(dockTakeoverProvider.notifier).release(holder);
+      await tester.pumpAndSettle();
+      expect(find.byType(FrostedDock), findsOneWidget);
+      expect(callsTo('show'), isNotEmpty);
+    });
+
     iosWidgets('a route on a tab that is not up leaves the dock alone', (
       tester,
     ) async {

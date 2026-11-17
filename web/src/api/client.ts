@@ -55,6 +55,8 @@ export type ApiSession = {
 }
 
 export type ApiSessionSummary = ApiSession & {
+  /** A live share link (GET /sessions only; absent on older servers). */
+  shared?: boolean
   /** Both 0 for album sessions. */
   trackCount: number
   durationMs: number
@@ -569,6 +571,8 @@ export type MixtapeApi = {
     updates: { title?: string; status?: ApiSessionStatus; caseColor?: string },
     signal?: AbortSignal,
   ) => Promise<{ session: ApiSession }>
+  /** POST /sessions/delete: hard-deletes this listener's mixes (1–100); ids not theirs are skipped. 403 sign_in_required for anonymous listeners. */
+  deleteSessions: (ids: string[], signal?: AbortSignal) => Promise<{ deleted: string[] }>
   selectPlaylistSeed: (
     sessionId: string,
     selection: PlaylistSeedSelection,
@@ -922,6 +926,8 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'PATCH',
         body: JSON.stringify(updates), signal,
       }),
+    deleteSessions: (ids, signal) =>
+      request('/sessions/delete', { method: 'POST', body: JSON.stringify({ ids }), signal }),
     selectPlaylistSeed: (sessionId, selection, signal) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/playlist-seed`, {
         method: 'PUT', body: JSON.stringify(selection), signal,

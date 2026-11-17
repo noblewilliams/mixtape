@@ -287,6 +287,11 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
   return { queue: payload.queue as ApiQueueTrack[], queueVersion: payload.queueVersion }
 }
 
+/** Live share links by mix id, from GET /sessions rows that carry `shared` (older servers don't). */
+function sharedFromList(rows: { id: string; shared?: boolean }[]): Record<string, boolean> {
+  return Object.fromEntries(rows.filter(row => row.shared !== undefined).map(row => [row.id, row.shared === true]))
+}
+
 export function App(props: AppProps) { return <SignedInWorkspace key={props.user.id} {...props} /> }
 
 function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, onAccountDeleted, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '', landedReplyRereadMs = LANDED_REPLY_REREAD_MS }: AppProps) {
@@ -538,6 +543,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             return { ...toDjSession(session), ...(prior && (queuesBySession[session.id] || refreshedSessions.current.has(session.id)) ? { queueVersion: prior.queueVersion, trackCount: prior.trackCount, durationLabel: prior.durationLabel } : {}), ...(changed && prior ? { title: prior.title, status: prior.status, caseColor: prior.caseColor } : {}) }
           }),
         ])
+        setSharedSessions(current => ({ ...current, ...sharedFromList(result.sessions) }))
         setCollectionError('')
 
       } catch (requestError) {
@@ -1128,7 +1134,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const idsAtStart = new Set(sessions.map(session => session.id))
     try {
       const result = await api.listSessions()
-      if (!signal.aborted) { setSessions(current => [...current.filter(item => !idsAtStart.has(item.id) && !result.sessions.some(session => session.id === item.id)), ...result.sessions.map(session => { const prior = current.find(item => item.id === session.id); const changed = (metadataRevision.current[session.id] ?? 0) !== (metadataAtStart[session.id] ?? 0); return { ...toDjSession(session), ...(prior && (queuesBySession[session.id] || refreshedSessions.current.has(session.id)) ? { queueVersion: prior.queueVersion, trackCount: prior.trackCount, durationLabel: prior.durationLabel } : {}), ...(changed && prior ? { title: prior.title, status: prior.status, caseColor: prior.caseColor } : {}) } })]); setCollectionError('') }
+      if (!signal.aborted) { setSharedSessions(current => ({ ...current, ...sharedFromList(result.sessions) })); setSessions(current => [...current.filter(item => !idsAtStart.has(item.id) && !result.sessions.some(session => session.id === item.id)), ...result.sessions.map(session => { const prior = current.find(item => item.id === session.id); const changed = (metadataRevision.current[session.id] ?? 0) !== (metadataAtStart[session.id] ?? 0); return { ...toDjSession(session), ...(prior && (queuesBySession[session.id] || refreshedSessions.current.has(session.id)) ? { queueVersion: prior.queueVersion, trackCount: prior.trackCount, durationLabel: prior.durationLabel } : {}), ...(changed && prior ? { title: prior.title, status: prior.status, caseColor: prior.caseColor } : {}) } })]); setCollectionError('') }
     } catch (e) {
       if (!signal.aborted) { setCollectionError(errorCopy(e)); if (e instanceof ApiError && e.status === 401) signOut() }
     } finally { if (!signal.aborted) setLoadingCollection(false) }
@@ -1154,6 +1160,60 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (!signal.aborted && e instanceof ApiError && e.status === 401) signOut()
       throw e
     } finally { sessionWrites.current.delete(id) }
+  }
+
+  /**
+   * Select mode's Archive / Unarchive (board 2026-11-16): one PATCH per mix, in
+   * parallel (no bulk route). Answers the ids that failed. One mix keeps the
+   * usual "Mix archived" Undo; several get a count, since Undo restores one.
+   */
+  async function setStatusMany(ids: string[], status: 'archived' | 'active') {
+    const results = await Promise.allSettled(ids.map((id) => updateMix(id, { status })))
+    const failed = ids.filter((_, index) => results[index].status === 'rejected')
+    const done = ids.length - failed.length
+    if (status === 'archived' && done > 1) {
+      setArchiveUndo(null)
+      announce(`${done} mixes archived`)
+    }
+    if (failed.length) announce(status === 'archived' ? 'Couldn’t archive. Try again.' : 'Couldn’t unarchive. Try again.', 'error')
+    return failed
+  }
+
+  /**
+   * Select mode's Delete: POST /sessions/delete, then no trace of the mixes is
+   * left here. A turn in flight for one is abandoned (the server's delete ends it).
+   */
+  async function deleteMixes(ids: string[]): Promise<'deleted' | 'sign_in_required'> {
+    let deleted: string[] = []
+    try {
+      // The server takes at most 100 ids a call.
+      for (let i = 0; i < ids.length; i += 100) deleted.push(...(await api.deleteSessions(ids.slice(i, i + 100))).deleted)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403 && e.code === 'sign_in_required') return 'sign_in_required'
+      if (e instanceof ApiError && e.status === 401) signOut()
+      throw e
+    }
+    // Ids the server skipped came from this listener's own list, so they were
+    // already gone (deleted elsewhere): they leave the list too, uncounted.
+    for (const id of ids) {
+      const turn = stoppableTurns.current.get(id)
+      if (turn) {
+        stoppableTurns.current.delete(id)
+        turn.controller.abort()
+      }
+      turnsOut.current.delete(id)
+      shareUrls.current.forget(id)
+      forgetSession(id)
+    }
+    const gone = new Set(ids)
+    setThinkingSessionId((current) => (current && gone.has(current) ? null : current))
+    setTurnWork((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !gone.has(id))))
+    setSharedSessions((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !gone.has(id))))
+    setArchiveUndo((current) => (current && gone.has(current) ? null : current))
+    if (navigation.current.activeSessionId && gone.has(navigation.current.activeSessionId)) setActiveSessionId(null)
+    const count = deleted.length
+    if (count) announce(count === 1 ? 'Mix deleted' : `${count} mixes deleted`)
+    return 'deleted'
   }
 
   /**
@@ -2285,6 +2345,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           onRename={(id, title) => updateMix(id, { title })}
           onArchive={(id) => updateMix(id, { status: 'archived' })}
           onRestore={(id) => updateMix(id, { status: 'active' })}
+          onArchiveMany={setStatusMany}
+          onDeleteMany={deleteMixes}
+          anonymous={anonymous}
+          onSignIn={() => openSignIn('keep')}
+          isShared={(id) => sharedSessions[id] === true}
+          isWorking={turnOut}
           collectionView={collectionView}
           onChangeCollectionView={setCollectionView}
           onOpenSession={openSession}

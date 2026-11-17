@@ -23,6 +23,7 @@ import 'mix_activity_provider.dart';
 import 'mix_operation_gate.dart';
 import 'onboarding_provider.dart';
 import 'playlist_context_provider.dart';
+import 'playback_provider.dart';
 import 'first_run_funnel_provider.dart';
 import 'working_step.dart';
 import '../widgets/energy_journey.dart' show EnergyArc;
@@ -86,6 +87,10 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
   final _writes = <String>{};
   final _changedAt = <String, int>{};
 
+  /// Mixes deleted this build: a list read that started before the delete
+  /// lands after it with them still in, and must not bring them back.
+  final _deleted = <String>{};
+
   bool get hasPendingMetadataWrites => _writes.isNotEmpty;
 
   @override
@@ -96,6 +101,7 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
     final revision = _revision;
     _writes.clear();
     _changedAt.clear();
+    _deleted.clear();
     ref.onDispose(() => _generation++);
     try {
       final sessions = await api.listSessions();
@@ -149,10 +155,68 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
     };
     final listedIds = sessions.map((session) => session.id).toSet();
     return [
-      for (final session in sessions) preserved[session.id] ?? session,
+      for (final session in sessions)
+        if (!_deleted.contains(session.id)) preserved[session.id] ?? session,
       for (final session in preserved.values)
-        if (!listedIds.contains(session.id)) session,
+        if (!listedIds.contains(session.id) && !_deleted.contains(session.id))
+          session,
     ];
+  }
+
+  /// The most ids `POST /sessions/delete` takes in one call.
+  static const int deleteBatchSize = 100;
+
+  /// Permanently deletes [ids] (select and delete mixes, approved
+  /// 2026-11-16), in batches of [deleteBatchSize]. Answers the ids the server
+  /// says it deleted.
+  ///
+  /// Every asked id leaves the list once its batch is answered, including
+  /// ones the server skipped: it skips only ids that are not the listener's,
+  /// and these came from the listener's own list, so they are already gone
+  /// elsewhere. A batch that fails (offline, a 500,
+  /// [SignInRequiredException] for an anonymous listener) is rethrown with
+  /// its rows left in place; batches answered before it stay deleted.
+  ///
+  /// For each mix that left: the player lets go of it and drops its unsent
+  /// listens ([PlaybackController.forgetSession]), and its conversation reads
+  /// again, so one still open on another tab shows its could-not-open state.
+  Future<List<String>> deleteSessions(List<String> ids) async {
+    final generation = _generation;
+    final api = ref.read(djApiProvider);
+    final deleted = <String>[];
+    for (var start = 0; start < ids.length; start += deleteBatchSize) {
+      final batch = ids.sublist(
+        start,
+        start + deleteBatchSize > ids.length
+            ? ids.length
+            : start + deleteBatchSize,
+      );
+      final answered = await api.deleteSessions(batch);
+      if (generation != _generation) return deleted..addAll(answered);
+      deleted.addAll(answered);
+      _drop(batch);
+    }
+    return deleted;
+  }
+
+  void _drop(List<String> ids) {
+    final gone = ids.toSet();
+    _deleted.addAll(gone);
+    for (final id in gone) {
+      _changedAt.remove(id);
+    }
+    final current = state.value ?? const <DjSession>[];
+    state = AsyncData([
+      for (final session in current)
+        if (!gone.contains(session.id)) session,
+    ]);
+    final player = ref.exists(playbackProvider)
+        ? ref.read(playbackProvider)
+        : null;
+    for (final id in gone) {
+      player?.forgetSession(id);
+      ref.invalidate(chatProvider(id));
+    }
   }
 
   Future<bool> archive(String id) =>
@@ -200,6 +264,28 @@ final sessionsProvider =
     AsyncNotifierProvider<SessionsNotifier, List<DjSession>>(
       SessionsNotifier.new,
     );
+
+/// Share state learnt since the list was read, so the delete confirm can say
+/// "Their share links will stop working." (select and delete mixes, approved
+/// 2026-11-16) even for a mix shared or stopped a moment ago.
+///
+/// `GET /sessions` carries [DjSession.shared]; a session read, a Share and a
+/// Stop sharing are fresher, so what they said wins. A plain holder, not
+/// reactive state, so a chat read can note it while it builds.
+class KnownSharedMixes {
+  final Map<String, bool> _known = {};
+
+  void note(String sessionId, {required bool shared}) =>
+      _known[sessionId] = shared;
+
+  bool isShared(DjSession session) => _known[session.id] ?? session.shared;
+}
+
+final knownSharedMixesProvider = Provider<KnownSharedMixes>((ref) {
+  // User-scoped: the next account starts knowing nothing.
+  ref.watch(authProvider);
+  return KnownSharedMixes();
+});
 
 // ---------------------------------------------------------------------------
 // Chat state machine
@@ -503,8 +589,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   }
 
   /// A Share or Stop sharing landed: the menus follow without a re-read.
-  void setShared(bool shared) =>
-      _mergeCurrent((current) => current.copyWith(shared: shared));
+  void setShared(bool shared) {
+    if (ref.mounted) {
+      ref.read(knownSharedMixesProvider).note(sessionId, shared: shared);
+    }
+    _mergeCurrent((current) => current.copyWith(shared: shared));
+  }
 
   bool _current(int generation) => ref.mounted && generation == _generation;
 
@@ -588,6 +678,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     SessionDetail detail, {
     bool sending = false,
     String? transientError,
+  }) {
+    if (ref.mounted) {
+      ref.read(knownSharedMixesProvider).note(sessionId, shared: detail.shared);
+    }
+    return _chatStateOf(
+      detail,
+      sending: sending,
+      transientError: transientError,
+    );
+  }
+
+  ChatState _chatStateOf(
+    SessionDetail detail, {
+    required bool sending,
+    required String? transientError,
   }) => ChatState(
     session: detail.session,
     messages: detail.messages.map((m) => ChatMessage(m)).toList(),

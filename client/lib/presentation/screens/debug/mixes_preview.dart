@@ -22,6 +22,10 @@
 /// ago, and one "From a friend" (a sender who cleared their name) whose
 /// share was stopped, so its screen offers Remove. Remove takes either out
 /// of the made-up list.
+///
+/// Select mode works on it too (select and delete mixes, 2026-11-16): the ⋯
+/// in the nav bar opens it, Archive and Delete change the made-up list, and
+/// the second mix reads as shared so the confirm's share line shows.
 library;
 
 import 'package:flutter/material.dart';
@@ -119,7 +123,12 @@ class _SignedIn extends AuthNotifier {
 
 /// Answers the calls the Mixes tab makes; anything else is not wired.
 class _PreviewApi
-    implements DjApi, DjTurnProgressSender, DjSharedMixes, DjTurnStopper {
+    implements
+        DjApi,
+        DjTurnProgressSender,
+        DjSharedMixes,
+        DjTurnStopper,
+        DjSessionDeleter {
   _PreviewApi() {
     final now = DateTime.now();
     const active = [
@@ -149,6 +158,7 @@ class _PreviewApi
           queueVersion: 1,
           updatedAt: now.subtract(Duration(minutes: 40 + 20 * i)),
           caseColor: color,
+          shared: i == 1,
         ),
       );
       i++;
@@ -191,6 +201,7 @@ class _PreviewApi
     caseColor: color ?? s.caseColor,
     kind: s.kind,
     pick: s.pick,
+    shared: s.shared,
   );
 
   Future<void> get _latency =>
@@ -218,6 +229,13 @@ class _PreviewApi
   Future<DjSession> setCaseColor(String id, String caseColor) async {
     await _latency;
     return _replace(id, (s) => _copy(s, color: caseColor));
+  }
+
+  @override
+  Future<List<String>> deleteSessions(List<String> ids) async {
+    await _latency;
+    _sessions.removeWhere((s) => ids.contains(s.id));
+    return ids;
   }
 
   @override

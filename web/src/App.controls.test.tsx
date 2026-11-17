@@ -1,9 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { App } from './App'
 import type { SessionDetailResponse } from './api/client'
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
+import { ApiError } from './api/client'
 import { createFakeApi } from './test/fake-api'
 
 // Whole-app renders run long on a loaded machine; the default 5 s is too tight there.
@@ -126,4 +127,79 @@ it('points a failed archive undo at the Archived tab', async () => {
   fail = true
   fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
   expect(await screen.findByText('Couldn’t restore the mix. Open Archived to retry.')).toBeInTheDocument()
+})
+
+it('deletes ticked mixes from Mixes in one call, drops their rows and says so', async () => {
+  const { api } = renderApp()
+  fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Sunday kitchen radio' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Soft landing after work' }))
+  fireEvent.click(within(screen.getByRole('toolbar', { name: 'Selected mixes' })).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete 2 mixes?' })).getByRole('button', { name: 'Delete 2 mixes' }))
+  expect(await screen.findByText('2 mixes deleted')).toBeInTheDocument()
+  expect(api.calls.filter((c) => c.method === 'deleteSessions').map((c) => c.args[0])).toEqual([['sunday-kitchen', 'soft-landing']])
+  expect(screen.queryByRole('button', { name: 'Open Sunday kitchen radio' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Open Soft landing after work' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+})
+
+it('archives ticked mixes from Mixes in parallel', async () => {
+  const { api } = renderApp()
+  fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Sunday kitchen radio' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Soft landing after work' }))
+  fireEvent.click(within(screen.getByRole('toolbar', { name: 'Selected mixes' })).getByRole('button', { name: 'Archive' }))
+  await waitFor(() => expect(screen.queryByRole('checkbox')).not.toBeInTheDocument())
+  const writes = api.calls.filter((c) => c.method === 'updateSession')
+  expect(writes.map((c) => c.args.slice(0, 2))).toEqual([['sunday-kitchen', { status: 'archived' }], ['soft-landing', { status: 'archived' }]])
+  expect(screen.queryByRole('button', { name: 'Open Sunday kitchen radio' })).not.toBeInTheDocument()
+})
+
+it('asks for sign-in when the server refuses a delete with sign_in_required', async () => {
+  const api = createFakeApi({ deleteSessions: async () => { throw new ApiError(403, { error: 'sign_in_required' }) } })
+  renderApp({ api })
+  fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Sunday kitchen radio' }))
+  fireEvent.click(within(screen.getByRole('toolbar', { name: 'Selected mixes' })).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete this mix?' })).getByRole('button', { name: 'Delete mix' }))
+  expect(await screen.findByRole('alertdialog', { name: 'Sign in to delete mixes' })).toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: 'Sunday kitchen radio', hidden: true })).toBeChecked()
+})
+
+it('warns about share links for a mix the list says is shared, without opening it', async () => {
+  const base = createFakeApi()
+  const list = base.listSessions
+  const api = { ...base, listSessions: async () => {
+    const result = await list()
+    return { sessions: result.sessions.map((s) => ({ ...s, shared: s.id === 'sunday-kitchen' })) }
+  } } as typeof base
+  renderApp({ api })
+  fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Sunday kitchen radio' }))
+  fireEvent.click(within(screen.getByRole('toolbar', { name: 'Selected mixes' })).getByRole('button', { name: 'Delete' }))
+  expect(screen.getByRole('alertdialog', { name: 'Delete this mix?' })).toHaveTextContent('Their share links will stop working.')
+})
+
+it('deletes in batches of 100 and counts only what the server deleted', async () => {
+  const base = createFakeApi()
+  const batches: string[][] = []
+  const api = { ...base, deleteSessions: async (ids: string[]) => {
+    batches.push(ids)
+    return { deleted: ids.filter((id) => id !== 'soft-landing') }
+  } } as typeof base
+  renderApp({ api })
+  fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Select' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Sunday kitchen radio' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Soft landing after work' }))
+  fireEvent.click(within(screen.getByRole('toolbar', { name: 'Selected mixes' })).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete 2 mixes?' })).getByRole('button', { name: 'Delete 2 mixes' }))
+  // Soft landing was already gone (another device): it leaves the list too, but isn't counted.
+  expect(await screen.findByText('Mix deleted')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Open Soft landing after work' })).not.toBeInTheDocument()
+  expect(batches).toEqual([['sunday-kitchen', 'soft-landing']])
 })

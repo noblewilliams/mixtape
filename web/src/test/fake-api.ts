@@ -142,6 +142,8 @@ const atVersion = (album: ApiAlbum, version: number): ApiAlbum => ({ ...album, v
 
 export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: FakeApiOptions = {}): FakeApi {
   const albumSessions = new Map<string, FakeAlbumSession>()
+  // Mixes deleted through POST /sessions/delete, per fake: list reads leave them out.
+  const deletedSessions = new Set<string>()
   const shelf = new Map<string, FakeShelfRow>(
     (options.listenLater ?? []).map((entry) => [entry.id, { entry: { ...entry }, removed: false }]),
   )
@@ -260,7 +262,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
           }
         })
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      return { sessions: [...albums, ...summaries.map((session) => ({ ...session }))] }
+      return { sessions: [...albums, ...summaries.filter((session) => !deletedSessions.has(session.id)).map((session) => ({ ...session }))] }
     },
     getSuggestions: async()=>({enabled:true,suggestion:null,dismissed:false}),
     selectSuggestion: async()=>{throw new Error('No suggestion')},
@@ -439,6 +441,11 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
     updateSession: async (sessionId, updates) => {
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
       return { session: { ...session, ...updates } }
+    },
+    deleteSessions: async (ids) => {
+      const deleted = ids.filter((id) => summaries.some((item) => item.id === id) && !deletedSessions.has(id))
+      deleted.forEach((id) => deletedSessions.add(id))
+      return { deleted }
     },
     selectPlaylistSeed: async () => { throw new Error('Configure playlist inspiration for this scenario') },
     confirmPlaylistTaste: async () => { throw new Error('Configure taste confirmation for this scenario') },

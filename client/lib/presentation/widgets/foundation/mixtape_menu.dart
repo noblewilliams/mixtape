@@ -90,6 +90,10 @@ abstract final class MixMenuIcons {
   static const IconData share = CupertinoIcons.forward_end_fill;
   static const IconData stopSharing = CupertinoIcons.stop_fill;
   static const IconData eject = CupertinoIcons.eject_fill;
+
+  /// A ticked circle: select mode's way in (select and delete mixes board,
+  /// S1).
+  static const IconData select = CupertinoIcons.checkmark_circle;
 }
 
 /// The popover itself, for tests.
@@ -650,4 +654,420 @@ class _MixtapeMenuItemState<T> extends State<MixtapeMenuItem<T>> {
       ),
     );
   }
+}
+
+/// One button in a [showMixtapeConfirm] popover.
+@immutable
+class MixtapeConfirmAction<T> {
+  const MixtapeConfirmAction({
+    required this.label,
+    required this.value,
+    this.isDestructive = false,
+    this.key,
+  });
+
+  final String label;
+  final T value;
+
+  /// Drawn in the destructive red; otherwise plum.
+  final bool isDestructive;
+  final Key? key;
+}
+
+/// The confirm card itself, for tests.
+const Key mixtapeConfirmKey = Key('mixtape-confirm');
+
+/// A question anchored to the control that asked it, in the menu's grammar
+/// rather than an action sheet (`.cpop` on
+/// `docs/mockups/2026-11-16-select-delete-mixes.html`, frames S4 and S7): a
+/// bold title, its lines in smoke, then centred full-width buttons between
+/// hairlines, and a small tail pointing at the anchor. Tapping outside
+/// answers null, as the menu does.
+Future<T?> showMixtapeConfirm<T>(
+  BuildContext context, {
+  required String title,
+  List<String> lines = const [],
+  required List<MixtapeConfirmAction<T>> actions,
+}) {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final overlayBox = navigator.context.findRenderObject() as RenderBox?;
+  final box = context.findRenderObject();
+  Rect? anchor;
+  if (box is RenderBox &&
+      box.attached &&
+      box.hasSize &&
+      overlayBox != null &&
+      overlayBox.hasSize) {
+    anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox) & box.size;
+  }
+  return navigator.push<T>(
+    _MixtapeConfirmRoute<T>(
+      anchor: anchor,
+      title: title,
+      lines: lines,
+      actions: actions,
+      theme: Theme.of(context),
+      reduceTransparency: FrostedSurfaceMode.of(context).reduceTransparency,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    ),
+  );
+}
+
+/// The confirm card's geometry, from the board's `.cpop`.
+abstract final class MixtapeConfirmMetrics {
+  static const double width = 290;
+  static const double radius = 18;
+  static const double tail = 14;
+  static const double anchorGap = 8;
+}
+
+class _MixtapeConfirmRoute<T> extends PopupRoute<T> {
+  _MixtapeConfirmRoute({
+    required this.anchor,
+    required this.title,
+    required this.lines,
+    required this.actions,
+    required this.theme,
+    required this.reduceTransparency,
+    required this.barrierLabel,
+  });
+
+  final Rect? anchor;
+  final String title;
+  final List<String> lines;
+  final List<MixtapeConfirmAction<T>> actions;
+  final ThemeData theme;
+  final bool reduceTransparency;
+
+  @override
+  final String barrierLabel;
+
+  @override
+  Color? get barrierColor => null;
+
+  @override
+  bool get barrierDismissible => true;
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 180);
+
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 120);
+
+  void _close(BuildContext context, [T? value]) {
+    if (isCurrent) Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) {
+    final media = MediaQuery.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final tokens = _tokensOf(theme);
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeIn,
+    );
+    final above = anchor != null && anchor!.center.dy >= media.size.height / 2;
+    final fill = reduceTransparency
+        ? tokens.sheetSurface
+        : tokens.sheetSurface.withValues(alpha: dark ? 0.98 : 0.97);
+
+    Widget card = _ConfirmCard<T>(
+      title: title,
+      lines: lines,
+      actions: actions,
+      fill: fill,
+      onSelected: (value) => _close(context, value),
+    );
+    card = FadeTransition(opacity: curved, child: card);
+    if (!media.disableAnimations) {
+      card = ScaleTransition(
+        scale: Tween<double>(begin: 0.92, end: 1).animate(curved),
+        alignment: above ? Alignment.bottomRight : Alignment.topRight,
+        child: card,
+      );
+    }
+
+    return Theme(
+      data: theme,
+      child: FrostedSurfaceMode(
+        reduceTransparency: reduceTransparency,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: FadeTransition(
+                opacity: curved,
+                child: Semantics(
+                  button: true,
+                  label: barrierLabel,
+                  onTap: () => _close(context),
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    key: mixtapeMenuBarrierKey,
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _close(context),
+                    child: ColoredBox(
+                      color: dark
+                          ? const Color.fromRGBO(0, 0, 0, 0.4)
+                          : const Color.fromRGBO(20, 16, 20, 0.28),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: CustomMultiChildLayout(
+                delegate: _ConfirmLayout(
+                  anchor: anchor,
+                  padding: media.padding,
+                  above: above,
+                ),
+                children: [
+                  if (anchor != null)
+                    LayoutId(
+                      id: _ConfirmPart.tail,
+                      child: FadeTransition(
+                        opacity: curved,
+                        child: Transform.rotate(
+                          angle: math.pi / 4,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: fill,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  LayoutId(id: _ConfirmPart.card, child: card),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _ConfirmPart { card, tail }
+
+/// Above an anchor in the lower half, below one in the upper half; the card's
+/// trailing edge lines up with an anchor on the right, its leading edge with
+/// one on the left. The tail sits on the card's edge over the anchor's centre.
+class _ConfirmLayout extends MultiChildLayoutDelegate {
+  _ConfirmLayout({
+    required this.anchor,
+    required this.padding,
+    required this.above,
+  });
+
+  final Rect? anchor;
+  final EdgeInsets padding;
+  final bool above;
+
+  static const double _margin = MixtapeMenuMetrics.screenMargin;
+
+  @override
+  void performLayout(Size size) {
+    final maxWidth = math.max(
+      0.0,
+      math.min(MixtapeConfirmMetrics.width, size.width - 2 * _margin),
+    );
+    final top = padding.top + _margin;
+    final bottom = size.height - padding.bottom - _margin;
+    final card = layoutChild(
+      _ConfirmPart.card,
+      BoxConstraints(
+        minWidth: maxWidth,
+        maxWidth: maxWidth,
+        maxHeight: math.max(0.0, bottom - top),
+      ),
+    );
+    final a = anchor;
+    final maxX = math.max(_margin, size.width - _margin - card.width);
+    final maxY = math.max(top, bottom - card.height);
+    if (a == null) {
+      positionChild(
+        _ConfirmPart.card,
+        Offset(
+          ((size.width - card.width) / 2).clamp(_margin, maxX),
+          ((size.height - card.height) / 2).clamp(top, maxY),
+        ),
+      );
+      return;
+    }
+    const gap = MixtapeConfirmMetrics.anchorGap;
+    final x = (a.center.dx > size.width / 2 ? a.right - card.width : a.left)
+        .clamp(_margin, maxX);
+    final y = (above ? a.top - gap - card.height : a.bottom + gap).clamp(
+      top,
+      maxY,
+    );
+    positionChild(_ConfirmPart.card, Offset(x, y));
+    if (hasChild(_ConfirmPart.tail)) {
+      const side = MixtapeConfirmMetrics.tail;
+      layoutChild(
+        _ConfirmPart.tail,
+        BoxConstraints.tight(const Size.square(side)),
+      );
+      final radius = MixtapeConfirmMetrics.radius;
+      final tailX = (a.center.dx - side / 2).clamp(
+        x + radius,
+        x + card.width - radius - side,
+      );
+      final tailY = above ? y + card.height - side / 2 : y - side / 2;
+      positionChild(_ConfirmPart.tail, Offset(tailX, tailY));
+    }
+  }
+
+  @override
+  bool shouldRelayout(_ConfirmLayout oldDelegate) =>
+      anchor != oldDelegate.anchor ||
+      padding != oldDelegate.padding ||
+      above != oldDelegate.above;
+}
+
+class _ConfirmCard<T> extends StatelessWidget {
+  const _ConfirmCard({
+    required this.title,
+    required this.lines,
+    required this.actions,
+    required this.fill,
+    required this.onSelected,
+  });
+
+  final String title;
+  final List<String> lines;
+  final List<MixtapeConfirmAction<T>> actions;
+  final Color fill;
+  final ValueChanged<T> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = _tokensOf(Theme.of(context));
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final radius = BorderRadius.circular(MixtapeConfirmMetrics.radius);
+    return Container(
+      key: mixtapeConfirmKey,
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: radius,
+        boxShadow: const [
+          BoxShadow(
+            color: Color.fromRGBO(20, 16, 24, 0.3),
+            blurRadius: 50,
+            offset: Offset(0, 18),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: Material(
+          type: MaterialType.transparency,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      height: 1.25,
+                      fontWeight: FontWeight.w700,
+                      color: tokens.text,
+                    ),
+                  ),
+                ),
+                if (lines.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    lines.join(' '),
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: tokens.smoke,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                for (final action in actions)
+                  _ConfirmButton(
+                    key: action.key,
+                    label: action.label,
+                    ink: action.isDestructive
+                        ? (dark
+                              ? MixtapeMenuItem.destructiveDark
+                              : MixtapeMenuItem.destructiveLight)
+                        : tokens.plum,
+                    hairline: tokens.hairline,
+                    onTap: () => onSelected(action.value),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConfirmButton extends StatelessWidget {
+  const _ConfirmButton({
+    super.key,
+    required this.label,
+    required this.ink,
+    required this.hairline,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color ink;
+  final Color hairline;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: label,
+    onTap: onTap,
+    excludeSemantics: true,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: hairline)),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minHeight: MixtapeMetrics.minTarget,
+          ),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: ink,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }

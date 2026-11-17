@@ -153,13 +153,15 @@ class GlassButton extends StatelessWidget {
 class GlassLabelButton extends StatelessWidget {
   const GlassLabelButton({
     super.key,
-    required this.icon,
+    this.icon,
     required this.label,
     this.semanticLabel,
     this.onPressed,
   });
 
-  final IconData icon;
+  /// The glyph before the word; none draws the word alone (select mode's
+  /// Select all pill).
+  final IconData? icon;
 
   /// The word on the button.
   final String label;
@@ -202,25 +204,38 @@ class GlassLabelButton extends StatelessWidget {
                 child: Opacity(
                   opacity: enabled ? 1 : 0.4,
                   child: Padding(
-                    padding: const EdgeInsets.only(left: 10, right: 12),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(icon, size: iconSize, color: tokens.text),
-                        const SizedBox(width: 6),
-                        Text(
-                          label,
-                          maxLines: 1,
-                          textScaler: MediaQuery.textScalerOf(
-                            context,
-                          ).clamp(maxScaleFactor: maxTextScale),
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                            color: tokens.text,
+                    padding: EdgeInsets.only(
+                      left: icon == null ? 14 : 10,
+                      right: icon == null ? 14 : 12,
+                    ),
+                    // As tall as the glass, so the word sits in its middle
+                    // on the frosted fallback too (it draws no centring of
+                    // its own).
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        minHeight: GlassButton.diameter,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (icon != null) ...[
+                            Icon(icon, size: iconSize, color: tokens.text),
+                            const SizedBox(width: 6),
+                          ],
+                          Text(
+                            label,
+                            maxLines: 1,
+                            textScaler: MediaQuery.textScalerOf(
+                              context,
+                            ).clamp(maxScaleFactor: maxTextScale),
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                              color: tokens.text,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

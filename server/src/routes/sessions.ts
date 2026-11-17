@@ -173,6 +173,10 @@ const patchSessionSchema = z
   .refine((data) => data.status !== undefined || data.title !== undefined || data.caseColor !== undefined, {
     message: 'at least one of status, title or caseColor is required',
   })
+// One select-mode action: at most the 50 mixes GET /sessions lists, with room.
+const deleteSessionsSchema = z.object({ ids: z.array(z.uuid()).min(1).max(100) })
+// How long a delete waits for a running turn to undo itself before deleting.
+const DELETE_STOP_WAIT_MS = 5_000
 const sessionEventSchema = z.object({ type: z.union([z.literal('played'), z.literal('saved_playlist')]) })
 
 const MANUAL_OPS_HINT = 'swap/extend require the DJ — send a message instead'
@@ -225,6 +229,34 @@ const TURN_STOPPED_BODY = { error: 'turn_stopped' }
 // stopTiming is for tests: how a stop request waits for the turn to let go.
 export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share?: { baseUrl: string }, stopTiming?: TurnStopTiming) {
   const app = new Hono<{ Variables: AppVars }>()
+
+  // Permanent delete of the listener's chosen mixes (select mode on the
+  // Mixes list). Registered before mix history, whose '/:id/*' guard would
+  // otherwise 404 this path as a malformed id. Everything hanging off a
+  // session cascades (messages, queue, versions, shares and their saves).
+  // Ids the listener doesn't own are skipped silently, never reported.
+  // Anonymous listeners can't delete: the free-mix cap counts the rows they
+  // have, so deleting would reset it. A mix with a turn still running is
+  // stopped first (bounded wait), so the turn never writes into a session
+  // that has gone; a turn that outlives the wait sees it gone on finish.
+  app.post('/delete', zValidator('json', deleteSessionsSchema), async (c) => {
+    const { id: userId, isAnonymous } = c.get('user')
+    if (isAnonymous) return c.json({ error: 'sign_in_required' }, 403)
+    const owned = await db
+      .select({ id: djSessions.id, activeTurnId: djSessions.activeTurnId })
+      .from(djSessions)
+      .where(and(eq(djSessions.userId, userId), inArray(djSessions.id, c.req.valid('json').ids)))
+    await Promise.all(owned
+      .filter((s) => s.activeTurnId != null)
+      .map((s) => requestStop(db, s.id, { timeoutMs: DELETE_STOP_WAIT_MS, ...stopTiming })))
+    if (owned.length === 0) return c.json({ deleted: [] })
+    const deleted = await db
+      .delete(djSessions)
+      .where(and(eq(djSessions.userId, userId), inArray(djSessions.id, owned.map((s) => s.id))))
+      .returning({ id: djSessions.id })
+    return c.json({ deleted: deleted.map((r) => r.id) })
+  })
+
   app.route('/', mixHistoryRoutes(db))
 
   // Newest 200 by seq; callers reverse back to chronological order for the
@@ -532,6 +564,12 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
         // part of the tape a listener sees in the collection.
         trackCount: sql<number>`count(${queueTracks.id})::int`,
         durationMs: sql<number>`coalesce(sum(${tracks.durationMs}), 0)::int`,
+        // A live (unrevoked) share link: select mode's delete confirm warns
+        // that links stop working, without opening each mix to find out.
+        shared: sql<boolean>`EXISTS (
+          SELECT 1 FROM mix_shares ms
+          WHERE ms.session_id = ${djSessions.id} AND ms.revoked_at IS NULL
+        )`,
         // Album sessions: the current pick (the latest version's rank 0) for
         // the Mixes list, null before the first pick. Correlated on the
         // grouped primary key, so this stays one statement.

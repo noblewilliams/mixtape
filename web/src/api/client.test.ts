@@ -350,6 +350,29 @@ describe('Mixtape API client', () => {
     expect(fetchMock.mock.calls.every(([, init]) => init?.signal === signal)).toBe(true)
   })
 
+  it('deletes several sessions in one POST /sessions/delete', async () => {
+    fetchMock.mockResolvedValueOnce(json({ deleted: ['a', 'b'] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+    const signal = new AbortController().signal
+
+    await expect(api.deleteSessions(['a', 'b'], signal)).resolves.toEqual({ deleted: ['a', 'b'] })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect([url, init?.method, init?.body, init?.signal]).toEqual([
+      'https://api.mixtape.test/sessions/delete', 'POST', JSON.stringify({ ids: ['a', 'b'] }), signal,
+    ])
+  })
+
+  it('surfaces sign_in_required on a refused delete', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'sign_in_required' }), {
+      status: 403, headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+    await expect(api.deleteSessions(['a'])).rejects.toMatchObject({ status: 403, code: 'sign_in_required' })
+  })
+
   it('updates sessions and manages DJ memories', async () => {
     fetchMock
       .mockResolvedValueOnce(json({

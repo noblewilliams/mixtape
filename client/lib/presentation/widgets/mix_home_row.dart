@@ -10,6 +10,7 @@ import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
 import 'foundation/mixtape_menu.dart';
 import 'foundation/swipe_actions.dart';
+import 'mix_select_mode.dart';
 import 'tape_palette.dart';
 import 'tape_settings_dialog.dart';
 import 'foundation/shimmer.dart';
@@ -29,7 +30,29 @@ class MixHomeRow extends StatefulWidget {
     this.onCaseColor,
     this.working = false,
     this.ready = false,
+    this.onSelect,
+    this.selecting = false,
+    this.selected = false,
+    this.onToggleSelected,
+    this.fading = false,
   });
+
+  /// The row menu's Select: opens select mode with this row ticked (select
+  /// and delete mixes, approved 2026-11-16). Absent, the menu has no Select.
+  final VoidCallback? onSelect;
+
+  /// Select mode: a circle leads the row, the whole row ticks it, and the
+  /// swipe and long-press are off.
+  final bool selecting;
+
+  /// Ticked, in select mode.
+  final bool selected;
+
+  /// A tap anywhere on the row, in select mode.
+  final VoidCallback? onToggleSelected;
+
+  /// A delete is running on this row: it fades until the server answers.
+  final bool fading;
 
   /// The DJ has a turn out on this mix: the tape's hubs turn and the line
   /// under the title says so (device smoke, 2026-11-13).
@@ -103,6 +126,8 @@ class MixHomeRow extends StatefulWidget {
   static const String renameAction = 'rename';
   static const String versionHistoryAction = 'history';
   static const String statusAction = 'status';
+  static const String selectAction = 'select';
+  static const String selectLabel = 'Select';
 
   @override
   State<MixHomeRow> createState() => _MixHomeRowState();
@@ -145,6 +170,8 @@ class _MixHomeRowState extends State<MixHomeRow> {
         _openVersionHistory();
       case MixHomeRow.statusAction:
         _changeStatus();
+      case MixHomeRow.selectAction:
+        widget.onSelect?.call();
     }
   }
 
@@ -171,6 +198,12 @@ class _MixHomeRowState extends State<MixHomeRow> {
         value: MixHomeRow.versionHistoryAction,
         label: 'Version history',
         icon: MixMenuIcons.history,
+      ),
+    if (widget.onSelect != null)
+      const MixtapeMenuAction(
+        value: MixHomeRow.selectAction,
+        label: MixHomeRow.selectLabel,
+        icon: MixMenuIcons.select,
       ),
     MixtapeMenuAction(
       value: MixHomeRow.statusAction,
@@ -267,7 +300,7 @@ class _MixHomeRowState extends State<MixHomeRow> {
       child: Builder(
         builder: (context) => SwipeActions(
           key: ValueKey('mix-swipe-$id'),
-          enabled: !_editing && !_busy,
+          enabled: !_editing && !_busy && !widget.selecting,
           // The list sits inside the screen's side padding; the row still
           // slides out to the screen edge, as WhatsApp's does.
           bleed: MixtapeMetrics.screenSidePadding,
@@ -330,6 +363,8 @@ class _MixHomeRowState extends State<MixHomeRow> {
       );
     }
 
+    if (widget.selecting) return _buildSelectRow(context);
+
     return GestureDetector(
       // No chevron (founder, 2026-11-09); the actions live on long-press and
       // the swipe.
@@ -358,6 +393,74 @@ class _MixHomeRowState extends State<MixHomeRow> {
                 icon: Icon(Icons.more_horiz, color: context.tokens.muted),
               )
             : null,
+      ),
+    );
+  }
+}
+
+extension on _MixHomeRowState {
+  /// Select mode (board S2/S3/S9): the circle leads, the rest of the row
+  /// moves over by its slot and nothing else changes. The whole row is the
+  /// tick target, and reads to VoiceOver as one "Title, subtitle" that is
+  /// selected or not. At wrapping text sizes the circle stays level with the
+  /// title's first line.
+  Widget _buildSelectRow(BuildContext context) {
+    final wraps =
+        MediaQuery.textScalerOf(context).scale(100) / 100 >= FlushRow.wrapScale;
+    final toggle = widget.onToggleSelected;
+    return Semantics(
+      key: MixSelect.rowKey(widget.session.id),
+      container: true,
+      button: true,
+      selected: widget.selected,
+      label: '${widget.session.title}, $_subtitle',
+      onTap: toggle,
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: toggle,
+        child: AnimatedOpacity(
+          opacity: widget.fading ? MixSelect.fadingOpacity : 1,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 200),
+          child: Row(
+            crossAxisAlignment: wraps
+                ? CrossAxisAlignment.start
+                : CrossAxisAlignment.center,
+            children: [
+              Padding(
+                padding: EdgeInsets.only(
+                  top: wraps ? MixHomeRow.verticalPadding + 6 : 0,
+                ),
+                child: SizedBox(
+                  width: MixSelect.slotWidth,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: MixSelectCircle(
+                      key: MixSelect.circleKey(widget.session.id),
+                      selected: widget.selected,
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: FlushRow(
+                  leading: _tile,
+                  leadingSize: MixHomeRow.artSize,
+                  verticalPadding: MixHomeRow.verticalPadding,
+                  showChevron: false,
+                  title: widget.session.title,
+                  subtitle: _subtitle,
+                  subtitleWidget: widget.working
+                      ? MixHomeRow.workingLine(context)
+                      : null,
+                  isFirst: widget.isFirst,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

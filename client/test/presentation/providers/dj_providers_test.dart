@@ -19,6 +19,10 @@ import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/presentation/providers/mix_operation_gate.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/working_step.dart';
+import 'package:mixtape/data/playback/playback_api.dart';
+import 'package:mixtape/data/playback/playback_controller.dart';
+import 'package:mixtape/data/playback/player_bridge.dart';
+import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 
 import '../../helpers/fake_listening_api.dart';
@@ -29,7 +33,18 @@ import '../../helpers/fake_listening_api.dart';
 /// individual tests only wire up what they need; unset callbacks throw so a
 /// test exercising an unexpected call fails loudly rather than hanging.
 /// [DjRemakeSender] lets it answer [DjApiRemake.sendRemake] too.
-class FakeDjApi implements DjApi, DjRemakeSender {
+class FakeDjApi implements DjApi, DjRemakeSender, DjSessionDeleter {
+  Future<List<String>> Function(List<String> ids)? onDeleteSessions;
+  final List<List<String>> deleteCalls = [];
+
+  @override
+  Future<List<String>> deleteSessions(List<String> ids) {
+    deleteCalls.add(ids);
+    final impl = onDeleteSessions;
+    if (impl == null) throw UnimplementedError('onDeleteSessions not wired');
+    return impl(ids);
+  }
+
   @override
   Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
 
@@ -348,6 +363,20 @@ class TestAuthNotifier extends AuthNotifier {
   void set(AuthStatus status) => state = status;
 }
 
+class _NoPlaybackApi implements PlaybackApi {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// Records which mixes the player was told were deleted.
+class _Player extends PlaybackController {
+  _Player() : super(_NoPlaybackApi(), AppPlayerBridge());
+  final forgotten = <String>[];
+
+  @override
+  void forgetSession(String id) => forgotten.add(id);
+}
+
 DjSession _session({
   String id = 's1',
   String status = 'active',
@@ -490,6 +519,143 @@ void main() {
 
       expect(api.lastStatusCall, (id: 's1', status: 'active'));
       expect(container.read(sessionsProvider).value!.single.status, 'active');
+    });
+
+    test('deleteSessions drops the deleted rows and keeps the rest', () async {
+      final api = FakeDjApi()
+        ..onListSessions = (() async => [_session(id: 'a'), _session(id: 'b'), _session(id: 'c')])
+        ..onDeleteSessions = (ids) async => ids;
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+
+      final deleted = await container.read(sessionsProvider.notifier).deleteSessions(['a', 'c']);
+
+      expect(deleted, ['a', 'c']);
+      expect(api.deleteCalls, [
+        ['a', 'c'],
+      ]);
+      expect(container.read(sessionsProvider).value!.map((s) => s.id), ['b']);
+    });
+
+    test('ids the server skipped are gone elsewhere: every asked row leaves, '
+        'and only what it deleted comes back', () async {
+      final api = FakeDjApi()
+        ..onListSessions = (() async => [_session(id: 'a'), _session(id: 'b'), _session(id: 'c')])
+        ..onDeleteSessions = (ids) async => ['a'];
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+
+      final deleted = await container.read(sessionsProvider.notifier).deleteSessions(['a', 'b']);
+
+      expect(deleted, ['a']);
+      expect(container.read(sessionsProvider).value!.map((s) => s.id), ['c']);
+    });
+
+    test('more than the server takes at once goes in batches of 100', () async {
+      final ids = [for (var i = 0; i < 230; i++) 'm$i'];
+      final api = FakeDjApi()
+        ..onListSessions = (() async => [for (final id in ids) _session(id: id)])
+        ..onDeleteSessions = (batch) async => batch;
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+
+      final deleted = await container.read(sessionsProvider.notifier).deleteSessions(ids);
+
+      expect(api.deleteCalls.map((c) => c.length), [100, 100, 30]);
+      expect(deleted, ids);
+      expect(container.read(sessionsProvider).value, isEmpty);
+    });
+
+    test('a deleted mix\'s open conversation reads again, and the player is '
+        'told it is gone', () async {
+      final api = FakeDjApi()
+        ..onListSessions = (() async => [_session(id: 'a'), _session(id: 'b')])
+        ..onDeleteSessions = ((ids) async => ids)
+        ..onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: const [],
+          queue: const [],
+        );
+      final player = _Player();
+      final container = ProviderContainer(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
+          djApiProvider.overrideWithValue(api),
+          authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
+          playbackProvider.overrideWithValue(player),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.read(playbackProvider);
+      await container.read(sessionsProvider.future);
+      final sub = container.listen(chatProvider('a'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('a').future);
+      final reads = api.getSessionCallCount;
+
+      await container.read(sessionsProvider.notifier).deleteSessions(['a']);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(player.forgotten, ['a']);
+      expect(api.getSessionCallCount, greaterThan(reads));
+    });
+
+    test('a failed delete leaves every row and rethrows', () async {
+      final api = FakeDjApi()
+        ..onListSessions = (() async => [_session(id: 'a'), _session(id: 'b')])
+        ..onDeleteSessions = (ids) async => throw ApiException(500, 'boom');
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+
+      await expectLater(
+        container.read(sessionsProvider.notifier).deleteSessions(['a']),
+        throwsA(isA<ApiException>()),
+      );
+      expect(container.read(sessionsProvider).value!.map((s) => s.id), ['a', 'b']);
+    });
+
+    test('a list read that started before the delete cannot bring a row back', () async {
+      final stale = Completer<List<DjSession>>();
+      var reads = 0;
+      final api = FakeDjApi()
+        ..onListSessions = () {
+          reads++;
+          if (reads == 1) return Future.value([_session(id: 'a'), _session(id: 'b')]);
+          return stale.future;
+        }
+        ..onDeleteSessions = (ids) async => ids;
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+
+      final refresh = container.read(sessionsProvider.notifier).refresh();
+      await container.read(sessionsProvider.notifier).deleteSessions(['a']);
+      stale.complete([_session(id: 'a'), _session(id: 'b')]);
+      await refresh;
+
+      expect(container.read(sessionsProvider).value!.map((s) => s.id), ['b']);
+    });
+
+    test('the list says which mixes are shared; a read or Stop sharing since wins', () async {
+      final api = FakeDjApi()
+        ..onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: const [],
+          queue: const [],
+          shared: true,
+        );
+      final container = _makeContainer(api);
+      final sub = container.listen(chatProvider('a'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('a').future);
+
+      final known = container.read(knownSharedMixesProvider);
+      final listedA = DjSession(id: 'a', title: 't', status: 'active', queueVersion: 1, updatedAt: DateTime(2026));
+      final listedB = DjSession(id: 'b', title: 't', status: 'active', queueVersion: 1, updatedAt: DateTime(2026), shared: true);
+      expect(known.isShared(listedA), isTrue, reason: 'the read said shared');
+      expect(known.isShared(listedB), isTrue, reason: 'the list said shared');
+
+      container.read(chatProvider('a').notifier).setShared(false);
+      expect(known.isShared(listedA.copyWith(shared: true)), isFalse);
     });
 
     test('rename calls renameSession then refreshes the list, mirroring archive/unarchive', () async {

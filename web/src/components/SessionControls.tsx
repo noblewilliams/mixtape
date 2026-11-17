@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { Cassette } from './Cassette'
 import { TapeSettings } from './TapeSettings'
 import type { DjSession, SharedMixRow } from '../domain'
@@ -127,6 +127,13 @@ function sessionSubline(session: DjSession): string {
   return `${session.trackCount} songs · ${session.ageLabel}`
 }
 
+/**
+ * Select mode on Mixes (approved board 2026-11-16, W1): a real checkbox named
+ * by the title, and a click anywhere on the row ticks instead of opening.
+ * `range` is a Shift-click, for the list to tick everything since the last tick.
+ */
+export type RowSelect = { checked: boolean; fading?: boolean; onToggle: (range: boolean) => void }
+
 export function SessionRow({
   session,
   onOpen,
@@ -136,10 +143,12 @@ export function SessionRow({
   onColor,
   showTape = false,
   layout = 'row',
+  select,
 }: {
   session: DjSession
   showTape?: boolean
   layout?: 'row' | 'tile'
+  select?: RowSelect
   onOpen: () => void
   onRename: (title: string) => Promise<void>
   onArchive: () => Promise<void>
@@ -207,6 +216,18 @@ export function SessionRow({
     else setReveal(amount >= 18 ? 44 : 0)
   }
   const cassette = <Cassette title={session.title} caseColor={session.caseColor} stockColor={session.stockColor} />
+  // In select mode the row's own buttons step aside: a click ticks, the ••• menu stays.
+  const tick = (event: MouseEvent) => {
+    // Portalled modals (Tape settings) bubble through React; only clicks on the row itself tick.
+    if (!select || !event.currentTarget.contains(event.target as Node)) return
+    if ((event.target as HTMLElement).closest('.wc-more, .wc-popover, input')) return
+    select.onToggle(event.shiftKey)
+  }
+  const box = select && (
+    <input type="checkbox" className="wc-select-box" aria-label={session.title} checked={select.checked} readOnly
+      onClick={(event) => select.onToggle(event.shiftKey)} />
+  )
+  const selectClass = select ? ` is-selecting${select.checked ? ' is-picked' : ''}${select.fading ? ' is-fading' : ''}` : ''
   const menuButtonElement = (
     <button
       ref={menuButton}
@@ -223,7 +244,7 @@ export function SessionRow({
     <>
       {menu && (
         <div ref={menuElement} className="wc-popover wc-session-menu" role="group" aria-label="Mix actions">
-          <button className="wc-text" aria-label={`Rename ${session.title}`} onClick={() => { setMenu(false); setRenaming(true) }}>Rename</button>
+          {!select && <button className="wc-text" aria-label={`Rename ${session.title}`} onClick={() => { setMenu(false); setRenaming(true) }}>Rename</button>}
           {onColor && <button className="wc-text" onClick={() => { setMenu(false); setSettings(true) }}>Tape settings</button>}
           {session.status === 'active' && <button className="wc-text" onClick={() => void act(onArchive)}>
             Archive
@@ -234,6 +255,36 @@ export function SessionRow({
       {settings && onColor && <TapeSettings session={session} onColor={onColor} onClose={() => { setSettings(false); menuButton.current?.focus() }} />}
       {error && <p role="alert">{error}</p>}
     </>
+  )
+  if (layout === 'tile' && select) return (
+    <div className={`wc-session-tile${selectClass} ${menu ? 'has-menu' : ''}`} onClick={tick}>
+      {box}
+      <span className="mix-tape-open">{cassette}</span>
+      <div className="wc-tile-foot">
+        <span className="wc-session-copy">
+          <strong>{session.title}</strong>
+          <small>{sessionSubline(session)}</small>
+        </span>
+        {menuButtonElement}
+      </div>
+      {extras}
+    </div>
+  )
+  if (select) return (
+    <div ref={row} className={`wc-session-row${selectClass} ${menu ? 'has-menu' : ''}`}>
+      <div className="wc-session-surface" onClick={tick}>
+        {box}
+        <div className="wc-session-open">
+          {showTape && <span className="mix-tape-open">{cassette}</span>}
+          <span className="wc-session-copy">
+            <strong>{session.title}</strong>
+            <small>{sessionSubline(session)}</small>
+          </span>
+        </div>
+        {menuButtonElement}
+      </div>
+      {extras}
+    </div>
   )
   if (layout === 'tile') return (
     <div className={`wc-session-tile ${menu ? 'has-menu' : ''}`}>
@@ -379,12 +430,15 @@ export function SessionRow({
  */
 export function SharedRow({
   row,
-  onOpen,
+  onOpen: openShared,
   onRemove,
   layout = 'row',
+  dimmed = false,
 }: {
   row: SharedMixRow
   layout?: 'row' | 'tile'
+  /** Select mode: a share is not this listener's to delete, so it dims, takes no checkbox and does not open. */
+  dimmed?: boolean
   onOpen: () => void
   onRemove: () => Promise<void>
 }) {
@@ -394,6 +448,7 @@ export function SharedRow({
   const menuElement = useRef<HTMLDivElement>(null)
   const menuButton = useRef<HTMLButtonElement>(null)
   const mounted = useRef(true)
+  const onOpen = dimmed ? () => undefined : openShared
   useEffect(() => () => { mounted.current = false }, [])
   useEffect(() => {
     if (!menu) return
@@ -429,7 +484,7 @@ export function SharedRow({
   // Built in parts, never split on " · ": a name may hold one.
   const subline = <small><b className="wc-shared-from">{sharerLabel(row.sharerName)}</b> · {sharedDetails(row)}</small>
   const cassette = <Cassette title={row.title} caseColor={row.caseColor} />
-  const open = <button className="mix-tape-open" onClick={onOpen} aria-label={`Open ${row.title}`}>{cassette}</button>
+  const open = dimmed ? <span className="mix-tape-open">{cassette}</span> : <button className="mix-tape-open" onClick={onOpen} aria-label={`Open ${row.title}`}>{cassette}</button>
   const menuButtonElement = (
     <button ref={menuButton} className="wc-text wc-more" disabled={busy} aria-label={`Mix actions for ${row.title}`} aria-expanded={menu} onClick={() => setMenu((value) => !value)}>
       •••
@@ -446,7 +501,7 @@ export function SharedRow({
     </>
   )
   if (layout === 'tile') return (
-    <div className={`wc-session-tile wc-shared-row ${menu ? 'has-menu' : ''}`}>
+    <div className={`wc-session-tile wc-shared-row${dimmed ? ' is-dimmed' : ''} ${menu ? 'has-menu' : ''}`}>
       {open}
       <div className="wc-tile-foot">
         <span className="wc-session-copy"><strong>{row.title}</strong>{subline}</span>
@@ -456,7 +511,7 @@ export function SharedRow({
     </div>
   )
   return (
-    <div className={`wc-session-row wc-shared-row ${menu ? 'has-menu' : ''}`}>
+    <div className={`wc-session-row wc-shared-row${dimmed ? ' is-dimmed' : ''} ${menu ? 'has-menu' : ''}`}>
       <div className="wc-session-surface">
         <div className="wc-session-open">
           {open}
