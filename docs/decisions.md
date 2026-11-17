@@ -26,7 +26,8 @@ forbids, so the founder chose (a) plus (b) and left that stance untouched:
 Code: `server/src/dj/title.ts` (`generateMixTitle`), `routes/sessions.ts`
 (`createMixTurn`). Amends 2026-08-30 session titles.
 
-Amended (2026-11-17, founder): both namers write 3 to 8 words in sentence
+Amended (2026-11-17, founder): both namers write 3 to 6 words (4 is the
+sweet spot; about 5.7 measured, down from about 7) in sentence
 case, in the voice of the music asked for (its slang, places, rituals and
 attitude), and almost always as an imperative action rather than a
 description: "Move your legs faster than your doubt", not "Legs moving
@@ -39,7 +40,8 @@ reused them and the examples verbatim. Seen: "Brew your coffee while
 Johannesburg dreams", "Drown your phone before it rings". The song namer usually writes its own line from what the songs
 share and lifts a song or album title only when one of 3 or more words
 sums up the mix ("Sunset in Pretoria"). The brief is material to name,
-never to answer; an answer over 10 words is discarded as a reply (one real
+never to answer; an answer over 8 words (the 6-word limit plus two of
+slack) is discarded as a reply (one real
 brief, "extend my running playlist", drew "I appreciate the request, but
 ..."). The song-based call has no retry, so it adds at most 5 s after the
 picks (usually under 1 s); the parallel brief-only call keeps the SDK's one
