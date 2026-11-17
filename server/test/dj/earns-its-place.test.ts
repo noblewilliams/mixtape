@@ -13,7 +13,7 @@ import {
   onlyArtistFitNotice,
   NOTHING_FITS_TEXT,
   PERSONA_PROMPT,
-  PERSONA_PROMPT_WITH_OUTSIDE,
+  PERSONA_PROMPT_WITH_PROPOSE_FIRST,
   PERSONA_PROMPT_WITH_FILL,
   FILL_PERSONA_LINE,
   shortMixNotice,
@@ -309,10 +309,10 @@ describe('decision 2: a short curation is filled from outside the library, then 
       expect(offReq.system).toBe(PERSONA_PROMPT)
     }
 
-    // OUTSIDE_PICKS on already carries allowOutside: its own variant wins.
+    // Propose first also carries allowOutside: its own variant wins.
     const both = scriptedLlm([])
-    await runDjTurn(db, { llm: both.llm, embed: embedFake, fill, neverRefuse: true, outsidePicks: true }, { id: session.id, userId: 'u1' }, 'hi')
-    expect(both.requests.filter((r) => r.tools.length > 0)[0].system).toBe(PERSONA_PROMPT_WITH_OUTSIDE)
+    await runDjTurn(db, { llm: both.llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'hi')
+    expect(both.requests.filter((r) => r.tools.length > 0)[0].system).toBe(PERSONA_PROMPT_WITH_PROPOSE_FIRST)
   })
 
   it('with NEVER_REFUSE off the mix is shorter and says so, nothing proposed', async () => {
@@ -737,10 +737,10 @@ describe('decision 4: a turn whose queue changed never fails silently', () => {
 })
 
 describe('decision 5: the reply describes only what is in the listing', () => {
-  it('the persona says so, flag on or off', () => {
+  it('the persona says so, propose first on or off', () => {
     expect(HONEST_LISTING_PERSONA_LINE).toMatch(/anchors, leads or features/)
     expect(HONEST_LISTING_PERSONA_LINE).toMatch(/differs from what they asked/)
     expect(PERSONA_PROMPT).toContain(HONEST_LISTING_PERSONA_LINE)
-    expect(PERSONA_PROMPT_WITH_OUTSIDE).toContain(HONEST_LISTING_PERSONA_LINE)
+    expect(PERSONA_PROMPT_WITH_PROPOSE_FIRST).toContain(HONEST_LISTING_PERSONA_LINE)
   })
 })

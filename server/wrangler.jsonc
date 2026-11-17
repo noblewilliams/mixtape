@@ -34,9 +34,6 @@
     // GOOGLE_CLIENT_ID secret. Keep it equal to GOOGLE_IOS_CLIENT_ID in
     // client/config/google-ios.json.
     "GOOGLE_IOS_CLIENT_ID": "403264926110-000q34va63qouvvtvb11co0je53867gb.apps.googleusercontent.com",
-    // Outside picks (plan 2026-10-03, Phase C): "on" lets mixes include a few
-    // songs the listener does not own. Anything else is off.
-    "OUTSIDE_PICKS": "off",
     // Album picks (plan 2026-10-20, Gate 2 on 2026-10-21): "on" lets listeners
     // ask the DJ for an album. Anything else is off.
     "ALBUM_PICKS": "on",
@@ -46,7 +43,7 @@
     "NEVER_REFUSE": "on",
     // Propose first (plan 2026-11-16, S7): "on" blends songs the DJ proposes,
     // verified on Apple, into personal mixes and raises the corpus share.
-    // Anything else is off. PROPOSE_FIRST_USERS (below) gates it per listener.
+    // Anything else is off: the kill switch back to the pre-propose-first DJ.
     "PROPOSE_FIRST": "on",
     // AI consent (plan 2026-11-02): "enforce" refuses mixes, turns and voice
     // to listeners who have not agreed. Off until clients that ask are live.
@@ -86,11 +83,8 @@
   //   ITUNES_STOREFRONT       — iTunes storefront code for enrichment lookups (default "ng")
   //   GOOGLE_IOS_CLIENT_ID    — iOS OAuth client id, declared under "vars" above; accepted as an
   //                             additional Google ID token audience for native sign-in
-  //   OUTSIDE_PICKS           declared under "vars" above; read once per request in src/index.ts
   //   ALBUM_PICKS             declared under "vars" above; read once per request in src/index.ts
   //   NEVER_REFUSE            declared under "vars" above; read once per request in src/index.ts
-  //   PROPOSE_FIRST           declared under "vars" above; read once per turn in src/index.ts
-  //   PROPOSE_FIRST_USERS     — comma-separated user ids that get PROPOSE_FIRST while it is "off"
-  //                             (var or secret; unset gates no one). Removed with S10
+  //   PROPOSE_FIRST           declared under "vars" above; read once per request in src/index.ts
   // MusicKit keys also enable the server-only Apple catalog client used by artwork enrichment.
 }

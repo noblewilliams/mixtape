@@ -568,7 +568,7 @@ describe('rename_session: zod and its longhand JSON schema agree', () => {
   })
 })
 
-describe('DJ_TOOLS_WITH_OUTSIDE (OUTSIDE_PICKS on)', () => {
+describe('DJ_TOOLS_WITH_OUTSIDE (propose first, or the fill)', () => {
   const withOutside = (name: string) => DJ_TOOLS_WITH_OUTSIDE.find((t) => t.name === name)!.input_schema
 
   it('offers the same tools, frozen, and differs from DJ_TOOLS only by allowOutside', () => {

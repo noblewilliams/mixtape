@@ -7,7 +7,6 @@ import {
   applyOps,
   planOps,
   MAX_ACTIVE_QUEUE_LENGTH,
-  newToListenerTrackIds,
   QueueOpError,
   QueueVersionConflict,
   type ReplacementPick,
@@ -1146,10 +1145,9 @@ describe('getActiveQueue newToYou: playlists and not-personal sessions', () => {
     await replaceQueue(db, session.id, [kept, removed].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
 
     expect((await getActiveQueue(db, session.id)).map((v) => v.newToYou)).toEqual([false, true])
-    expect([...(await newToListenerTrackIds(db, session.id))]).toEqual([removed.id])
   })
 
-  it('a not-personal session marks nothing, while the raw ownership set still sees the unowned songs', async () => {
+  it('a not-personal session marks nothing', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const session = await seedSession(db, 'u1')
@@ -1159,6 +1157,5 @@ describe('getActiveQueue newToYou: playlists and not-personal sessions', () => {
     await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
 
     expect((await getActiveQueue(db, session.id)).map((v) => v.newToYou)).toEqual([false, false])
-    expect(new Set(await newToListenerTrackIds(db, session.id))).toEqual(new Set([a.id, b.id]))
   })
 })

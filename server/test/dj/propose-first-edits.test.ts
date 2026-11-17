@@ -7,7 +7,7 @@ import {
   editOutsideShortNotice,
   genreCheckNotice,
   namedArtistsNotFoundNotice,
-  outsidePicksNotice,
+  newToYouNotice,
   type DjDeps,
   editAddedNotice,
 } from '../../src/dj/loop'
@@ -153,7 +153,7 @@ describe('propose first: edits reach songs they do not own', () => {
     expect(asks).toHaveLength(1)
     expect(asks[0].system).toBe(PROPOSE_SYSTEM_PROMPT_PERSONAL)
     expect(asks[0].messages[0].content as string).toContain('Propose up to 3 songs.')
-    expect(text).toContain(outsidePicksNotice([1]))
+    expect(text).toContain(newToYouNotice([1]))
     expect(text).not.toContain(namedArtistsNotFoundNotice(['Kendrick Lamar']))
     expect(text).toMatch(/K Song \d+ — Kendrick Lamar \| new/)
     expect(text).toContain(editAddedNotice(0, 1))
@@ -211,7 +211,7 @@ describe('propose first: edits reach songs they do not own', () => {
     expect(result.queue.slice(0, 10).map((t) => t.trackId)).toEqual(before.map((t) => t.trackId))
     expect(proposalRequests(requests)).toHaveLength(1)
     expect(proposalRequests(requests)[0].messages[0].content as string).toContain('Propose up to 7 songs.')
-    expect(text).toContain(outsidePicksNotice([10, 11, 12, 13, 14]))
+    expect(text).toContain(newToYouNotice([10, 11, 12, 13, 14]))
     expect(text).not.toMatch(/could not be found in their music/)
   })
 
@@ -328,7 +328,7 @@ describe('propose first edits: budget, spares and dedupe', () => {
     expect(result.queue[1].artist).toBe('Kendrick Lamar')
     expect(result.queue[3].artist).toBe('Kendrick Lamar')
     expect(result.queue[1].title).not.toBe(result.queue[3].title)
-    expect(text).toContain(outsidePicksNotice([1, 3]))
+    expect(text).toContain(newToYouNotice([1, 3]))
   })
 
   it('another release of a song this batch already landed is not landed twice', async () => {

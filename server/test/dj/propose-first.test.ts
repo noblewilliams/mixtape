@@ -151,38 +151,20 @@ async function personalTurn(opts: { library?: number; input: Record<string, unkn
 }
 
 describe('PROPOSE_FIRST flag', () => {
-  it('only the exact string "on" enables it for everyone', () => {
-    expect(proposeFirstEnabled({ PROPOSE_FIRST: 'on' }, 'anyone')).toBe(true)
+  it('only the exact string "on" enables it', () => {
     expect(proposeFirstEnabled({ PROPOSE_FIRST: 'on' })).toBe(true)
     for (const value of [undefined, 'off', 'ON', ' on', 'true', '1', '']) {
-      expect(proposeFirstEnabled({ PROPOSE_FIRST: value }, 'u1')).toBe(false)
+      expect(proposeFirstEnabled({ PROPOSE_FIRST: value })).toBe(false)
     }
   })
 
-  it('PROPOSE_FIRST_USERS turns it on for the listed listeners only', () => {
-    const env = { PROPOSE_FIRST: 'off', PROPOSE_FIRST_USERS: 'u1, u2 ,,' }
-    expect(proposeFirstEnabled(env, 'u1')).toBe(true)
-    expect(proposeFirstEnabled(env, 'u2')).toBe(true)
-    expect(proposeFirstEnabled(env, 'u3')).toBe(false)
-    expect(proposeFirstEnabled(env, '')).toBe(false)
-    expect(proposeFirstEnabled(env)).toBe(false)
-    expect(proposeFirstEnabled({ PROPOSE_FIRST_USERS: '' }, 'u1')).toBe(false)
-  })
-
-  it('ships on in wrangler.jsonc (cutover 2026-11-17), with no listener list as a var', () => {
+  // S10 (2026-11-17): the per-listener rollout list is gone; the flag is
+  // one switch for everyone.
+  it('ships on in wrangler.jsonc (cutover 2026-11-17), with no listener list', () => {
     const config = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8')
     expect(config).toMatch(/"PROPOSE_FIRST":\s*"on"/)
     expect(config).not.toMatch(/"PROPOSE_FIRST_USERS":/)
-  })
-
-  it('a turn resolves the flag for its own listener', async () => {
-    const listed = await personalTurn({ input: { targetCount: 10 }, deps: { proposeFirst: undefined, proposeFirstFor: (id) => id === 'u1' } })
-    expect(proposalRequests(listed.requests)).toHaveLength(1)
-    expect(listed.requests[0].system).toBe(PERSONA_PROMPT_WITH_PROPOSE_FIRST)
-
-    const other = await personalTurn({ input: { targetCount: 10 }, deps: { proposeFirst: undefined, proposeFirstFor: (id) => id === 'u2' } })
-    expect(proposalRequests(other.requests)).toHaveLength(0)
-    expect(other.requests[0].system).toBe(PERSONA_PROMPT_WITH_FILL)
+    expect(config).not.toMatch(/OUTSIDE_PICKS/)
   })
 })
 
@@ -199,9 +181,7 @@ describe('flag off is today', () => {
   it('proposeFirst false sends exactly what an unset flag sends', async () => {
     const absent = await personalTurn({ input: { targetCount: 20 }, deps: { proposeFirst: undefined } })
     const off = await personalTurn({ input: { targetCount: 20 }, deps: { proposeFirst: false } })
-    const resolvedOff = await personalTurn({ input: { targetCount: 20 }, deps: { proposeFirst: undefined, proposeFirstFor: () => false } })
     expect(shape(off.requests)).toEqual(shape(absent.requests))
-    expect(shape(resolvedOff.requests)).toEqual(shape(absent.requests))
     expect(off.searches).toEqual(absent.searches)
 
     // The tool result line for line, bar which library songs were listed
@@ -538,11 +518,15 @@ describe('remake and outside picks', () => {
     expect(result.queue.every((t) => t.title.startsWith('Library '))).toBe(true)
   })
 
-  async function bothFlags(proposeFirst: boolean) {
+  // Retired with OUTSIDE_PICKS (S10, 2026-11-17): the catalogue outside
+  // pool. Catalogue neighbours a personal listener does not own never reach
+  // the curation; the songs new to them are proposals only.
+  it('catalogue neighbours never join a personal mix: new songs are proposals only', async () => {
     const db = await createTestDb()
     await seedUser(db)
     await seedLibrary(db, 30)
-    // Catalogue neighbours the listener does not own: outside-pool rows.
+    // Catalogue neighbours the listener does not own: what the retired
+    // outside pool drew on.
     await seedUser(db, 'other')
     for (let i = 0; i < 20; i++) {
       const [t] = await db.insert(tracks).values({ appleId: `other-${i}`, title: `Other ${i}`, artist: 'Someone Else', genre: 'Soul', durationMs: 200_000 }).returning()
@@ -553,17 +537,8 @@ describe('remake and outside picks', () => {
     const session = await seedSession(db)
     const { fill } = fakeApple(proposals(22))
     const { llm, requests } = scriptedLlm([generate({ targetCount: 20, familiarity: 'adventurous' })], proposals(22))
-    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, outsidePicks: true, proposeFirst }, { id: session.id, userId: 'u1' }, 'tonight')
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'tonight')
     const curationText = JSON.stringify(curationRequests(requests)[0].messages)
-    return { result, curationText }
-  }
-
-  it('with both flags on, the outside pool is off: new songs are proposals only', async () => {
-    // OUTSIDE_PICKS alone draws on the catalogue neighbours...
-    const outsideOnly = await bothFlags(false)
-    expect(outsideOnly.curationText).toContain('Other ')
-    // ...propose first takes its place.
-    const { result, curationText } = await bothFlags(true)
     expect(curationText).not.toContain('Other ')
     expect(result.queue.filter((t) => t.title.startsWith('Other '))).toHaveLength(0)
     for (const t of result.queue.filter((q) => q.newToYou)) expect(t.title).toMatch(/^Song /)

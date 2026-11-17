@@ -62,11 +62,9 @@ type Bindings = {
   AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
   ANTHROPIC_API_KEY?: string
   GROQ_API_KEY?: string
-  OUTSIDE_PICKS?: string
   ALBUM_PICKS?: string
   NEVER_REFUSE?: string
   PROPOSE_FIRST?: string
-  PROPOSE_FIRST_USERS?: string
   AI_CONSENT?: string
   DJ_PAUSED?: string
   SHARE_BASE_URL?: string
@@ -112,22 +110,16 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
   }
 }
 
-// Outside picks (plan 2026-10-03, Phase C): mixes may include songs the
-// listener does not own. Only the exact string "on" enables it, so a typo or
-// a missing var is the safe default, today's behaviour.
-export function outsidePicksEnabled(env: { OUTSIDE_PICKS?: string }): boolean {
-  return env.OUTSIDE_PICKS === 'on'
-}
-
 // Album picks (plan 2026-10-20, Phase 1): listeners may ask the DJ for one
-// album. Same exact-"on" rule as outside picks.
+// album. Only the exact string "on" enables it, so a typo or a missing var
+// is the safe default, off.
 export function albumPicksEnabled(env: { ALBUM_PICKS?: string }): boolean {
   return env.ALBUM_PICKS === 'on'
 }
 
 // Never refuse (spec 2026-10-21 everyone-gets-a-mix, step 4): a listener
 // with too few seeds gets songs the DJ proposes, verified on Apple, instead
-// of a refusal. Same exact-"on" rule as outside picks.
+// of a refusal. Same exact-"on" rule as album picks.
 // Plan 2026-11-02 AI consent: 'enforce' refuses AI routes to listeners who
 // have not agreed. Anything else is off.
 export function aiConsentMode(env: { AI_CONSENT?: string }): 'off' | 'enforce' {
@@ -147,13 +139,11 @@ export function neverRefuseEnabled(env: { NEVER_REFUSE?: string }): boolean {
 
 // Propose first (spec 2026-11-16): personal mixes blend songs the DJ
 // proposes from all of music, verified on Apple, and corpus mixes propose
-// more of themselves. Same exact-"on" rule as outside picks. For the gated
-// rollout, PROPOSE_FIRST_USERS (comma-separated user ids, optional) turns it
-// on for those listeners only while PROPOSE_FIRST stays "off".
-export function proposeFirstEnabled(env: { PROPOSE_FIRST?: string; PROPOSE_FIRST_USERS?: string }, userId?: string): boolean {
-  if (env.PROPOSE_FIRST === 'on') return true
-  if (!userId || !env.PROPOSE_FIRST_USERS) return false
-  return env.PROPOSE_FIRST_USERS.split(',').some((id) => id.trim() !== '' && id.trim() === userId)
+// more of themselves. Same exact-"on" rule as album picks. On for everyone
+// since 2026-11-17; "off" is the kill switch back to the pre-propose-first
+// DJ.
+export function proposeFirstEnabled(env: { PROPOSE_FIRST?: string }): boolean {
+  return env.PROPOSE_FIRST === 'on'
 }
 
 // The album loop rides the DJ's model clients plus the Apple catalogue, so it
@@ -193,10 +183,8 @@ function buildDjDeps(env: Bindings, db: Db): DjDeps | undefined {
     // the same ANTHROPIC_API_KEY the DJ loop already requires, no separate
     // config to fail-fast on.
     titleComplete: pauseOnBilling(anthropicComplete(anthropic), trip),
-    outsidePicks: outsidePicksEnabled(env),
     neverRefuse: neverRefuseEnabled(env),
-    // Resolved per turn for its listener (runDjTurn).
-    proposeFirstFor: (userId) => proposeFirstEnabled(env, userId),
+    proposeFirst: proposeFirstEnabled(env),
   }
 }
 

@@ -26,7 +26,8 @@ export type QueueTrackView = {
   artworkBgColor: string | null
   // True when the session's listener holds no recording of this track (no
   // user_tracks row and no playlist they keep shares its ISRC, else its
-  // row id): an outside pick (dj/pool.ts buildOutsidePool). Always false in
+  // row id): a song new to them (a proposal, or a catalogue song in an
+  // artist-only mix). Always false in
   // a not-personal session (founder decision 2026-10-03: those mixes come
   // from the shared catalogue and carry no mark; a whole-mix generate sets
   // the flag from its pool, an edit only ever sets it, dj/loop.ts).
@@ -201,22 +202,6 @@ export async function getActiveQueue(db: Db, sessionId: string): Promise<QueueTr
     .innerJoin(djSessions, eq(djSessions.id, queueTracks.sessionId))
     .where(and(eq(queueTracks.sessionId, sessionId), eq(queueTracks.state, 'active')))
     .orderBy(asc(queueTracks.position))
-}
-
-/**
- * Track ids in the session's active queue that the listener holds no
- * recording of, on RAW ownership: unlike newToYou, never suppressed for a
- * not-personal session. The DJ's edit budget counts outside picks already in
- * a queue from this, so a cap stays conservative whatever the display says.
- */
-export async function newToListenerTrackIds(db: Db, sessionId: string): Promise<Set<string>> {
-  const rows = await db
-    .select({ trackId: queueTracks.trackId })
-    .from(queueTracks)
-    .innerJoin(tracks, eq(tracks.id, queueTracks.trackId))
-    .innerJoin(djSessions, eq(djSessions.id, queueTracks.sessionId))
-    .where(and(eq(queueTracks.sessionId, sessionId), eq(queueTracks.state, 'active'), sql`NOT ${heldSql}`))
-  return new Set(rows.map((r) => r.trackId))
 }
 
 // A slot in the working queue, tracked through an op batch so later ops see

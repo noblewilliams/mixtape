@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { curate, sanitizeReason, CurationNothingFits, CurationTruncated, CurationUnparseable, MAX_REASON_LENGTH, NAMED_ARTISTS_RULE_PREFIX, REASON_RULE } from '../../src/dj/curate'
-import { outsideCap } from '../../src/dj/pool'
-import { OUTSIDE_LEGEND_LINE, OUTSIDE_SYSTEM_INTRO } from '../../src/dj/curate'
 import { intentSchema, type Intent } from '../../src/dj/contracts'
 import type { LlmClient, LlmRequest, LlmTurn } from '../../src/dj/llm'
 import type { PoolTrack } from '../../src/dj/pool'
@@ -26,16 +24,7 @@ function makePool(n: number): PoolTrack[] {
     releaseYear: 2000,
     durationMs: 200_000,
     score: n - i,
-    outside: false,
   }))
-}
-
-// `personal` rows then `outside` rows, as buildPool returns them: outside
-// rows carry ids o0, o1, ... and are flagged.
-function mixedPool(personal: number, outside: number): PoolTrack[] {
-  const own = makePool(personal)
-  const other = makePool(outside).map((t, i) => ({ ...t, trackId: `o${i}`, title: `New ${i}`, playCount: null, outside: true }))
-  return [...own, ...other]
 }
 
 function systemOf(req: LlmRequest): string {
@@ -250,7 +239,7 @@ describe('curate', () => {
     const pool = makePool(10)
     const { llm, requests } = scriptedLlm([textTurn(pool.slice(0, 3).map((t) => ({ id: t.trackId })))])
 
-    await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 0 })
+    await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
     expect(requests[0].effort).toBe('medium')
     expect(requests[0]).not.toHaveProperty('thinking')
@@ -490,65 +479,17 @@ it.each(['rise', 'fall', 'steady', 'arc'] as const)('keeps %s sequencing at user
   expect(JSON.stringify(requests[0].system)).not.toContain('Keep my exclusions first')
 })
 
-describe('curate with outside picks', () => {
-  it('a pool with no outside rows gets the plain legend, no new field and no cap line', async () => {
+// The outside pool retired with OUTSIDE_PICKS (propose first S10,
+// 2026-11-17): every pool row is the listener's own or the catalogue's, so
+// the request never carries the "new" field, its legend or a cap line.
+describe('curate with no outside picks', () => {
+  it('sends the plain legend, no new field and no cap line', async () => {
     const { llm, requests } = scriptedLlm([textTurn([{ id: 't0' }])])
-    await curate(llm, makePool(5), intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 2 })
+    await curate(llm, makePool(5), intent({ themes: 'x', targetCount: 3 }))
     const [pool, intentBlock] = blocksOf(requests[0])
     expect(pool).not.toMatch(/\bnew\b/)
     expect(intentBlock).not.toMatch(/marked new/)
     expect(systemOf(requests[0])).toContain('Assume they know these songs.')
-  })
-
-  it('marks outside rows new, explains it in the legend, states the cap and scopes "they know these songs" to unmarked rows', async () => {
-    const { llm, requests } = scriptedLlm([textTurn([{ id: 't0' }, { id: 'o0' }, { id: 't1' }])])
-    await curate(llm, mixedPool(3, 2), intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 1 })
-    const [pool, intentBlock] = blocksOf(requests[0])
-    const lines = pool.split('\n')
-    expect(lines.filter((l) => l.startsWith('o')).every((l) => l.endsWith(' | new'))).toBe(true)
-    expect(lines.filter((l) => l.startsWith('t')).some((l) => l.endsWith(' | new'))).toBe(false)
-    expect(pool).toContain(OUTSIDE_LEGEND_LINE)
-    expect(intentBlock.split('\n')).toContain('Pick at most 1 song marked new.')
-    const system = systemOf(requests[0])
-    expect(system).not.toContain('Assume they know these songs.')
-    expect(system).toContain(OUTSIDE_SYSTEM_INTRO)
-  })
-
-  it('keeps the outside system prompt static across caps and counts, so it stays cacheable', async () => {
-    const a = scriptedLlm([textTurn([{ id: 't0' }])])
-    const b = scriptedLlm([textTurn([{ id: 't0' }])])
-    await curate(a.llm, mixedPool(6, 3), intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 1 })
-    await curate(b.llm, mixedPool(9, 5), intent({ themes: 'y', targetCount: 5, familiarity: 'adventurous' }), undefined, { outsideCap: 2 })
-    expect(systemOf(a.requests[0])).toBe(systemOf(b.requests[0]))
-    expect(blocksOf(b.requests[0])[1].split('\n')).toContain('Pick at most 2 songs marked new.')
-  })
-
-  it('keeps outside picks in play order up to the cap and drops the rest, unpadded', async () => {
-    const pool = mixedPool(6, 4)
-    const { llm } = scriptedLlm([textTurn([{ id: 'o2', reason: 'A' }, { id: 't3' }, { id: 'o0' }, { id: 'o1' }, { id: 'o3' }])])
-    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 5 }), undefined, { outsideCap: 2 })
-    const ids = result.map((p) => p.trackId)
-    expect(ids).toEqual(['o2', 't3', 'o0'])
-  })
-
-  it('a cap of 0 yields no outside picks whatever the model returns', async () => {
-    const { llm } = scriptedLlm([textTurn([{ id: 'o0' }, { id: 'o1' }, { id: 't0' }])])
-    const result = await curate(llm, mixedPool(4, 2), intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 0 })
-    expect(result.map((p) => p.trackId)).toEqual(['t0'])
-  })
-
-  it('an under-return is never padded, not even with outside rows that rank first', async () => {
-    const pool = [...mixedPool(0, 3), ...makePool(2)]
-    const { llm } = scriptedLlm([textTurn([{ id: 't1' }])])
-    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 4 }), undefined, { outsideCap: 3 })
-    expect(result.map((p) => p.trackId)).toEqual(['t1'])
-  })
-
-  it('without an explicit cap, uses the intent cap', async () => {
-    const { llm } = scriptedLlm([textTurn(['o0', 'o1', 'o2', 'o3', 't0'].map((id) => ({ id })))])
-    const brief = intent({ themes: 'x', targetCount: 5, familiarity: 'adventurous' })
-    const result = await curate(llm, mixedPool(5, 4), brief)
-    expect(result.filter((p) => p.trackId.startsWith('o'))).toHaveLength(outsideCap(brief))
   })
 })
 
@@ -600,14 +541,14 @@ describe('curate with a cut-off picks array', () => {
     expect(result.map((p) => p.reason)).toEqual(complete.map((p) => p.reason))
   })
 
-  it('a salvaged answer is cut to the count and held to the outside cap like any other', async () => {
-    const pool = mixedPool(6, 3)
-    const complete = ['o0', 't0', 'o1', 't1', 't2'].map((id) => ({ id, reason: 'Fits the room.' }))
+  it('a salvaged answer is cut to the count like any other', async () => {
+    const pool = makePool(9)
+    const complete = ['t4', 't0', 't5', 't1', 't2'].map((id) => ({ id, reason: 'Fits the room.' }))
     const { llm } = scriptedLlm([{ text: cutAfter(complete, '{"id":"t3"'), stopReason: 'end_turn' }])
 
-    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 1 })
+    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
-    expect(result.map((p) => p.trackId)).toEqual(['o0', 't0', 't1'])
+    expect(result.map((p) => p.trackId)).toEqual(['t4', 't0', 't5'])
   })
 
   it('a max_tokens answer cut off mid-array still retries with a doubled budget, then throws CurationTruncated', async () => {

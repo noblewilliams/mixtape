@@ -28,8 +28,8 @@ const intentBase = z.object({
   // Outside picks (decision 2026-10-03): false when the listener, or a saved
   // preference, wants only their own music. Absent means true. Optional
   // rather than defaulted so a parsed intent carries no new key unless the
-  // model sent one. Accepted whatever OUTSIDE_PICKS says; only the advertised
-  // tool schema below depends on the flag.
+  // model sent one. Accepted whatever the flags say; only the advertised
+  // tool schema below depends on them.
   allowOutside: z.boolean().optional(),
   familiarity: z.enum(['comfort', 'mix', 'adventurous']).default('mix'),
   targetCount: z.number().int().min(3).max(60).default(15),
@@ -338,8 +338,9 @@ const targetCountProperty = {
     'Number of tracks to queue. Convert any requested duration to a count at ~3.5 minutes per track (e.g. "an hour" is about 17 tracks). Defaults to 15.',
 }
 
-// Advertised only with OUTSIDE_PICKS on (DJ_TOOLS_WITH_OUTSIDE below), so
-// the flag off sends today's tool definitions byte for byte.
+// Advertised only in DJ_TOOLS_WITH_OUTSIDE below (propose first, or the
+// never-refuse fill), so a turn with neither sends the plain tool
+// definitions byte for byte.
 const allowOutsideProperty = {
   type: 'boolean',
   description:
@@ -523,7 +524,8 @@ function buildDjTools(intents: IntentJsonSchemas): LlmToolDef[] {
 
 export const DJ_TOOLS: LlmToolDef[] = buildDjTools(intentJsonSchemas(intentPropertiesBase))
 
-// OUTSIDE_PICKS on: the same tools, with allowOutside on every intent.
+// Propose first or the fill (dj/loop.ts conversationVariant): the same
+// tools, with allowOutside on every intent.
 export const DJ_TOOLS_WITH_OUTSIDE: LlmToolDef[] = buildDjTools(
   intentJsonSchemas({ ...intentPropertiesBase, allowOutside: allowOutsideProperty }),
 )

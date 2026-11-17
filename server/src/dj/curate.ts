@@ -1,5 +1,5 @@
 import type { LlmClient, LlmMessage, LlmRequest } from './llm'
-import { outsideCap, type PoolTrack } from './pool'
+import type { PoolTrack } from './pool'
 import type { Intent } from './contracts'
 import { sanitizeForPrompt, stripEmDashes } from './sanitize'
 import { isScratchNote } from './notes'
@@ -84,14 +84,6 @@ const POOL_LEGEND =
   'id | title — artist | play count | bpm | energy 0-1 | valence 0-1 (bleak→bright) | release year | genre\n' +
   '"-" means unknown. Unknown is not a disqualifier.\n'
 
-// Outside picks (spec 2026-10-03 Part C). Every variant below applies only
-// when the pool handed to curate actually holds an outside row, so a pool
-// without one (OUTSIDE_PICKS off, a comfort brief, an own-music-only brief)
-// sends today's request byte for byte. Each is static so the cached prefix
-// stays reusable; the per-request cap lives in the intent block.
-export const OUTSIDE_LEGEND_LINE = 'A trailing "| new" field marks a song the listener does not own yet.'
-const POOL_LEGEND_WITH_OUTSIDE = `${POOL_LEGEND}${OUTSIDE_LEGEND_LINE}\n`
-
 function poolLine(t: PoolTrack): string {
   // title/artist are user-controlled data synced from the listener's own
   // library (routes/ingest.ts) and get woven straight into the curation
@@ -109,7 +101,6 @@ function poolLine(t: PoolTrack): string {
     fmt(t.releaseYear),
     // Catalogue data, but sanitized like the title: it lands in the prompt.
     t.genre ? sanitizeForPrompt(t.genre) : '-',
-    ...(t.outside ? ['new'] : []),
   ].join(' | ')
 }
 
@@ -137,14 +128,6 @@ const SYSTEM_INTRO =
   "You are the DJ's ear. You build the running order for one listening queue, choosing only " +
     "from a pool of tracks pulled from this listener's own library — their music, not " +
     'recommendations. Assume they know these songs.'
-
-// Replaces SYSTEM_INTRO when the pool holds outside rows: "assume they know
-// these songs" is scoped to the unmarked rows.
-export const OUTSIDE_SYSTEM_INTRO =
-  "You are the DJ's ear. You build the running order for one listening queue, choosing only " +
-  'from a pool of tracks. Unmarked tracks come from this listener\'s own library; assume they ' +
-  'know those. Tracks marked new are songs they do not own yet: use one only where it truly ' +
-  'belongs, never more than the intent allows, and never as filler.'
 
 // The reason rules, shared with the proposal call (dj/propose.ts) so both
 // paths write reasons in one register. Spec 2026-11-09
@@ -194,7 +177,6 @@ const SYSTEM_RULES = [
 ]
 
 const SYSTEM_PROMPT = [SYSTEM_INTRO, ...SYSTEM_RULES].join('\n\n')
-const SYSTEM_PROMPT_WITH_OUTSIDE = [OUTSIDE_SYSTEM_INTRO, ...SYSTEM_RULES].join('\n\n')
 
 // Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5): the
 // pool holds only that artist's songs (dj/pool.ts onlyArtistKey), so the
@@ -217,14 +199,12 @@ function namedArtistsLine(names: string[]): string {
     'listener asked. The spread-the-artists rule does not apply; pick only from the pool.'
 }
 
-// `cap` is null when the pool holds no outside row, and the line is absent.
-function buildIntentBlock(intent: Intent, sessionContext: string | undefined, cap: number | null, scope: ArtistScopeOptions = {}): string {
+function buildIntentBlock(intent: Intent, sessionContext: string | undefined, scope: ArtistScopeOptions = {}): string {
   // "up to": the count is a ceiling (SYSTEM_RULES), so the intent block
   // must not contradict it with a quota.
   const lines = [`Pick up to ${intent.targetCount} tracks.`]
   if (scope.onlyArtist) lines.push(onlyArtistLine(scope.onlyArtist))
   else if (scope.namedArtists && scope.namedArtists.length > 0) lines.push(namedArtistsLine(scope.namedArtists))
-  if (cap !== null) lines.push(`Pick at most ${cap} ${cap === 1 ? 'song' : 'songs'} marked new.`)
   lines.push(arcInstruction(intent.energyArc), `Themes: ${intent.themes}`)
   if (intent.tempoMin !== undefined || intent.tempoMax !== undefined) {
     lines.push(`Tempo: ${intent.tempoMin ?? '-'}–${intent.tempoMax ?? '-'} bpm`)
@@ -243,20 +223,19 @@ function buildRequest(
   intent: Intent,
   sessionContext: string | undefined,
   maxTokens: number,
-  cap: number | null,
   scope: ArtistScopeOptions = {},
   thinking?: 'off',
 ): LlmRequest {
-  const poolBlock = (cap === null ? POOL_LEGEND : POOL_LEGEND_WITH_OUTSIDE) + pool.map(poolLine).join('\n')
+  const poolBlock = POOL_LEGEND + pool.map(poolLine).join('\n')
   const message: LlmMessage = {
     role: 'user',
     content: [
       { type: 'text', text: poolBlock, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: buildIntentBlock(intent, sessionContext, cap, scope) },
+      { type: 'text', text: buildIntentBlock(intent, sessionContext, scope) },
     ],
   }
   return {
-    system: cap === null ? SYSTEM_PROMPT : SYSTEM_PROMPT_WITH_OUTSIDE,
+    system: SYSTEM_PROMPT,
     messages: [message],
     tools: [],
     maxTokens,
@@ -420,26 +399,9 @@ function normalizePicks(raw: unknown[], poolIds: Set<string>): CuratedTrack[] {
   return picks
 }
 
-// The outside cap, enforced in code rather than trusted to the model: the
-// first `cap` outside picks in play order stay, later ones are dropped and
-// nothing takes their place.
-function capOutside(picks: CuratedTrack[], outsideIds: Set<string>, cap: number): CuratedTrack[] {
-  let kept = 0
-  return picks.filter((p) => {
-    if (!outsideIds.has(p.trackId)) return true
-    kept += 1
-    return kept <= cap
-  })
-}
-
-
 type ArtistScopeOptions = { onlyArtist?: string; namedArtists?: string[] }
 
 export type CurateOptions = {
-  // Most outside picks this curation may keep (an edit passes what is left
-  // of the queue's cap). Defaults to outsideCap(intent). Read only when the
-  // pool holds an outside row.
-  outsideCap?: number
   // The artist an artist-only pool is made of; lifts the spread rule.
   onlyArtist?: string
   // The artists a named-artist edit's pool is made of; lifts the spread
@@ -460,10 +422,8 @@ export async function curate(
   options: CurateOptions = {},
 ): Promise<CuratedTrack[]> {
   const poolIds = new Set(pool.map((t) => t.trackId))
-  const outsideIds = new Set(pool.filter((t) => t.outside).map((t) => t.trackId))
-  const cap = outsideIds.size > 0 ? Math.max(0, options.outsideCap ?? outsideCap(intent)) : null
   const maxTokens = scaledMaxTokens(intent.targetCount)
-  const request = buildRequest(pool, intent, sessionContext, maxTokens, cap, options, options.thinking)
+  const request = buildRequest(pool, intent, sessionContext, maxTokens, options, options.thinking)
 
   let turn = await llm(request)
   if (turn.stopReason === 'max_tokens') {
@@ -494,6 +454,5 @@ export async function curate(
   // list up from pool score order (as this once did) put back exactly the
   // off-brief library tracks the rule leaves out. A shortfall is the
   // caller's to fill or explain (dj/loop.ts).
-  const kept = cap === null ? picks : capOutside(picks, outsideIds, cap)
-  return kept.slice(0, intent.targetCount)
+  return picks.slice(0, intent.targetCount)
 }

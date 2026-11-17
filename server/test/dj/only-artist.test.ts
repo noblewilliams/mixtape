@@ -163,7 +163,7 @@ describe('resolveOnlyArtist', () => {
 describe('curate in artist-only mode', () => {
   const pool: PoolTrack[] = Array.from({ length: 4 }, (_, i) => ({
     trackId: `00000000-0000-4000-8000-00000000000${i}`, appleId: `a${i}`, spotifyId: null, title: `T${i}`, artist: 'J. Cole', playCount: null,
-    tempo: null, energy: null, valence: null, releaseYear: null, durationMs: null, score: 1, outside: false,
+    tempo: null, energy: null, valence: null, releaseYear: null, durationMs: null, score: 1,
   }))
 
   it('lifts the spread rule in the intent block and keeps the cached system prompt', async () => {

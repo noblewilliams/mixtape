@@ -26,9 +26,6 @@ export type PoolTrack = {
   // every-song-earns-its-place). Optional so hand-built pools need not set it.
   genre?: string | null
   score: number
-  // True for a catalogue row the listener holds no recording of (see
-  // buildOutsidePool). Personal and corpus rows are always false.
-  outside: boolean
 }
 
 // Which candidate set buildPool draws from — decided by resolvePoolMode.
@@ -46,37 +43,27 @@ export type PoolModeResolution = {
 export type BuildPoolOptions = {
   mode?: PoolMode
   playlistSeed?: { playlistId: string; excludeSourceTracks: boolean }
-  // Most outside picks the caller will keep (outsideCap, or what is left of
-  // it for an edit). Absent or 0 means no outside query at all, which is
-  // what OUTSIDE_PICKS "off" passes. Personal mode only.
-  outsideCap?: number
   // Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5): an
   // artist key (dj/artist-keys.ts artistKey). Candidates are then only rows
   // crediting that artist (tracks.artist_keys, so features count), drawn
   // from the listener's own rows AND the shared catalogue in either mode;
-  // a catalogue row need not be enriched, only playable. No outside pool:
-  // the catalogue rows already ride in the main query.
+  // a catalogue row need not be enriched, only playable. The catalogue
+  // rows ride in the main query.
   // Several keys (a named-artist edit, spec 2026-11-09
   // every-song-earns-its-place, decision 3) admit a row crediting ANY of
   // them; one key behaves exactly as a single string.
   onlyArtistKey?: string | string[]
 }
 
-// Outside picks (spec 2026-10-03 Part C): the share of a mix that may be
-// songs the listener does not own, per familiarity preset. Enforced in code
-// after curation (dj/curate.ts), never left to the model.
+// The share of a mix that may be songs the listener does not own, per
+// familiarity preset (spec 2026-10-03 Part C). Since propose first's S10
+// (2026-11-17) it only says whether a brief leaves room for any
+// (dj/loop.ts ownMusicBrief); PROPOSE_SHARE sets how many.
 export const OUTSIDE_SHARE: Readonly<Record<Intent['familiarity'], number>> = Object.freeze({
   comfort: 0,
   mix: 0.2,
   adventurous: 0.4,
 })
-
-// The nearest-neighbour step's size, and the outside pool's own bound: at
-// most OUTSIDE_POOL_MULTIPLE candidates per allowed pick, never more than
-// OUTSIDE_POOL_MAX (about 2,500 prompt tokens at the cap).
-export const OUTSIDE_NEAREST = 200
-export const OUTSIDE_POOL_MULTIPLE = 4
-export const OUTSIDE_POOL_MAX = 60
 
 /**
  * How many songs the listener does not own a mix of `targetCount` may hold:
@@ -491,8 +478,7 @@ export function onSpotifySql(userId: string): SQL {
 // The CTEs every scored query reads, whatever its candidate source: the
 // selected playlist's profile (seed_*; empty when none is selected), the
 // learned per-artist taste (see the TASTE_* comments above) and the playback
-// balance. Shared by buildPool and buildOutsidePool so an outside row is
-// scored by exactly the signals a personal one is.
+// balance.
 function sharedScoringCtes(userId: string, selectedPlaylistId: string | null): SQL {
   return sql`
     seed_deduped AS (
@@ -612,8 +598,8 @@ function sharedScoringCtes(userId: string, selectedPlaylistId: string | null): S
 }
 
 // Recording dedupe, part two: which row of an ISRC group the listener's
-// player can open. See the comment at its use in buildPool; buildOutsidePool
-// reuses it as a hard requirement (an outside pick must be playable).
+// player can open. See the comment at its use in buildPool; the artist-only
+// pool reuses it as a hard requirement.
 // Uncorrelated subqueries, each evaluated once per query, not per row.
 function platformPrefSql(userId: string): SQL {
   return sql`CASE
@@ -727,8 +713,7 @@ function scoreTerms(intent: Intent, vecLiteral: string) {
 }
 
 // The brief's hard filters plus the queue and playlist-source exclusions,
-// over the aliases t, f and fb. Shared by buildPool and buildOutsidePool so an
-// outside row passes exactly the rules a personal one does.
+// over the aliases t, f and fb.
 function hardFilters(intent: Intent, excludeTrackIds: string[] | undefined, excludeSeedRecordings: boolean): SQL[] {
   const filters: SQL[] = []
   const { tempoMin, tempoMax } = intent
@@ -794,7 +779,7 @@ function hardFilters(intent: Intent, excludeTrackIds: string[] | undefined, excl
 // case-folded (so "free mind" keeps "Free Mind (Interlude)"), and when they
 // gave an artist it must be credited too, so naming Cole's "Intro" does not
 // let every other intro in. Here in hardFilters so every pool (personal,
-// corpus, artist-only, outside) gets it. Named titles are bound parameters,
+// corpus, artist-only) gets it. Named titles are bound parameters,
 // never interpolated into the regex. The Postgres pattern (\m and \M are
 // its word start and end) and the code one below say the same thing and
 // share their test list (test/dj/pool.test.ts).
@@ -949,8 +934,7 @@ export async function buildPool(
   //    player can open: the artist's whole pool is small, and a song Apple
   //    lists for them is a fair pick before its enrichment lands (unknown
   //    features score neutrally, as anywhere else). For a personal listener
-  //    that is their own player's id (platformPrefSql as a hard filter, as
-  //    buildOutsidePool uses it), so an Apple listener is never handed a
+  //    that is their own player's id (platformPrefSql as a hard filter), so an Apple listener is never handed a
   //    Spotify-only row; the recording dedupe below keeps an ISRC twin with
   //    the right id. A corpus-mode listener has no player on record (the
   //    preference defaults them to Spotify, and the Apple fill only inserts
@@ -1090,21 +1074,10 @@ export async function buildPool(
     LIMIT ${poolSize}
   `)
 
-  const personal = (normalizeRows(res) as unknown as PoolRow[]).map((r) => toPoolTrack(r, false))
-  // Outside rows ride after the personal ones, and only when there are
-  // personal ones: a listener with nothing of their own to pick from must
-  // still hear "nothing matched" or the empty-library text (dj/loop.ts), not
-  // a mix made only of songs they do not have.
-  const cap = options.outsideCap ?? 0
-  if (mode !== 'personal' || cap <= 0 || personal.length === 0 || onlyKey !== undefined) return personal
-  const outside = await buildOutsidePool(db, embedding, userId, intent, cap, {
-    excludeTrackIds,
-    playlistSeed: options.playlistSeed,
-  })
-  return [...personal, ...outside]
+  return (normalizeRows(res) as unknown as PoolRow[]).map(toPoolTrack)
 }
 
-function toPoolTrack(r: PoolRow, outside: boolean): PoolTrack {
+function toPoolTrack(r: PoolRow): PoolTrack {
   return {
     trackId: r.track_id,
     appleId: r.apple_id,
@@ -1119,7 +1092,6 @@ function toPoolTrack(r: PoolRow, outside: boolean): PoolTrack {
     durationMs: r.duration_ms,
     genre: r.genre ?? null,
     score: Number(r.score),
-    outside,
   }
 }
 
@@ -1143,9 +1115,8 @@ function directlyHeldSql(userId: SQL, trackId: SQL): SQL {
  * the row itself when it has no ISRC (it is its own recording), otherwise
  * any row sharing its ISRC. Indexed probes per row (user_tracks by listener
  * and track, playlist_entries by track, tracks by isrc) rather than one
- * COALESCE(isrc, id::text) comparison, which no index serves. Shared by
- * buildOutsidePool (never offer a held song) and queue-store's newToYou
- * (never mark one), so the two cannot disagree.
+ * COALESCE(isrc, id::text) comparison, which no index serves. Read by
+ * queue-store's newToYou (never mark a held song new).
  */
 export function holdsRecordingSql(userId: SQL, trackId: SQL, isrc: SQL): SQL {
   return sql`(
@@ -1155,151 +1126,4 @@ export function holdsRecordingSql(userId: SQL, trackId: SQL, isrc: SQL): SQL {
       WHERE twin.isrc = ${isrc} AND ${directlyHeldSql(userId, sql`twin.id`)}
     ))
   )`
-}
-
-/**
- * The nearest-neighbour step of buildOutsidePool, as a standalone SELECT of
- * (track_id, embedding). Exported so a test can EXPLAIN it.
- *
- * ORDER BY holds the raw distance and nothing else, so the HNSW index on
- * track_meanings.embedding can serve it (buildPool's blended ORDER BY
- * cannot). An HNSW scan returns at most hnsw.ef_search rows (pgvector's
- * default is 40), so the statement raises it first, in the same statement:
- * the one-row `cfg` is evaluated before the inner scan's first fetch (the
- * scan's filter references it), and pgvector reads hnsw.ef_search at that
- * first fetch. That ordering holds by how the Postgres executor and pgvector
- * are built today, not by any SQL guarantee; checked in pglite (pgvector
- * 0.8.1), not on Neon. set_config(..., true) is transaction-local: run as
- * its own implicit transaction it reverts when the statement ends, so
- * nothing leaks to the next query on a pooled connection. Inside an explicit
- * transaction it would persist until commit, so revisit before calling this
- * from one. NULL embeddings are filtered out so a sequential plan (NULL
- * distances sort last but still count) never fills the near set with rows
- * that cannot match; the index holds none anyway.
- */
-export function outsideNearestSql(vecLiteral: string): SQL {
-  return sql`
-    SELECT nn.track_id, nn.embedding
-    FROM (SELECT set_config('hnsw.ef_search', ${String(OUTSIDE_NEAREST)}, true) AS ef) cfg
-    CROSS JOIN LATERAL (
-      SELECT m.track_id, m.embedding
-      FROM track_meanings m
-      WHERE cfg.ef IS NOT NULL AND m.embedding IS NOT NULL
-      ORDER BY m.embedding <=> ${vecLiteral}::halfvec(1024)
-      LIMIT ${OUTSIDE_NEAREST}
-    ) nn`
-}
-
-/**
- * Outside candidates (spec 2026-10-03 Part C): catalogue songs the listener
- * holds no recording of, near the brief, that their player can open. One
- * bounded statement, reusing the embedding buildPool already has.
- *
- *  1. nearest: the OUTSIDE_NEAREST rows closest to the brief, by raw
- *     embedding distance (see outsideNearestSql).
- *  2. candidates: each near row plus its ISRC twins, so a playable twin can
- *     stand in for a near row the listener cannot play (an Apple listener's
- *     Apple twin of a Spotify import row).
- *  3. Dropped: any recording the listener holds (holdsRecordingSql: any
- *     user_tracks row, candidate or not, or any playlist they keep); rows
- *     their player cannot open (platformPrefSql as a hard
- *     requirement); the brief's hard filters and the queue and playlist
- *     source exclusions (hardFilters, exactly as for personal rows).
- *  4. Scored with the corpus formula: familiarity is SEED_ARTIST_FAMILIARITY
- *     when the listener has another song by the artist (in a user_tracks row
- *     or a playlist they keep) and 0 otherwise, so a
- *     new song by an artist they know ranks first; learned artist taste, the
- *     playback balance and the selected playlist's profile apply as they do
- *     to personal rows.
- *  5. One row per recording, then the best min(OUTSIDE_POOL_MAX,
- *     OUTSIDE_POOL_MULTIPLE x cap).
- *
- * The near set is approximate and global: if most of it is the listener's
- * own music, few outside rows survive. Accepted; the cap is small.
- */
-export async function buildOutsidePool(
-  db: Db,
-  embedding: number[],
-  userId: string,
-  intent: Intent,
-  cap: number,
-  opts: { excludeTrackIds?: string[]; playlistSeed?: { playlistId: string; excludeSourceTracks: boolean } } = {},
-): Promise<PoolTrack[]> {
-  if (cap <= 0) return []
-  const vecLiteral = `[${embedding.join(',')}]`
-  const selectedPlaylistId = opts.playlistSeed?.playlistId ?? null
-  const limit = Math.min(OUTSIDE_POOL_MAX, OUTSIDE_POOL_MULTIPLE * cap)
-  const { weights, seedWeight } = poolWeights(intent.familiarity, 'corpus', selectedPlaylistId !== null)
-  const { featureFit, simFit, tasteFit, seedFit } = scoreTerms(intent, vecLiteral)
-  const famFit = sql`CASE
-    WHEN lower(btrim(t.artist)) IN (SELECT name FROM own_artists) THEN ${SEED_ARTIST_FAMILIARITY}::float8
-    ELSE 0::float8
-  END`
-  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit} + ${seedWeight} * ${seedFit} + COALESCE(pb.balance, 0))`
-  const filters = [
-    platformPrefSql(userId),
-    sql`NOT ${holdsRecordingSql(sql`${userId}`, sql`t.id`, sql`t.isrc`)}`,
-    ...hardFilters(intent, opts.excludeTrackIds,
-      selectedPlaylistId !== null && opts.playlistSeed?.excludeSourceTracks === true),
-  ]
-
-  const res = await db.execute(sql`
-    WITH ${sharedScoringCtes(userId, selectedPlaylistId)},
-    nearest AS (${outsideNearestSql(vecLiteral)}),
-    own_artists AS (
-      SELECT lower(btrim(ot.artist)) AS name
-      FROM user_tracks ut
-      JOIN tracks ot ON ot.id = ut.track_id
-      WHERE ut.user_id = ${userId}
-      UNION
-      SELECT lower(btrim(pt.artist)) AS name
-      FROM playlist_entries pe
-      JOIN user_playlists up ON up.id = pe.playlist_id
-      JOIN tracks pt ON pt.id = pe.track_id
-      WHERE up.user_id = ${userId} AND up.in_library = true
-    ),
-    candidates AS (
-      SELECT nr.track_id AS near_id, nr.track_id AS track_id FROM nearest nr
-      UNION
-      SELECT nr.track_id AS near_id, tw.id AS track_id
-      FROM nearest nr
-      JOIN tracks n ON n.id = nr.track_id
-      JOIN tracks tw ON tw.isrc = n.isrc
-      WHERE n.isrc IS NOT NULL
-    ),
-    scored AS (
-      SELECT
-        COALESCE(t.isrc, t.id::text) AS key,
-        t.id AS track_id,
-        t.apple_id AS apple_id,
-        t.spotify_id AS spotify_id,
-        t.title AS title,
-        t.artist AS artist,
-        NULL::int AS play_count,
-        ${TEMPO} AS tempo,
-        ${ENERGY} AS energy,
-        ${VALENCE} AS valence,
-        t.release_year AS release_year,
-        t.duration_ms AS duration_ms,
-        t.genre AS genre,
-        ${scoreExpr} AS score
-      FROM candidates c
-      JOIN nearest tm ON tm.track_id = c.near_id
-      JOIN tracks t ON t.id = c.track_id
-      CROSS JOIN seed_profile sp
-      LEFT JOIN track_features f ON f.track_id = t.id
-      LEFT JOIN track_feature_fallbacks fb ON fb.track_id = t.id
-      LEFT JOIN artist_taste at ON at.artist = t.artist
-      LEFT JOIN playback_balance pb ON pb.artist = t.artist
-      WHERE ${sql.join(filters, sql` AND `)}
-    )
-    SELECT * FROM (
-      SELECT DISTINCT ON (key) *
-      FROM scored
-      ORDER BY key, score DESC, track_id
-    ) deduped
-    ORDER BY score DESC, track_id
-    LIMIT ${limit}
-  `)
-  return (normalizeRows(res) as unknown as PoolRow[]).map((r) => toPoolTrack(r, true))
 }
