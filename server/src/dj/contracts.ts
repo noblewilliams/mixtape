@@ -406,6 +406,21 @@ export const renameSessionJsonSchema = Object.freeze({
   required: ['title'],
 })
 
+// Where a swap lands when the listener does not say which songs go. Without
+// it the model took the last positions every time, so new songs piled up at
+// the bottom and a second swap replaced the first one's picks (live,
+// 2026-11-17: "swap in some Kendrick" then "swap in some tyla" both hit
+// positions 13 and 14 of a 15-song mix). Prompt only, no server override.
+// Conversation history is text only, so the DJ's own earlier replies are what
+// tell it which songs the previous edit added.
+export const UNPLACED_SWAP_GUIDANCE =
+  'When the listener names a song or position to replace, swap exactly that. ' +
+  'When they ask for a swap without saying which songs go (e.g. "swap in some Kendrick"), replace the songs that fit their request least: ' +
+  'one that clashes with what they are asking for, or with the mood shift they want. ' +
+  'Spread those positions through the mix instead of taking the last few. ' +
+  'Never replace a song you added in your previous edit (your earlier replies say which) unless they ask, ' +
+  'and never one the listener pinned or asked to keep.'
+
 function buildDjTools(intents: IntentJsonSchemas): LlmToolDef[] {
   const tools: LlmToolDef[] = [
     {
@@ -430,7 +445,7 @@ function buildDjTools(intents: IntentJsonSchemas): LlmToolDef[] {
     {
       name: 'edit_queue',
       description:
-        "THE tool for any change to an existing queue — removals, swaps, reorders, extensions. Prefer this over generate_queue whenever a queue exists: the listener has been shaping it, so make the smallest change that satisfies the request and leave everything else in place. Modify the current queue in place. ops run in order, and each op sees the queue exactly as the PRECEDING ops left it — positions are working-relative, not fixed to the queue you started with. A remove shifts every later track down one position; if you want to remove several tracks, list them in DESCENDING position order (e.g. remove 5 then remove 2, never the reverse) so earlier removals don't shift the positions you listed later. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe.",
+        "THE tool for any change to an existing queue — removals, swaps, reorders, extensions. Prefer this over generate_queue whenever a queue exists: the listener has been shaping it, so make the smallest change that satisfies the request and leave everything else in place. Modify the current queue in place. ops run in order, and each op sees the queue exactly as the PRECEDING ops left it — positions are working-relative, not fixed to the queue you started with. A remove shifts every later track down one position; if you want to remove several tracks, list them in DESCENDING position order (e.g. remove 5 then remove 2, never the reverse) so earlier removals don't shift the positions you listed later. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe. " + UNPLACED_SWAP_GUIDANCE,
       input_schema: {
         type: 'object',
         properties: {

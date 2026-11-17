@@ -10,6 +10,7 @@ import {
   setPlaylistSeedInputSchema,
   DJ_TOOLS,
   DJ_TOOLS_WITH_OUTSIDE,
+  UNPLACED_SWAP_GUIDANCE,
 } from '../../src/dj/contracts'
 
 describe('intentSchema', () => {
@@ -774,5 +775,22 @@ describe('genres tool description', () => {
     const text = JSON.stringify(generate.input_schema)
     expect(text).toContain('\\"lofi afro house\\" is [\\"afro house\\"]')
     expect(text).toContain('\\"chill hip hop\\" is [\\"hip hop\\"]')
+  })
+})
+
+// Live 2026-11-17: unplaced swaps always took the last positions, so new
+// songs piled up at the bottom and the next swap replaced them.
+describe('edit_queue: swaps with no named song spread through the mix', () => {
+  it('tells the DJ where an unplaced swap lands, with or without outside picks', () => {
+    for (const tools of [DJ_TOOLS, DJ_TOOLS_WITH_OUTSIDE]) {
+      const description = tools.find((t) => t.name === 'edit_queue')!.description
+      expect(description).toContain(UNPLACED_SWAP_GUIDANCE)
+    }
+    expect(UNPLACED_SWAP_GUIDANCE).toContain('swap exactly that')
+    expect(UNPLACED_SWAP_GUIDANCE).toContain('fit their request least')
+    expect(UNPLACED_SWAP_GUIDANCE).toContain('Spread those positions through the mix instead of taking the last few')
+    expect(UNPLACED_SWAP_GUIDANCE).toContain('Never replace a song you added in your previous edit')
+    expect(UNPLACED_SWAP_GUIDANCE).toContain('pinned or asked to keep')
+    expect(UNPLACED_SWAP_GUIDANCE).not.toContain('\u2014')
   })
 })

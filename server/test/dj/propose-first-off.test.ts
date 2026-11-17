@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import { curate } from '../../src/dj/curate'
-import { DJ_TOOLS, DJ_TOOLS_WITH_OUTSIDE, intentSchema } from '../../src/dj/contracts'
+import { DJ_TOOLS, DJ_TOOLS_WITH_OUTSIDE, UNPLACED_SWAP_GUIDANCE, intentSchema } from '../../src/dj/contracts'
 import { FILL_PERSONA_LINE, HONEST_LISTING_PERSONA_LINE, PERSONA_PROMPT, PERSONA_PROMPT_WITH_FILL, runDjTurn } from '../../src/dj/loop'
 import { createTestDb } from '../helpers/db'
 import { djSessions, user } from '../../src/db/schema'
@@ -58,10 +58,13 @@ describe('PROPOSE_FIRST off without the fill is byte-for-byte the plain DJ', () 
   // named genre each song is checked against) are deliberate changes to what
   // the model sees, whatever the flags; with them stripped, the plain tools
   // are still the pre-outside ones.
-  it('sends the same tool definitions, bar the named artists and songs, the artist-only scope, the genres and instrumental', () => {
+  // So is edit_queue's unplaced-swap guidance (2026-11-17, swaps spread
+  // through the mix), stripped from its description below.
+  it('sends the same tool definitions, bar the named artists and songs, the artist-only scope, the genres, instrumental and the unplaced-swap guidance', () => {
     const added = new Set(['namedArtists', 'namedSongs', 'onlyArtist', 'genres', 'instrumental'])
     const stripped = JSON.stringify(
-      JSON.parse(JSON.stringify(DJ_TOOLS), (k, v) => (added.has(k) ? undefined : v)),
+      JSON.parse(JSON.stringify(DJ_TOOLS), (k, v) => (added.has(k) ? undefined
+        : k === 'description' && typeof v === 'string' && v.endsWith(` ${UNPLACED_SWAP_GUIDANCE}`) ? v.slice(0, -UNPLACED_SWAP_GUIDANCE.length - 1) : v)),
     )
     expect(sha(stripped)).toBe(PINNED.tools)
   })
