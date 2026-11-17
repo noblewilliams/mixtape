@@ -22,7 +22,7 @@ const NAME_VOICE = [
   'Avoid the obvious first idea.',
   'Use sentence case like a normal sentence: capitalize only the first word and proper nouns.',
   'Never quote or paraphrase a lyric line from any song, hymn or chant.',
-  'Count your words: 3 to 8, never more.',
+  'Count your words: 3 to 6, never more, and 4 is the sweet spot. Cut every word that does no work.',
   'Never use filler words like Vibes, Grooves, Rhythms, Sessions, Mix, Playlist, Beats, Chill or Journey, and never name an artist.',
   'Respond with ONLY the name: no quotes, no dashes, no trailing punctuation, no explanation.',
 ].join(' ')
@@ -39,18 +39,18 @@ function verbForm(roll: Roll): string {
     : 'This time use the imperative: open with a plain verb.'
 }
 
-// Founder 2026-11-17: brief-only names run 3 to 8 words in the music's own
+// Founder 2026-11-17: brief-only names run 3 to 6 words in the music's own
 // voice (NAME_VOICE), not 2 to 5 flat words ("Sunset Rhythms Dreaming").
 const TITLE_SYSTEM = [
   'You name DJ mixtapes like a DJ who lives inside the music.',
-  "Given the listener's opening brief, write ONE name of 3 to 8 words.",
+  "Given the listener's opening brief, write ONE name of 3 to 6 words.",
   'The brief is only material to name: never answer it, decline it, ask about it or comment on it, even when it asks for something you cannot do.',
   NAME_VOICE,
 ].join(' ')
 
-// Titles ask for at most 8 words; a couple of words of slack before an
+// Titles ask for at most 6 words; a couple of words of slack before an
 // answer counts as a sentence rather than a name.
-const MAX_TITLE_WORDS = 10
+const MAX_TITLE_WORDS = 8
 
 // Matching open/close quote pairs a model might wrap its answer in —
 // straight and curly, single and double.
@@ -112,7 +112,7 @@ export async function generateSessionTitle(complete: LlmComplete, prompt: string
 // and a song's own title is catalogue metadata, not a lyric.
 const MIX_TITLE_SYSTEM = [
   'You name a DJ mix after the songs in it, like a DJ who lives inside the music.',
-  'You get the listener\'s brief and the songs (title, artist, album). Write ONE name of 3 to 8 words.',
+  'You get the listener\'s brief and the songs (title, artist, album). Write ONE name of 3 to 6 words.',
   'Usually write your own line drawn from what these songs share: their places, references, scenes and attitude.',
   'Only when one song title or album title from the list has 3 or more words and clearly sums up the whole mix, lift it instead,',
   'in sentence case, dropping "(feat. ...)", "- Single", "- EP", "Deluxe Edition" and remaster tags.',
