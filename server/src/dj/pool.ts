@@ -742,6 +742,13 @@ function hardFilters(intent: Intent, excludeTrackIds: string[] | undefined, excl
     filters.push(sql`(${TEMPO} IS NULL OR ${TEMPO} <= ${tempoMax})`)
   }
   if (intent.allowExplicit === false) filters.push(sql`COALESCE(t.explicit, false) = false`)
+  // An instrumental brief (Intent.instrumental): only songs LRCLIB lists as
+  // instrumental. Unknown does not pass, unlike tempo and era: live
+  // (2026-11-17), "focus music, no vocals" filled half its mix with calm
+  // vocal indie from the library. Songs from outside fill what this leaves.
+  if (intent.instrumental === true) {
+    filters.push(sql`EXISTS (SELECT 1 FROM track_meanings im WHERE im.track_id = t.id AND im.instrumental)`)
+  }
   // NULL release_year passes an era filter rather than being excluded — most
   // rows lack a year until re-sync; excluding them would empty pools.
   if (intent.eraFrom !== undefined) filters.push(sql`(t.release_year IS NULL OR t.release_year >= ${intent.eraFrom})`)

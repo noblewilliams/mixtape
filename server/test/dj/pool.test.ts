@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   buildPool,
@@ -2450,5 +2450,22 @@ describe('pools read fallback features', () => {
 
     expect(byId(estimated.id)).toMatchObject({ outside: true, tempo: 140, energy: 0.8, valence: 0.3 })
     expect(byId(measured.id)).toMatchObject({ outside: true, tempo: 110, energy: 0.2, valence: null })
+  })
+})
+
+describe('instrumental briefs (2026-11-17)', () => {
+  it('keeps only songs LRCLIB lists as instrumental; vocal and unknown songs stay out', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const vocal = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const quiet = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const unknown = await seedTrack(db, 'u1', { tempo: 90 })
+    await db.update(trackMeanings).set({ instrumental: true }).where(eq(trackMeanings.trackId, quiet.id))
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', instrumental: true }))).map((r) => r.trackId)
+    expect(ids).toEqual([quiet.id])
+
+    const all = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))).map((r) => r.trackId)
+    expect(new Set(all)).toEqual(new Set([vocal.id, quiet.id, unknown.id]))
   })
 })

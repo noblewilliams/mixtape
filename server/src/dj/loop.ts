@@ -2409,16 +2409,6 @@ async function generateFromBrief(
   const cap = outsidePoolCap(deps, intent)
   deps.step?.({ step: 'digging', scope: poolMode.mode === 'personal' ? 'library' : 'catalogue' })
   const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode, playlistSeed: selected, outsideCap: cap })
-  if (pool.length === 0) {
-    // Not an error — the model still gets to tell the listener, in its own
-    // voice, that nothing matched. A personal listener with no candidates at
-    // all gets the empty-library text instead: retrying with a looser brief
-    // cannot help them, and the model should stop and say so.
-    if (poolMode.mode === 'personal' && !(await hasPersonalCandidates(db, session.userId))) {
-      return { resultText: EMPTY_LIBRARY_TEXT, queueChanged: false, intent }
-    }
-    return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
-  }
   const proposeFirst = proposeFirstActive(deps)
   // A short curation is filled from outside the library (decision 2 of spec
   // 2026-11-09 every-song-earns-its-place) on the same gates as the blend,
@@ -2437,6 +2427,19 @@ async function generateFromBrief(
   // remake ("with my music" is an own-music request, decided 2026-11-16).
   const personalBlend = proposeFirst && poolMode.mode === 'personal' && fillShort && intent.allowOutside !== false && turn.remake !== true
   const blending = (poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined) || personalBlend
+  // A personal blend fills from outside even when nothing in the library
+  // fits (an instrumental brief over a library of vocal songs, 2026-11-17):
+  // curation is skipped and the proposals make the mix.
+  if (pool.length === 0 && !personalBlend) {
+    // Not an error — the model still gets to tell the listener, in its own
+    // voice, that nothing matched. A personal listener with no candidates at
+    // all gets the empty-library text instead: retrying with a looser brief
+    // cannot help them, and the model should stop and say so.
+    if (poolMode.mode === 'personal' && !(await hasPersonalCandidates(db, session.userId))) {
+      return { resultText: EMPTY_LIBRARY_TEXT, queueChanged: false, intent }
+    }
+    return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
+  }
   const blendTarget = blending ? blendWant(intent, personalBlend, proposeFirst) : 0
   // A personal genre blend: the wider search allowance for the rest of the
   // turn (FillTracker.wide), and a floor the sound check cannot take it under.
@@ -2475,7 +2478,7 @@ async function generateFromBrief(
   // thinking there took 44 to 95 s); a personal pool's request is as before.
   const thinking = poolMode.mode === 'corpus' ? { thinking: 'off' as const } : {}
   const [curatedCheck, proposedRaw] = await Promise.all([
-    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap, ...thinking })
+    (pool.length === 0 ? Promise.resolve<CuratedTrack[]>([]) : curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap, ...thinking }))
       .catch((e: unknown): CuratedTrack[] => {
         // Not a personal blend's: its proposals alone would land a short
         // mix blamed on the library, so its turn fails as before.

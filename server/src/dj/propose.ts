@@ -190,6 +190,10 @@ function buildUserBlock(input: ProposeInput, count: number): string {
       'Mood and texture words in the request (slow, instrumental, lofi as a sound) shape which songs of these ' +
       'genres you propose; they never replace the genre.')
   }
+  if (intent.instrumental === true) {
+    lines.push('Instrumental: the listener wants no vocals. Propose only instrumental recordings, with no lead or ' +
+      'featured singer.')
+  }
   lines.push(arcInstruction(intent.energyArc), `Themes: ${sanitizeForPrompt(intent.themes, 500)}`)
   if (intent.tempoMin !== undefined || intent.tempoMax !== undefined) {
     lines.push(`Tempo: ${intent.tempoMin ?? '-'}–${intent.tempoMax ?? '-'} bpm`)

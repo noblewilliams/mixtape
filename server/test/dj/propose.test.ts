@@ -641,3 +641,13 @@ describe('genre briefs (2026-11-16)', () => {
     expect(WIDE_VERIFY_DEADLINE_MS).toBeGreaterThan(VERIFY_DEADLINE_MS)
   })
 })
+
+describe('instrumental briefs (2026-11-17)', () => {
+  it('tells the call to propose instrumental recordings only', async () => {
+    const { llm, requests } = scripted(turn('[]'), turn('[]'))
+    await proposeSongs(llm, { brief: 'focus music, no vocals', intent: intent({ instrumental: true }), seeds: [], storefront: 'ng' })
+    expect(userBlock(requests[0])).toContain('Instrumental: the listener wants no vocals.')
+    await proposeSongs(llm, { brief: 'focus music', intent: intent({}), seeds: [], storefront: 'ng' })
+    expect(userBlock(requests[1])).not.toContain('Instrumental:')
+  })
+})
