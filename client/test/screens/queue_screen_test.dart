@@ -1404,6 +1404,29 @@ void main() {
     );
 
     testWidgets(
+      'on an Apple Music device a row on both Apple and Spotify keeps its grip and gets no Spotify action',
+      (tester) async {
+        // Live 2026-11-17: catalogue songs carry Spotify ids too, so an Apple
+        // Music listener saw "Open in Spotify" in place of the drag handle.
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(),
+          messages: [],
+          queue: [_track(0, spotifyId: 'sp0'), _track(1)],
+        );
+        final container = _makeContainer(
+          api,
+          destinations: InMemoryMusicPlatformStore(MusicPlatform.apple),
+        );
+        await _pump(tester, container);
+
+        expect(find.byKey(const Key('open-in-spotify-t0')), findsNothing);
+        expect(find.byKey(TrackRow.gripKey('t0')), findsOneWidget);
+        expect(find.byKey(TrackRow.gripKey('t1')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
       'Open in Spotify asks whether the app can open the scheme and uses it when it can',
       (tester) async {
         final api = FakeDjApi();

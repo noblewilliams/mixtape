@@ -736,10 +736,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   }) {
     final track = visibleQueue[index];
     // Every row opens in Spotify on a Spotify device: the exact track when
-    // we hold its id, a search for it otherwise.
+    // we hold its id, a search for it otherwise. Elsewhere only a row that
+    // is on Spotify alone (no Apple id), since it cannot play here. A row on
+    // both keeps its drag handle: catalogue songs carry both ids, and on an
+    // Apple Music device the action took the handle's place (live,
+    // 2026-11-17).
     final opensInSpotify =
-        track.spotifyId != null ||
-        ref.watch(musicPlatformProvider) == MusicPlatform.spotify;
+        ref.watch(musicPlatformProvider) == MusicPlatform.spotify ||
+        (track.spotifyId != null && track.appleId == null);
     final row = TrackRow(
       number: index + 1,
       track: track,
