@@ -419,6 +419,79 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a closing keyboard never carries the panel below its rest', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = TextEditingController();
+    addTearDown(controller.dispose);
+    final inset = ValueNotifier<double>(0);
+    addTearDown(inset.dispose);
+
+    // The shell hands the dock down as bottom padding; the keyboard's inset
+    // is set directly so its last frames can be held still.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          suggestionsApiProvider.overrideWithValue(FakeSuggestions()),
+          suggestionTimeZoneProvider.overrideWithValue(() async => 'UTC'),
+        ],
+        child: MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: ValueListenableBuilder<double>(
+            valueListenable: inset,
+            builder: (context, keyboard, _) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                padding: const EdgeInsets.only(bottom: 120),
+                viewInsets: EdgeInsets.only(bottom: keyboard),
+              ),
+              child: Scaffold(
+                resizeToAvoidBottomInset: false,
+                body: Stack(
+                  children: [
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: HomePanel(controller: controller, onSubmit: () {}),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Rect field() => tester.getRect(find.byKey(const Key('prompt-field')));
+    final resting = field();
+
+    // The last frames of the keyboard sliding away: a sliver of inset left.
+    for (final sliver in [60.0, 30.0, 12.0]) {
+      inset.value = sliver;
+      await tester.pumpAndSettle();
+      // Below rest here means a jump back up when the inset reaches zero.
+      expect(
+        field().bottom,
+        lessThanOrEqualTo(resting.bottom),
+        reason: '$sliver',
+      );
+    }
+
+    // Well up, the keyboard still lifts it clear.
+    inset.value = 300;
+    await tester.pumpAndSettle();
+    expect(
+      field().bottom,
+      lessThanOrEqualTo(844 - 300 - HomePanel.keyboardGap),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the panel clears the dock inset the shell hands down', (
     tester,
   ) async {

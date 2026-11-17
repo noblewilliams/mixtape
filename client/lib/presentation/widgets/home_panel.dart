@@ -13,6 +13,8 @@
 /// view Home's open space lives in.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
@@ -260,10 +262,13 @@ class _HomePanelState extends State<HomePanel> {
     final media = MediaQuery.of(context);
     final keyboard = media.viewInsets.bottom;
     // Over the keyboard when it is up — the dock stays behind it, and the
-    // shell owns that. Otherwise clear of the dock's own inset.
-    final bottom = keyboard > 0
-        ? keyboard + HomePanel.keyboardGap
-        : media.padding.bottom + HomePanel.dockGap;
+    // shell owns that. Never lower than its rest clear of the dock: as the
+    // keyboard slides away its inset passes below that line, and following
+    // it there sinks the panel behind the dock and snaps it back up at zero.
+    final bottom = math.max(
+      keyboard + HomePanel.keyboardGap,
+      media.padding.bottom + HomePanel.dockGap,
+    );
 
     final dimmed =
         widget.busy ||

@@ -12,6 +12,7 @@ library;
 
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart'
     show
@@ -1199,8 +1200,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final media = MediaQuery.of(context);
     final keyboard = media.viewInsets.bottom;
     // Over the keyboard when it is up; otherwise clear of the home
-    // indicator. No dock inside a mix, so nothing else to clear.
-    final bottom = keyboard > 0 ? keyboard : media.padding.bottom + 8;
+    // indicator. No dock inside a mix, so nothing else to clear. Never lower
+    // than that rest, or a closing keyboard drags the panel under it and it
+    // snaps back up when the inset reaches zero.
+    final bottom = math.max(keyboard, media.padding.bottom + 8);
     final enabled = state != null && !busy;
     // The composer is only locked when there is nothing to write to yet or
     // the inspiration is being changed under it. While the DJ works it stays
