@@ -13,6 +13,7 @@ import type { EnrichDeps } from './enrich/pipeline'
 import type { Db } from './db/types'
 import { handleScheduled, jobsForCron } from './enrich/scheduled'
 import { anthropicLlm, anthropicComplete, buildAnthropic } from './dj/llm'
+import { pauseOnBilling, probeAutoPause, tripAutoPause } from './dj/auto-pause'
 import type { DjDeps } from './dj/loop'
 import type { FillDeps } from './dj/catalogue-fill'
 import { generateMusicKitDeveloperToken } from './musickit/token'
@@ -67,6 +68,7 @@ type Bindings = {
   PROPOSE_FIRST?: string
   PROPOSE_FIRST_USERS?: string
   AI_CONSENT?: string
+  DJ_PAUSED?: string
   SHARE_BASE_URL?: string
   SHARE_READ_LIMITER?: ShareRateLimiter
 }
@@ -132,6 +134,13 @@ export function aiConsentMode(env: { AI_CONSENT?: string }): 'off' | 'enforce' {
   return env.AI_CONSENT === 'enforce' ? 'enforce' : 'off'
 }
 
+// DJ paused (2026-11-16): "on" refuses new mixes and changes to mixes and
+// tells clients through /health, for when the model is unavailable to us
+// (credits spent, an outage). Anything else is open.
+export function djPausedMode(env: { DJ_PAUSED?: string }): boolean {
+  return env.DJ_PAUSED === 'on'
+}
+
 export function neverRefuseEnabled(env: { NEVER_REFUSE?: string }): boolean {
   return env.NEVER_REFUSE === 'on'
 }
@@ -170,16 +179,20 @@ export function buildAlbumDeps(
 // createApp only mounts /sessions/* when `dj` is present, so an unconfigured
 // key means the route group 404s instead of every turn burning a request on
 // a client that was never going to construct.
-function buildDjDeps(env: Bindings): DjDeps | undefined {
+function buildDjDeps(env: Bindings, db: Db): DjDeps | undefined {
   if (!env.ANTHROPIC_API_KEY || !env.AI) return undefined
   const anthropic = buildAnthropic(env.ANTHROPIC_API_KEY)
+  // Every model call this request makes (turns, curation, titles, album
+  // picks, playlist edits) rides these two clients, so a billing refusal on
+  // any of them trips the automatic DJ pause (dj/auto-pause.ts).
+  const trip = () => tripAutoPause(db)
   return {
-    llm: anthropicLlm(anthropic),
+    llm: pauseOnBilling(anthropicLlm(anthropic), trip),
     embed: workersAiEmbedder(env.AI),
     // Same client, same env var — session titling (dj/title.ts) is gated on
     // the same ANTHROPIC_API_KEY the DJ loop already requires, no separate
     // config to fail-fast on.
-    titleComplete: anthropicComplete(anthropic),
+    titleComplete: pauseOnBilling(anthropicComplete(anthropic), trip),
     outsidePicks: outsidePicksEnabled(env),
     neverRefuse: neverRefuseEnabled(env),
     // Resolved per turn for its listener (runDjTurn).
@@ -405,7 +418,7 @@ function buildRequestApp(db: Db, env: Bindings) {
   const allowedOrigins = parseWebOrigins(env.WEB_ORIGINS)
   const deps = buildDeps(env)
   const musicKit = buildMusicKit(env, allowedOrigins)
-  const baseDjDeps = buildDjDeps(env)
+  const baseDjDeps = buildDjDeps(env, db)
   const fill = buildFillDeps(env, musicKit)
   const djDeps = baseDjDeps && fill ? { ...baseDjDeps, fill } : baseDjDeps
   const dj = djDeps ? { deps: djDeps } : undefined
@@ -421,7 +434,7 @@ function buildRequestApp(db: Db, env: Bindings) {
   const transcribe = buildTranscribe(env)
   const accountDeletion = { apple: buildAppleRevoke(env) }
   const shares = buildShares(env)
-  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), allowedOrigins })
+  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), djPaused: djPausedMode(env), allowedOrigins })
 }
 
 export default {
@@ -451,6 +464,16 @@ export default {
           : undefined,
         spotifyArtwork,
       }) }))
+      // While the DJ is paused for billing, one tiny call per run checks
+      // whether credits are back and reopens it (dj/auto-pause.ts).
+      if (env.ANTHROPIC_API_KEY) {
+        try {
+          const djPause = await probeAutoPause(db, anthropicComplete(buildAnthropic(env.ANTHROPIC_API_KEY)))
+          if (djPause !== 'open') console.log('dj auto-pause probe', JSON.stringify({ djPause }))
+        } catch {
+          console.error('dj auto-pause probe failed')
+        }
+      }
     } finally {
       ctx.waitUntil(pool.end())
     }

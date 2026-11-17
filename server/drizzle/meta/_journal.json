@@ -379,6 +379,13 @@
       "when": 1794822713801,
       "tag": "0053_queue_tracks_track_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1794895806990,
+      "tag": "0054_dj_pauses",
+      "breakpoints": true
     }
   ]
 }

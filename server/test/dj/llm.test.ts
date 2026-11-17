@@ -481,3 +481,33 @@ describe('anthropicComplete', () => {
     }
   })
 })
+
+describe('LlmError billing', () => {
+  async function thrown(apiError: unknown): Promise<LlmError> {
+    const llm = anthropicLlm({ messages: { stream: streamOf(async () => { throw apiError }) } })
+    try {
+      await llm(baseReq)
+    } catch (e) {
+      return e as LlmError
+    }
+    throw new Error('did not throw')
+  }
+
+  it('marks a 402 billing_error as billing', async () => {
+    const err = await thrown(new Anthropic.APIError(402, { type: 'error', error: { type: 'billing_error', message: 'x' } }, 'billing', new Headers()))
+    expect(err.billing).toBe(true)
+    expect(err.status).toBe(402)
+  })
+
+  it('marks the older 400 "credit balance is too low" answer as billing, without carrying its text', async () => {
+    const err = await thrown(new Anthropic.APIError(400, { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }, 'bad', new Headers()))
+    expect(err.billing).toBe(true)
+    expect(err.message).not.toContain('credit balance')
+  })
+
+  it('leaves other failures unmarked', async () => {
+    expect((await thrown(new Anthropic.APIError(400, { error: { type: 'invalid_request_error', message: 'max_tokens too large' } }, 'bad', new Headers()))).billing).toBe(false)
+    expect((await thrown(new Anthropic.APIError(529, undefined, 'overloaded', new Headers()))).billing).toBe(false)
+    expect((await thrown(new TypeError('fetch failed'))).billing).toBe(false)
+  })
+})

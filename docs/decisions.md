@@ -1942,3 +1942,35 @@ network_copy.dart`): "you're offline" only when the phone is, otherwise
 connection" for a server that didn't answer (2026-11-16).
 **Reopens if:** Apple's page is blocked somewhere listeners are, or a probe
 on every ambiguous failure shows up as a delay people notice.
+
+## 2026-11-16 — DJ paused: one server flag closes the composer everywhere
+
+When the model is unavailable to us (Anthropic credits spent, an outage), the
+operator sets `DJ_PAUSED: "on"` in `server/wrangler.jsonc`, commits and
+deploys. The server then refuses the three routes that reach the model
+(`POST /sessions`, `POST /sessions/:id/messages`,
+`POST /playlist-edit-drafts/:draftId/messages`) with `503 dj_paused` before
+any work, and reports `djPaused: true` on the public `GET /health`. Web and
+iOS read `/health` at start, on focus or resume, and on a timer (every minute
+while paused, so they reopen by themselves when the flag flips back), and also
+flip to paused on any `dj_paused` answer. Paused, the composer is disabled
+with "The DJ is taking a short break" and one quiet line saying everything
+already made still plays; typed text is kept. Playing, play now, create as
+playlist, sharing and deleting stay open. A wrangler var over a database row
+because a deploy is how every other flag moves and needs no admin surface.
+**Reopens if:** flipping by hand needs to happen without a deploy.
+
+**Automatic half (2026-11-17).** The first model call Anthropic refuses for
+billing (402 `billing_error`, or the older 400 "credit balance is too low")
+writes a `dj_pauses` row, and from then on every Worker answers exactly as if
+`DJ_PAUSED` were on (`server/src/dj/auto-pause.ts`). The listener whose call
+tripped it still sees that one turn fail; everyone after gets the calm notice.
+While the row exists, each cron run makes one 8-token call on the titling
+model (Haiku 4.5) and deletes the row once it answers, so a top-up reopens the
+DJ within about ten minutes with no deploy. Any probe failure, an overload
+included, keeps the pause. Shared state across isolates needs the database
+(no KV is bound); each isolate caches the read for 30 s, and every read or
+write fails open so the pause can never take the DJ down by itself. To clear
+it by hand: `DELETE FROM dj_pauses;`. **Reopens if:** the probe holds a pause
+long after credits are back (a model or outage problem, not billing), or the
+tripping turn's failure needs to read as the notice too.

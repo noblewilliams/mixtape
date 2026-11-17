@@ -1741,3 +1741,13 @@ export const mixShareSaves = pgTable('mix_share_saves', {
 }, t => [
   primaryKey({ columns: [t.userId, t.shareId] }),
 ])
+
+// Automatic DJ pause (2026-11-17): a row means the model refused us for
+// billing (credits spent) and every Worker refuses DJ sends until the cron
+// probe (dj/auto-pause.ts) gets an answer again and deletes it. Shared state
+// across isolates, so it lives here rather than in memory. One row per
+// cause; today only 'anthropic_billing'.
+export const djPauses = pgTable('dj_pauses', {
+  id: text('id').primaryKey(),
+  pausedAt: timestamp('paused_at', { withTimezone: true }).notNull().defaultNow(),
+})

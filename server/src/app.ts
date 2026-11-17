@@ -30,6 +30,8 @@ import { funnelEventsRoutes } from './routes/funnel-events'
 import { musicKitRoutes } from './routes/musickit'
 import { transcribeRoutes } from './routes/transcribe'
 import { deleteAccount, type AccountDeletionWiring } from './routes/account-deletion'
+import { requireDjOpen } from './middleware/require-dj-open'
+import { readAutoPause } from './dj/auto-pause'
 import { aiConsentRoutes, hasAiConsent, requireAiConsent, type AiConsentMode } from './routes/ai-consent'
 import type { FetchLike } from './musickit/catalog'
 import type { Db } from './db/types'
@@ -96,6 +98,7 @@ export function createApp({
   accountDeletion,
   shares,
   aiConsent = 'off',
+  djPaused = false,
   allowedOrigins = [],
 }: {
   auth: AuthLike
@@ -112,6 +115,9 @@ export function createApp({
   shares?: SharesWiring
   // AI_CONSENT in wrangler.jsonc: 'enforce' refuses AI routes without consent.
   aiConsent?: AiConsentMode
+  // DJ_PAUSED in wrangler.jsonc: true refuses every request that would reach
+  // the model (middleware/require-dj-open.ts) and reports it on /health.
+  djPaused?: boolean
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -147,10 +153,21 @@ export function createApp({
 
   // neverRefuse: the NEVER_REFUSE flag as the DJ deps carry it (index.ts),
   // on only when the DJ can act on it (the Apple fill is wired; without it
-  // the loop still refuses). Public and database-free so a first-run page
+  // the loop still refuses). Public and session-free so a first-run page
   // with no session yet can route "Skip for now" (spec 2026-10-21, Task 8).
   const neverRefuse = dj?.deps.neverRefuse === true && dj.deps.fill !== undefined
-  app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api', neverRefuse }))
+  // djPaused: new mixes and changes to mixes are off, by the operator
+  // (DJ_PAUSED) or automatically (dj/auto-pause.ts, credits spent); clients
+  // poll this and hold the composer closed while it is true. The automatic
+  // half is one cached read that fails open, so /health still answers with
+  // the database down.
+  const autoPaused = db ? () => readAutoPause(db) : undefined
+  app.get('/health', async (c) => c.json({
+    ok: true,
+    service: 'mixtape-api',
+    neverRefuse,
+    djPaused: djPaused || (autoPaused ? await autoPaused() : false),
+  }))
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2 live]  /sessions/* [P3 live]
   //   /me/memories/* [P4 live]  /me/music-sources  /me/onboarding [listening import]
@@ -208,6 +225,7 @@ export function createApp({
     app.route('/playlists', playlistsRoutes(db))
 
     app.use('/playlist-edit-drafts/*', requireSession(auth))
+    app.use('/playlist-edit-drafts/:draftId/messages', requireDjOpen(djPaused, autoPaused))
     app.use('/playlist-edit-drafts/:draftId/messages', requireAiConsent(db, aiConsent))
     app.route('/playlist-edit-drafts', playlistEditDraftRoutes(db, playlistEditing?.deps))
 
@@ -242,6 +260,8 @@ export function createApp({
       app.use('/sessions/*', requireSession(auth))
       // Starting a mix or album and every later turn reach the model. Exact
       // paths only: /sessions/:id/share calls no model and stays outside.
+      app.use('/sessions', requireDjOpen(djPaused, autoPaused))
+      app.use('/sessions/:id/messages', requireDjOpen(djPaused, autoPaused))
       app.use('/sessions', requireAiConsent(db, aiConsent))
       app.use('/sessions/:id/messages', requireAiConsent(db, aiConsent))
       app.route('/sessions', sessionRoutes(db, dj.deps, albums?.deps, shares ? { baseUrl: shares.baseUrl } : undefined))

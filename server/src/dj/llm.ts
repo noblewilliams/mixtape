@@ -59,10 +59,23 @@ export class LlmError extends Error {
   constructor(
     readonly detail: string,
     readonly status?: number,
+    // Our Anthropic account can't pay for the call (credits spent). Trips the
+    // automatic DJ pause (dj/auto-pause.ts); never carries the API's message.
+    readonly billing = false,
   ) {
     super(`anthropic: ${detail}`)
     this.name = 'LlmError'
   }
+}
+
+// Spent credits: the documented answer is 402 billing_error. Accounts have
+// also been answered 400 invalid_request_error "Your credit balance is too
+// low…", so that phrase counts too. Only the yes/no leaves this function.
+function isBillingFailure(status: number | undefined, errType: string | null, body: unknown): boolean {
+  if (status === 402 || errType === 'billing_error') return true
+  if (status !== 400) return false
+  const message = (body as { error?: { message?: unknown } } | undefined)?.error?.message
+  return typeof message === 'string' && /credit balance/i.test(message)
 }
 
 // Shared by anthropicLlm and anthropicComplete — deliberately excludes the SDK's
@@ -74,7 +87,7 @@ function toLlmError(e: unknown): LlmError {
     const bodyType = (e.error as { error?: { type?: unknown } } | undefined)?.error?.type
     const errType = e.type ?? (typeof bodyType === 'string' ? bodyType : null)
     const detail = e.status === undefined && errType ? `HTTP unknown (${errType})` : `HTTP ${e.status ?? 'unknown'}`
-    return new LlmError(detail, e.status)
+    return new LlmError(detail, e.status, isBillingFailure(e.status, errType, e.error))
   }
   return new LlmError(e instanceof Error ? e.name : typeof e)
 }
