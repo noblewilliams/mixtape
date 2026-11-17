@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAiConsentGate } from '../AiConsent'
+import { DJ_PAUSED_DETAIL, DJ_PAUSED_LINE, useDjStatus } from '../../lib/dj-status'
 import { Cassette } from '../Cassette'
 import { SendIcon } from '../Icons'
 import { useVoicePrompt, VoiceGlyph, voiceLabel, voiceStatus, type Transcribe } from '../useVoicePrompt'
@@ -32,6 +33,8 @@ export function FirstRunComposer({ draft, onDraft, onSend, transcribe, busy = fa
   const latest = useRef(draft)
   latest.current = draft
   const consentReady = useAiConsentGate()
+  // The DJ is paused: the field, mic and send are off and the draft stays.
+  const { paused } = useDjStatus()
   const { voice, toggle } = useVoicePrompt({
     transcribe: transcribe ?? (async () => { throw new Error('Transcription unavailable') }),
     consentReady,
@@ -42,15 +45,15 @@ export function FirstRunComposer({ draft, onDraft, onSend, transcribe, busy = fa
     },
   })
   useEffect(() => {
-    if (draft || busy || voice !== 'idle') return
+    if (draft || busy || paused || voice !== 'idle') return
     const id = setInterval(() => {
       if (document.activeElement !== input.current && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
         setExample((value) => (value + 1) % WELCOME_EXAMPLES.length)
       }
     }, 5000)
     return () => clearInterval(id)
-  }, [draft, busy, voice])
-  const ready = Boolean(draft.trim()) && !busy && voice === 'idle'
+  }, [draft, busy, paused, voice])
+  const ready = Boolean(draft.trim()) && !busy && !paused && voice === 'idle'
   function send() {
     if (ready) onSend(draft.trim())
   }
@@ -64,8 +67,8 @@ export function FirstRunComposer({ draft, onDraft, onSend, transcribe, busy = fa
         rows={1}
         maxLength={MAX_LENGTH}
         value={draft}
-        placeholder={WELCOME_EXAMPLES[example]}
-        disabled={busy}
+        placeholder={paused ? DJ_PAUSED_LINE : WELCOME_EXAMPLES[example]}
+        disabled={busy || paused}
         onChange={(event) => onDraft(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -80,7 +83,7 @@ export function FirstRunComposer({ draft, onDraft, onSend, transcribe, busy = fa
         </div>
       )}
       {transcribe ? (
-        <button className="home-voice-button fr-voice" type="button" disabled={busy} aria-label={voiceLabel(voice)} aria-pressed={voice === 'recording'} onClick={toggle}>
+        <button className="home-voice-button fr-voice" type="button" disabled={busy || (paused && voice === 'idle')} aria-label={voiceLabel(voice)} aria-pressed={voice === 'recording'} onClick={toggle}>
           <VoiceGlyph voice={voice} />
         </button>
       ) : null}
@@ -88,6 +91,7 @@ export function FirstRunComposer({ draft, onDraft, onSend, transcribe, busy = fa
         <i><SendIcon /></i>
       </button>
     </form>
+    {paused ? <p className="composer-paused fr-paused">{draft ? `${DJ_PAUSED_LINE}. ` : ''}{DJ_PAUSED_DETAIL}</p> : null}
     {voiceError ? <p className="fr-status fr-status--err" role="alert">{voiceError}</p> : null}
     </>
   )

@@ -124,6 +124,7 @@
 .fr-step { margin: 6px 0 0; min-height: 1.4em; color: var(--fr-cream); opacity: 0.78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fr-status { margin: 12px 0 0; min-height: 1.4em; color: var(--fr-cream); }
 .fr-status--err { display: flex; align-items: center; gap: 8px; color: var(--fr-err); }
+.composer-paused.fr-paused { margin-top: 12px; padding-inline: 0; font-size: 13px; color: var(--fr-cream); opacity: .8; }
 .fr-status-icon { width: 18px; height: 18px; flex: none; }
 .fr-pill .fr-pill-icon { width: 18px; height: 18px; flex: none; }
 

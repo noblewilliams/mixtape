@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react'
 import { useAiConsentGate } from './AiConsent'
+import { DJ_PAUSED_DETAIL, DJ_PAUSED_LINE, useDjStatus } from '../lib/dj-status'
 import { SendIcon, StopIcon } from './Icons'
 import { PromptKept, useVoicePrompt, VoiceGlyph, voiceLabel, voiceStatus, type Transcribe } from './useVoicePrompt'
 import './home-composer.css'
@@ -34,6 +35,8 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
   const input = useRef<HTMLTextAreaElement>(null)
   // Missing AI consent re-opens the consent dialog; nothing is sent or recorded and the text stays.
   const consentReady = useAiConsentGate()
+  // The DJ is paused (credits out, model down): nothing sends, the field and mic are off, a draft stays.
+  const { paused } = useDjStatus()
 
   const { voice, toggle } = useVoicePrompt({
     transcribe,
@@ -51,17 +54,17 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
   }, [])
 
   useEffect(() => {
-    if (inputPlaceholder || draft || voice !== 'idle' || busy || sending) return
+    if (inputPlaceholder || draft || voice !== 'idle' || busy || sending || paused) return
     const id = setInterval(() => {
       if (document.activeElement !== input.current && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
         setPlaceholder(value => (value + 1) % placeholders.length)
       }
     }, 5000)
     return () => clearInterval(id)
-  }, [draft, voice, busy, sending, inputPlaceholder])
+  }, [draft, voice, busy, sending, inputPlaceholder, paused])
 
   async function submit() {
-    if (!draft.trim() || busy || sending || voice !== 'idle') return
+    if (!draft.trim() || busy || sending || voice !== 'idle' || paused) return
     if (!consentReady()) return
     const sent = draft
     setSending(true)
@@ -83,15 +86,17 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
   return <div className="home-compose">
     {error && <div className="home-voice-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
     <form className={`home-composer${tools ? ' home-composer--tools' : ''}`} onSubmit={event => { event.preventDefault(); void submit() }}>
-      {voice === 'idle' ? <textarea ref={input} aria-label={inputLabel} maxLength={maxLength} rows={1} value={draft} placeholder={inputPlaceholder ?? placeholders[placeholder]} onChange={event => setDraft(event.target.value)} onKeyDown={event => {
+      {voice === 'idle' ? <textarea ref={input} aria-label={inputLabel} maxLength={maxLength} rows={1} value={draft} disabled={paused} placeholder={paused ? DJ_PAUSED_LINE : inputPlaceholder ?? placeholders[placeholder]} onChange={event => setDraft(event.target.value)} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit() }
       }} /> : <div className="home-voice-status" role="status">{voice === 'recording' && <i className="home-record-dot" />}<span>{voiceStatus(voice)}</span></div>}
       {tools && <div className="composer-tools">{tools}</div>}
       {/* A recording already under way keeps its key, so it can still be stopped. */}
-      {(!working || voice !== 'idle') && <button className="home-voice-button" type="button" aria-label={voiceLabel(voice)} aria-pressed={voice === 'recording'} onClick={toggle}><VoiceGlyph voice={voice} /></button>}
+      {(!working || voice !== 'idle') && <button className="home-voice-button" type="button" aria-label={voiceLabel(voice)} aria-pressed={voice === 'recording'} disabled={paused && voice === 'idle'} onClick={toggle}><VoiceGlyph voice={voice} /></button>}
       {onStop
         ? <button className="home-send-button" type="button" aria-label="Stop" onClick={onStop}><StopIcon /></button>
-        : <button className="home-send-button" type="submit" aria-label={sendLabel} disabled={!draft.trim() || working || voice !== 'idle'}><SendIcon /></button>}
+        : <button className="home-send-button" type="submit" aria-label={sendLabel} disabled={!draft.trim() || working || voice !== 'idle' || paused}><SendIcon /></button>}
     </form>
+    {/* One quiet line, part of the composer; a kept draft hides the placeholder, so the line names the break too. */}
+    {paused && <p className="composer-paused">{draft ? `${DJ_PAUSED_LINE}. ` : ''}{DJ_PAUSED_DETAIL}</p>}
   </div>
 }

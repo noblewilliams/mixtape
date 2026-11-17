@@ -79,6 +79,7 @@ import { addMusicFacts, addMusicRoute, type AddMusicTarget } from './lib/add-mus
 import { createMusicAddedWatch, type MusicAddedToken } from './lib/music-added-watch'
 import { NamePage, NamePageHold } from './components/first-run/NamePage'
 import { clearNamePageSettled, markNamePageSettled, mayAskName } from './lib/name-page'
+import { useDjStatus } from './lib/dj-status'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'account' | 'interview' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -655,6 +656,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     consentMissing.current = true
     setConsentOpen(true)
   }, [])
+  // The DJ paused (DJ_PAUSED, RootApp's DjStatusProvider): sends that need the
+  // model stop here, and a dj_paused 503 pauses every composer at once. The
+  // prompt is never lost: it stays where it was typed (PromptKept) or lands in
+  // Home's field. Playing, play now, playlists, sharing and deleting go on.
+  const djStatus = useDjStatus()
+  const djPausedRef = useRef(djStatus.paused)
+  djPausedRef.current = djStatus.paused
   const transcribe = useCallback((audio: File, signal: AbortSignal) => api.transcribe(audio, signal).catch((cause: unknown) => {
     if (!isAiConsentRequired(cause)) throw cause
     consentRequired()
@@ -884,7 +892,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     }
     if (!kept) return
     clearKeptPrompt()
-    if (!anonymous) void createTape(kept.prompt, false, false, kept.shape ?? undefined, kept.inspiration)
+    if (anonymous) return
+    // Paused: the kept prompt waits in Home's field instead of being re-sent.
+    if (djPausedRef.current) {
+      setActiveView('home')
+      setDraftSeed({ text: kept.prompt, id: Date.now() })
+    } else void createTape(kept.prompt, false, false, kept.shape ?? undefined, kept.inspiration)
   }, [restoring])
 
   // music_added_from_mix: armed per router-opened run, heard on every onboarding read.
@@ -1368,6 +1381,10 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (propagateError) throw new PromptKept()
       return
     }
+    if (djPausedRef.current) {
+      if (propagateError) throw new PromptKept()
+      return
+    }
     const signal = controlLife.current.signal
     setCreatingTape(true)
     const seed = inspiration !== undefined
@@ -1417,6 +1434,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         // The prompt stays where it was typed (the New mix dialog stays open).
         consentRequired()
         if (propagateError) throw new PromptKept()
+        return
+      }
+      if (djStatus.report(requestError)) {
+        // Nothing was made: the prompt stays where it was typed (the New mix
+        // dialog stays open); a kept prompt re-sent after sign-in goes to Home.
+        if (propagateError) throw new PromptKept()
+        if (dialog !== 'new-tape') { setActiveView('home'); setDraftSeed({ text: prompt, id: Date.now() }) }
         return
       }
       if (requestError instanceof AnonymousCapError) {
@@ -1562,6 +1586,10 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const signal = controlLife.current.signal
     if (!activeSession || seedWrites.current.has(activeSession.id)) return
     if (!consentReady()) return
+    if (djPausedRef.current) {
+      if (keepPrompt) throw new PromptKept()
+      return
+    }
     const sessionId = activeSession.id
     contentRevision.current[sessionId] = (contentRevision.current[sessionId] ?? 0) + 1
     const metadataAtStart = metadataRevision.current[sessionId] ?? 0
@@ -1650,6 +1678,16 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           [sessionId]: (current[sessionId] ?? []).filter((message) => message.id !== userMessage.id),
         }))
         consentRequired()
+        if (keepPrompt) throw new PromptKept()
+        return
+      }
+      if (djStatus.report(requestError)) {
+        // The DJ is paused: nothing reached it, so the pending turn goes with no
+        // error turn, and the text goes back in the field.
+        setMessagesBySession((current) => ({
+          ...current,
+          [sessionId]: (current[sessionId] ?? []).filter((message) => message.id !== userMessage.id),
+        }))
         if (keepPrompt) throw new PromptKept()
         return
       }

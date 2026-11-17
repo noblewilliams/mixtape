@@ -14,6 +14,7 @@ import { createFirstRunServices } from './components/first-run/services'
 import { SharedMixPage, type SharedMixPlayer } from './components/SharedMixPage'
 import { PlaybackController } from './playback/controller'
 import { sharedMixToken } from './lib/shared-route'
+import { DjStatusProvider } from './lib/dj-status'
 
 const api = createMixtapeApi(API_URL, sessionTokenStore.read)
 
@@ -57,10 +58,11 @@ function SignedInApp({ user, lastSignInProvider, restoring, initialSession, refe
   useLayoutEffect(() => () => gate.dispose(), [gate])
   // Browser authorization and pending work belong to this sign-in, never a module singleton.
   const musicKit = useMemo(() => createMusicKitClient({ getDeveloperToken: gate.api.getMusicKitToken }), [])
-  return <>
+  // /health needs no session: the raw api, so its reads never wait on the gate or show Refreshing….
+  return <DjStatusProvider api={api}>
     <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} signInAuth={browserAuth} refetchSession={refetch} signInError={signInError} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} onAccountDeleted={accountDeleted} />
     {!restoring && pendingReads > 0 && <div className="session-refresh-badge" role="status"><span className="session-refresh-spinner" aria-hidden="true" />Refreshing…</div>}
-  </>
+  </DjStatusProvider>
 }
 
 // Play on Apple Music for the shared page. Only Play creates a session

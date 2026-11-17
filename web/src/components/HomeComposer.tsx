@@ -4,6 +4,7 @@ import type { SessionKind } from '../domain'
 import { PromptComposer, type PromptComposerProps } from './PromptComposer'
 import { EnergyControl, type EnergyArc } from './EnergyJourney'
 import { ModeControl } from './ModeControl'
+import { useDjStatus } from '../lib/dj-status'
 
 /** A prompt put back into the field from outside (the cap's kept prompt after a failed sign-in). */
 export type DraftSeed = { text: string; id: number }
@@ -39,6 +40,8 @@ export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSub
   const control = albumPicks && !anonymous
   const kind = control ? mode : 'mix'
   const nudged = control && nudge === 'shown' && mode === 'album'
+  // Starters only fill the field, which is off while the DJ is paused.
+  const { paused } = useDjStatus()
 
   useEffect(() => {
     if (draftSeed) setDraft(draftSeed.text)
@@ -80,7 +83,7 @@ export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSub
     />
     {/* The live region stays mounted so the nudge is announced as it arrives. */}
     {control && <div className="home-switched" role="status">{nudged && <>Switched to Album for this prompt. <button type="button" onClick={() => choose('mix')}>Keep it a mix</button></>}</div>}
-    {!nudged && <div className="home-starters">{starters[kind].map(text => <button key={text} type="button" disabled={busy} onClick={() => {
+    {!nudged && <div className="home-starters">{starters[kind].map(text => <button key={text} type="button" disabled={busy || paused} onClick={() => {
       setDraft(text)
       root.current?.querySelector('textarea')?.focus()
     }}>{text}</button>)}</div>}

@@ -4,6 +4,7 @@ import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-rest
 import { MixSkeletons } from './UiStates'
 import './routine-suggestions.css'
 import { publicAsset } from '../lib/public-asset'
+import { useDjStatus } from '../lib/dj-status'
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 export function RoutineSuggestions({
   api,
@@ -18,6 +19,8 @@ export function RoutineSuggestions({
   const restoring = useWorkspaceRestoring()
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
+  // Make this mix needs the DJ; Not today does not.
+  const { paused: djPaused } = useDjStatus()
   const latest = useRef({ onCreate, busy })
   latest.current = { onCreate, busy }
   const life = useRef(0),
@@ -83,7 +86,7 @@ export function RoutineSuggestions({
           <div className="routine-actions">
             <button
               className="routine-primary"
-              disabled={working || busy}
+              disabled={working || busy || djPaused}
               onClick={() =>
                 void act(async () => {
                   const generation = life.current

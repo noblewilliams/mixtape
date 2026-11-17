@@ -473,8 +473,16 @@ export function isAiConsentRequired(error: unknown): boolean {
 }
 /** The consent version this client asks for; the server answers 409 for any other. */
 export const AI_CONSENT_VERSION = '2026-11-02'
-/** The public flags, readable before any session exists. */
-export type PublicConfig = { neverRefuse: boolean }
+/** The server's 503 while the DJ is paused (DJ_PAUSED): nothing that needs the model was done. */
+export function isDjPaused(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 503 && error.code === 'dj_paused'
+}
+/**
+ * The public flags, readable before any session exists. `djPaused`: the
+ * operator's kill switch (credits out, model down); an older server sends no
+ * field and is read as open.
+ */
+export type PublicConfig = { neverRefuse: boolean; djPaused: boolean }
 export type DeleteAccountResponse = {
   deleted: true
   apple: 'revoked' | 'failed' | 'not_linked' | 'no_token'
@@ -845,8 +853,8 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
       return { aiConsent: true }
     },
     getConfig: async (signal) => {
-      const body = await request<{ neverRefuse?: boolean }>('/health', { signal })
-      return { neverRefuse: body.neverRefuse === true }
+      const body = await request<{ neverRefuse?: boolean; djPaused?: boolean }>('/health', { signal })
+      return { neverRefuse: body.neverRefuse === true, djPaused: body.djPaused === true }
     },
     createSession: (prompt, playlistSeed, energyArc, kind, options) =>
       turn<CreateSessionResponse>('/sessions', {

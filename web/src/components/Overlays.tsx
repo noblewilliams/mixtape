@@ -3,6 +3,7 @@ import { EnergyControl, type EnergyArc } from './EnergyJourney'
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { CloseIcon } from './Icons'
 import { publicAsset } from '../lib/public-asset'
+import { DJ_PAUSED_DETAIL, DJ_PAUSED_LINE, useDjStatus } from '../lib/dj-status'
 
 type NewTapeDialogProps = {
   attachment?: ReactNode
@@ -14,11 +15,13 @@ type NewTapeDialogProps = {
 export function NewTapeDialog({ attachment, busy = false, onClose, onCreate }: NewTapeDialogProps) {
   const [title, setTitle] = useState('')
   const [shape, setShape] = useState<EnergyArc | null>(null)
+  // The DJ is paused: the field is off and nothing starts; what was typed stays.
+  const { paused } = useDjStatus()
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const value = title.trim()
-    if (!value) return
+    if (!value || paused) return
     if (shape) onCreate(value, shape)
     else onCreate(value)
   }
@@ -40,15 +43,16 @@ export function NewTapeDialog({ attachment, busy = false, onClose, onCreate }: N
             autoFocus
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Late dinner with old friends"
+            placeholder={paused ? DJ_PAUSED_LINE : 'Late dinner with old friends'}
             maxLength={2000}
-            disabled={busy}
+            disabled={busy || paused}
           />
+          {paused ? <p className="composer-paused">{title ? `${DJ_PAUSED_LINE}. ` : ''}{DJ_PAUSED_DETAIL}</p> : null}
           <div className="dialog-actions">
             <button className="dialog-cancel" type="button" onClick={onClose} disabled={busy}>
               Cancel
             </button>
-            <button className="dialog-confirm" type="submit" disabled={!title.trim() || busy}>
+            <button className="dialog-confirm" type="submit" disabled={!title.trim() || busy || paused}>
               {busy ? 'Making tape…' : 'Start tape'}
             </button>
           </div>

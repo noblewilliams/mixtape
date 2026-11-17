@@ -1,6 +1,7 @@
 import { useRestorableState } from '../lib/workspace-restore'
 import { TapeSettings } from './TapeSettings'
 import { PromptComposer, PromptKept, type PromptComposerProps } from './PromptComposer'
+import { useDjStatus } from '../lib/dj-status'
 import { EnergyControl, type EnergyArc } from './EnergyJourney'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AlbumPick, DjMessage, DjSession, SessionKind } from '../domain'
@@ -106,6 +107,8 @@ const unavailableTranscription = async () => { throw new Error('Transcription un
 
 export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, onShare, onStopSharing, session, messages, loading = false, thinking, working, onSend, onStop, shapeSeed, onShapeSeedTaken, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
   const album = kind === 'album'
+  // Paused: suggestions and the door's Remake are turns too; the mix itself still plays.
+  const { paused: djPaused } = useDjStatus()
   const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
   const [stopConfirm, setStopConfirm] = useState(false)
@@ -228,7 +231,7 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
               {index === lastDjIndex && (suggestions.length > 0 || onAddHistory) ? (
                 <div className="home-starters conversation-pills">
                   {suggestions.map((text) => (
-                    <button key={text} type="button" disabled={thinking || loading} onClick={() => { carry(); if (shape) onSuggestion?.(text, shape); else onSuggestion?.(text) }}>{text}</button>
+                    <button key={text} type="button" disabled={thinking || loading || djPaused} onClick={() => { carry(); if (shape) onSuggestion?.(text, shape); else onSuggestion?.(text) }}>{text}</button>
                   ))}
                   {onAddHistory ? <button type="button" className="conversation-history-pill" disabled={thinking || loading} onClick={onAddHistory}>Add my listening history</button> : null}
                 </div>
@@ -247,7 +250,7 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
             reply is inserted above it rather than the door being re-added (and re-read) below it. */}
         {!loading && !album && musicDoor && lastDjIndex >= 0 ? (
           <div className="music-door-slot" inert={musicDoorCovered} aria-hidden={musicDoorCovered || undefined}>
-            <MusicDoor {...musicDoor} notPersonal={session.notPersonal} busy={Boolean(musicDoor.busy) || thinking || loading || selectionBusy} />
+            <MusicDoor {...musicDoor} notPersonal={session.notPersonal} busy={Boolean(musicDoor.busy) || thinking || loading || selectionBusy || djPaused} />
           </div>
         ) : null}
         {loading ? null : placement.get(-1)?.map((item) => <PassedRow key={`passed-${item.id}`} album={item} onGoBack={onGoBack} />)}

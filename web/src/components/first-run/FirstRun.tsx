@@ -4,6 +4,7 @@ import { nextWorkingStep, type TurnWork, type WorkingStep } from '../djWorkingLi
 import { createDeferredFunnel } from '../../lib/funnel-once'
 import type { AuthPreferenceStore, AuthProvider } from '../../lib/auth-provider'
 import { AiConsentDialog, AiConsentGate } from '../AiConsent'
+import { DjStatusValue, useDjStatusSource } from '../../lib/dj-status'
 import { SignInPage, type AuthBridge } from '../AuthGate'
 import { Artists, ARTISTS_HEADLINE } from './Artists'
 import { ChooseMethod, METHOD_HEADLINE, type AddMethod } from './ChooseMethod'
@@ -165,11 +166,17 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
   // Until it lands, or if it fails, it is off: Skip goes to the artists page.
   const [neverRefuse, setNeverRefuse] = useState(false)
   const configRead = useRef<Promise<boolean> | null>(null)
+  // The DJ pause switch: lazy, so the first run still reads nothing on load.
+  // A dj_paused 503 or the Step 1 flag read pauses it; once paused it re-reads
+  // /health until the DJ is back.
+  const djStatus = useDjStatusSource(services?.api ?? null, { lazy: true })
+  const djValue = useMemo(() => ({ paused: djStatus.paused, report: djStatus.report }), [djStatus.paused, djStatus.report])
+  const learnDj = djStatus.learn
   const onStep1 = page.id === 'service'
   useEffect(() => {
     if (adding || !services || !onStep1) return
     configRead.current ??= services.api.getConfig().then(
-      (config) => config.neverRefuse,
+      (config) => { learnDj(config); return config.neverRefuse },
       () => false,
     )
     let live = true
@@ -312,12 +319,14 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
       const response = await services.api.createSession(text, undefined, undefined, undefined, { onProgress })
       mixing.current = false
       finish({ session: response })
-    } catch {
+    } catch (cause) {
       mixing.current = false
+      // The DJ is paused: no error line; the field comes back off, prompt kept, with the quiet note.
+      const failure = djStatus.report(cause) ? '' : MIX_FAILED
       if (trail.current[depthRef.current]?.id === 'making') {
-        popError.current = MIX_FAILED
+        popError.current = failure
         window.history.back()
-      } else setError(MIX_FAILED)
+      } else setError(failure)
     }
   }
 
@@ -516,7 +525,9 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
   return (
     <div className={`first-run fr-root${adding ? ' fr-root--add' : ''}`} data-testid="first-run">
       <AiConsentGate.Provider value={consentGate}>
-        <div className="fr-stage" key={key}>{content}</div>
+        <DjStatusValue value={djValue}>
+          <div className="fr-stage" key={key}>{content}</div>
+        </DjStatusValue>
       </AiConsentGate.Provider>
       {asking ? <AiConsentDialog onAgree={agreeToAi} onNotNow={() => setAsking(null)} /> : null}
     </div>

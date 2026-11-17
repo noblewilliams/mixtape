@@ -14,6 +14,9 @@
 .home-voice-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; font-size: 13px; color: var(--graphite); }
 .home-voice-error button { border: 0; background: transparent; color: inherit; padding: 10px 0 10px 10px; cursor: pointer; }
 @media (max-width: 600px) { .home-composer { padding-left: 12px; } }
+/* The DJ is paused: the field rests at the placeholder, and one quiet line sits under it. */
+.home-composer textarea:disabled { cursor: default; opacity: 1; }
+.composer-paused { margin: 8px 0 0; padding-inline: 16px; font-size: 12px; line-height: 18px; color: var(--muted); }
 
 /* Chat adds a quiet tool row to the same input used on Home. */
 .composer-area > .home-compose { width: min(100%, 610px); margin-inline: auto; padding-top: 0; }

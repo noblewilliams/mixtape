@@ -870,8 +870,8 @@ describe('Mixtape API client: listening import and onboarding', () => {
       fetchMock.mockResolvedValueOnce(ok({ ok: true, service: 'mixtape-api' }))
       const api = createMixtapeApi('https://api.mixtape.test')
 
-      expect(await api.getConfig()).toEqual({ neverRefuse: true })
-      expect(await api.getConfig()).toEqual({ neverRefuse: false })
+      expect(await api.getConfig()).toEqual({ neverRefuse: true, djPaused: false })
+      expect(await api.getConfig()).toEqual({ neverRefuse: false, djPaused: false })
       expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET'])).toEqual([
         ['https://api.mixtape.test/health', 'GET'],
         ['https://api.mixtape.test/health', 'GET'],

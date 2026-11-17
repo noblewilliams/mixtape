@@ -628,13 +628,13 @@ describe('never refuse, Skip for now on Step 1', () => {
   /** Step 1 with the flag read held open; resolve() settles it. */
   async function toStep1Pending() {
     const fakes = fakeServices({ neverRefuse: true })
-    let resolve: (value: { neverRefuse: boolean }) => void = () => undefined
+    let resolve: (value: { neverRefuse: boolean; djPaused: boolean }) => void = () => undefined
     fakes.api.getConfig.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
     render(<FirstRun services={fakes.services} onDone={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
     await heading('Step 1 of 3, Which do you use?')
     await waitFor(() => expect(fakes.api.getConfig).toHaveBeenCalled())
-    return { ...fakes, resolve: (on: boolean) => resolve({ neverRefuse: on }) }
+    return { ...fakes, resolve: (on: boolean) => resolve({ neverRefuse: on, djPaused: false }) }
   }
 
   it('waits on a read still in flight when Skip is tapped, then goes to the prompt page when it says on', async () => {
