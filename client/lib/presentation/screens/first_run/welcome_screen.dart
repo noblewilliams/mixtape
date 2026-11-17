@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/listening/listening_models.dart';
 import '../../format/import_format.dart';
+import '../../providers/dj_status_provider.dart';
 import '../../providers/first_run_flags_provider.dart';
 import '../../providers/first_run_funnel_provider.dart';
 import '../../theme/mixtape_theme.dart';
@@ -123,7 +124,8 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
       widget.artistsPassed || widget.withoutMusic || (widget.songsIn ?? 0) > 0;
 
   Future<void> _send() async {
-    if (_starting || _sending) return;
+    // The DJ is paused: nothing goes out, and the prompt stays in the field.
+    if (_starting || _sending || ref.read(djPausedProvider)) return;
     final prompt = _controller.text.trim();
     if (prompt.isEmpty) return;
     if (!widget.isPrompt) {
@@ -211,6 +213,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
           MixPromptInput(
             controller: _controller,
             busy: _starting,
+            paused: ref.watch(djPausedProvider),
             onSubmit: () => unawaited(_send()),
             exampleSet: WelcomeScreen.examples,
             voiceController: _voice,

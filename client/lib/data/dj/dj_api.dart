@@ -612,6 +612,11 @@ class DjApi {
   }
 
   Exception _translate(ApiException e) {
+    // The DJ is paused server-wide: before any status mapping, so a start,
+    // a turn, a remake and a streamed turn all say so the same way.
+    if (DjPausedException.matches(e.statusCode, e.body)) {
+      return const DjPausedException();
+    }
     switch (e.statusCode) {
       case 409:
         return _translate409(e.body);

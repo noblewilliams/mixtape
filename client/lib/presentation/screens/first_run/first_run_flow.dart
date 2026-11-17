@@ -24,6 +24,7 @@ import '../../../data/listening/listening_models.dart';
 import '../../format/network_copy.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/dj_providers.dart';
+import '../../providers/dj_status_provider.dart';
 import '../../providers/first_run_flags_provider.dart';
 import '../../providers/first_run_funnel_provider.dart';
 import '../../providers/first_run_provider.dart';
@@ -239,6 +240,9 @@ Future<String?> startFirstMix(
   void Function()? onCap,
   void Function(bool sending)? onSending,
 }) async {
+  // The DJ is paused: nothing goes out, not even the consent sheet; the
+  // caller's page keeps what was typed and shows the paused composer.
+  if (ref.read(djPausedProvider)) return null;
   final agreed = await confirmAiConsent(
     context,
     beforeSession: true,
@@ -301,6 +305,11 @@ Future<Object?> _sendFirstMix(
   } on AiConsentRequiredException {
     leaveMaking();
     return const _ConsentRefused();
+  } on DjPausedException {
+    // Paused server-wide: the starter has paused the app. No sentence; the
+    // caller's page shows the paused composer with the prompt still there.
+    leaveMaking();
+    return null;
   } on AnonymousCapException {
     leaveMaking();
     onCap?.call();

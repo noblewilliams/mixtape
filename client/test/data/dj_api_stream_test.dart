@@ -558,6 +558,7 @@ void main() {
             isA<AnonymousCapException>().having((e) => e.limit, 'limit', 5),
         (403, {'error': 'ai_consent_required'}):
             isA<AiConsentRequiredException>(),
+        (503, {'error': 'dj_paused'}): isA<DjPausedException>(),
         (404, {'error': 'not_found'}): isA<ApiException>().having(
           (e) => e.statusCode,
           'statusCode',

@@ -58,4 +58,44 @@ void main() {
       }
     },
   );
+
+  group('djPaused (DJ paused kill switch)', () {
+    test('GETs /health and reads djPaused: true as paused', () async {
+      late http.Request seen;
+      final paused = await apiWith((request) async {
+        seen = request;
+        return http.Response('{"ok":true,"djPaused":true}', 200);
+      }).djPaused();
+      expect(seen.method, 'GET');
+      expect(seen.url.path, '/health');
+      expect(paused, isTrue);
+    });
+
+    test('absent (an older server) or anything but true is open', () async {
+      for (final body in [
+        '{"ok":true,"service":"mixtape-api","neverRefuse":true}',
+        '{"ok":true,"djPaused":false}',
+        '{"ok":true,"djPaused":"true"}',
+        '{"ok":true,"djPaused":1}',
+      ]) {
+        final paused = await apiWith(
+          (_) async => http.Response(body, 200),
+        ).djPaused();
+        expect(paused, isFalse, reason: body);
+      }
+    });
+
+    test('a failed read is no answer at all (null), never paused', () async {
+      final failures = <Future<http.Response> Function(http.Request)>[
+        (_) async => http.Response('Not Found', 404),
+        (_) async => http.Response('boom', 500),
+        (_) async => http.Response('not json', 200),
+        (_) async => http.Response('[true]', 200),
+        (_) async => throw http.ClientException('offline'),
+      ];
+      for (final handler in failures) {
+        expect(await apiWith(handler).djPaused(), isNull);
+      }
+    });
+  });
 }

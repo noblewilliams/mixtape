@@ -11,7 +11,9 @@
 /// Pushed inside a tab `Navigator`: glass back and action clusters, no app bar.
 library;
 
-import '../../data/api/api_client.dart' show AiConsentRequiredException;
+import '../../data/api/api_client.dart'
+    show AiConsentRequiredException, DjPausedException;
+import '../providers/dj_status_provider.dart';
 import '../widgets/ai_consent_sheet.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/material.dart';
@@ -97,7 +99,8 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
   /// ai_consent_required` puts the text back and asks again, and Agree
   /// sends it.
   Future<void> _deliver(String text, {required bool fromComposer}) async {
-    if (_askingConsent) return;
+    // The DJ is paused: nothing goes out, and the draft stays put.
+    if (_askingConsent || ref.read(djPausedProvider)) return;
     _askingConsent = true;
     final agreed = await confirmAiConsent(context);
     _askingConsent = false;
@@ -118,6 +121,11 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
         fromComposer ? _controller.text.trim() : text,
         fromComposer: fromComposer,
       );
+    } on DjPausedException {
+      // Paused server-wide while this went out: the message was taken back
+      // and the app paused. The text goes back in the composer.
+      if (!mounted) return;
+      if (fromComposer && _controller.text.isEmpty) _controller.text = text;
     }
   }
 
@@ -253,7 +261,10 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
           if (message.isError)
             _FailedTurn(
               text: message.message.content,
-              onRetry: message.retryContent == null || state.sending
+              onRetry:
+                  message.retryContent == null ||
+                      state.sending ||
+                      ref.watch(djPausedProvider)
                   ? null
                   : () => _deliver(message.retryContent!, fromComposer: false),
             )
@@ -322,6 +333,7 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
               key: PlaylistEditScreen.composerKey,
               controller: _controller,
               busy: !composerEnabled,
+              paused: ref.watch(djPausedProvider),
               onSubmit: _send,
             ),
             const SizedBox(height: 10),

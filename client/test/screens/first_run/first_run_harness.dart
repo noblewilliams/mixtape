@@ -135,6 +135,12 @@ class FakeConfigApi implements ConfigApi {
   /// The anonymous sign-ins made before each read, in order.
   final List<int> signInsAtRead = [];
 
+  /// `djPaused` on `/health`; null is a failed read.
+  bool? djPausedAnswer = false;
+
+  @override
+  Future<bool?> djPaused() async => djPausedAnswer;
+
   @override
   Future<FirstRunFlags> flags() async {
     calls++;

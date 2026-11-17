@@ -323,4 +323,14 @@ void main() {
       throwsA(isA<AiConsentRequiredException>()),
     );
   });
+
+  test('503 dj_paused is the paused exception, not an edit error', () async {
+    final api = await apiWith(
+      MockClient((_) async => http.Response('{"error":"dj_paused"}', 503)),
+    );
+    await expectLater(
+      api.sendMessage('00000000-0000-4000-8000-000000000010', 'later', 1),
+      throwsA(isA<DjPausedException>()),
+    );
+  });
 }

@@ -18,6 +18,7 @@ import '../../data/dj/dj_models.dart';
 import '../../data/listening/listening_models.dart' show FunnelEventType;
 import '../../data/playlists/playlist_context_models.dart';
 import 'auth_provider.dart';
+import 'dj_status_provider.dart';
 import 'mix_activity_provider.dart';
 import 'mix_operation_gate.dart';
 import 'onboarding_provider.dart';
@@ -862,6 +863,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
       rethrow;
+    } on DjPausedException {
+      // The DJ is paused server-wide: nothing went through. The turn is
+      // taken back (the listener's line, and what it cleared as it went
+      // out), the app pauses at once, and the screen keeps the text.
+      landed = false;
+      ref.read(djStatusProvider.notifier).markPaused();
+      if (!live()) return;
+      _mergeCurrent(
+        (c) => c.copyWith(
+          messages: [
+            for (final m in c.messages)
+              if (!identical(m, userMessage)) m,
+          ],
+          suggestions: c.suggestions ?? base.suggestions,
+          addMusic: c.addMusic ?? base.addMusic,
+        ),
+      );
+      rethrow;
     } on DjApiException catch (e) {
       if (!live()) return;
       if (e.kind == 'stale') {
@@ -1637,6 +1656,12 @@ final sessionStarterProvider =
                 .noteMix(detail.session.id, detail.queue.length);
           }
           return detail.session.id;
+        } on DjPausedException {
+          // Paused server-wide before anything was made: the app pauses at
+          // once and the caller keeps the prompt.
+          made = null;
+          ref.read(djStatusProvider.notifier).markPaused();
+          rethrow;
         } on NewMixStoppedException {
           // The server deleted the new mix: a list read mid-create may have
           // listed it.

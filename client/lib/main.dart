@@ -5,6 +5,7 @@ import 'core/config.dart';
 import 'data/api/api_client.dart' show ApiClient;
 import 'data/api/reachability.dart' show probeInternet;
 import 'presentation/providers/auth_provider.dart';
+import 'presentation/providers/dj_status_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
 import 'presentation/providers/incoming_link_provider.dart';
 import 'presentation/providers/name_page_provider.dart';
@@ -70,6 +71,9 @@ class MixtapeApp extends ConsumerWidget {
     // A share opened before there was a session is saved once one appears,
     // even after the first-run root swaps out the screen that held it.
     ref.listen(pendingShareSaveProvider, (_, _) {});
+    // Whether the DJ is paused (the operator's kill switch): read now, on
+    // every return to the foreground and on a timer, whatever the root.
+    ref.listen(djStatusMonitorProvider, (_, _) {});
     final root = switch (auth) {
       AuthStatus.unknown => _Root.unknown,
       AuthStatus.noSession => _Root.firstRun,

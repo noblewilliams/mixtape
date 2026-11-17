@@ -34,6 +34,7 @@ import '../../../data/playlists/playlist_context_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/capabilities_provider.dart';
 import '../../providers/dj_providers.dart';
+import '../../providers/dj_status_provider.dart';
 import '../../providers/mix_activity_provider.dart';
 import '../../providers/playlist_context_provider.dart';
 import '../mixes_screen.dart';
@@ -43,6 +44,11 @@ class MixesPreview extends StatefulWidget {
 
   /// A made-up share from Ada, ten songs, two with no Apple Music match.
   static const String sharedToken = 'PreviewShareAdaLateDrv';
+
+  /// Opens with the DJ paused, so the paused composers can be checked.
+  static const bool djPaused = bool.fromEnvironment(
+    'MIXTAPE_PREVIEW_DJ_PAUSED',
+  );
 
   /// A made-up share its sender stopped.
   static const String goneToken = 'PreviewShareStoppedXyz';
@@ -62,6 +68,10 @@ class _MixesPreviewState extends State<MixesPreview> {
       isAnonymousProvider.overrideWithValue(false),
       albumPicksEnabledProvider.overrideWithValue(true),
       playlistContextApiProvider.overrideWithValue(_PreviewContextApi()),
+      // `--dart-define=MIXTAPE_PREVIEW_DJ_PAUSED=true`: every composer in
+      // its paused state (the DJ paused kill switch).
+      if (MixesPreview.djPaused)
+        djStatusProvider.overrideWith(_PausedDj.new),
     ],
   );
 
@@ -95,6 +105,11 @@ class _MixesPreviewState extends State<MixesPreview> {
           MaterialPageRoute(builder: (_) => const MixesScreen()),
     ),
   );
+}
+
+class _PausedDj extends DjStatusNotifier {
+  @override
+  DjStatus build() => DjStatus.paused;
 }
 
 class _SignedIn extends AuthNotifier {

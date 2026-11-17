@@ -13,6 +13,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../providers/dj_status_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../providers/keep_mixes_provider.dart' show KeptPrompt;
 import '../../widgets/keep_sheet.dart';
@@ -160,6 +161,12 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
     // The seeds are in: the busy state ends here and the making page,
     // pushed by startFirstMix, covers the DJ turn.
     setState(() => _busy = false);
+    // The DJ is paused: back to the page the prompt was typed on, which
+    // still holds it and shows the paused composer.
+    if (ref.read(djPausedProvider)) {
+      unawaited(Navigator.of(context).maybePop());
+      return;
+    }
     final error = await startFirstMix(
       context,
       ref,
@@ -171,6 +178,11 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
       },
     );
     if (!mounted) return;
+    if (error == null && ref.read(djPausedProvider)) {
+      // Refused with dj_paused on the way out: as above.
+      unawaited(Navigator.of(context).maybePop());
+      return;
+    }
     setState(() => _error = error);
   }
 

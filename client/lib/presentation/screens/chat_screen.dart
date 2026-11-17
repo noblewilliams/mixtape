@@ -29,6 +29,7 @@ import '../../data/dj/dj_models.dart';
 import '../../data/playlists/playlist_context_models.dart';
 import '../add_music/add_music_router.dart';
 import '../providers/dj_providers.dart';
+import '../providers/dj_status_provider.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/library_sync_provider.dart';
@@ -250,7 +251,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         (operation != null && !heldByStop) ||
         ref.read(sessionPlaylistContextProvider(widget.sessionId)).writing ||
         chat?.sending == true ||
-        _askingConsent) {
+        _askingConsent ||
+        // The DJ is paused: nothing goes out, and the draft stays put.
+        ref.read(djPausedProvider)) {
       return;
     }
     // Nothing reaches the DJ before the listener has agreed; Not now keeps
@@ -287,6 +290,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         fromComposer: fromComposer,
         remake: remake,
       );
+    } on DjPausedException {
+      // Paused server-wide while this went out: the turn was taken back and
+      // the app paused. The text goes back in the composer, which now shows
+      // the paused state; no error, no toast.
+      if (!mounted) return;
+      if (fromComposer && _textController.text.isEmpty) {
+        _textController.text = trimmed;
+      }
     } catch (_) {
       if (!mounted) return;
       _snack('something unexpected happened', kind: FeedbackKind.error);
@@ -942,7 +953,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           key: _musicDoorKey,
           notPersonal: true,
           layout: MusicDoorLayout.transcript,
-          onRemake: busy ? null : _onRemake,
+          // A remake is a model turn: it waits out a paused DJ too.
+          onRemake: busy || ref.watch(djPausedProvider) ? null : _onRemake,
         ),
       );
     }
@@ -1060,7 +1072,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       onResend: message.isError && precedingText.isNotEmpty
           ? () => preceding!.remake ? _remake() : _send(precedingText)
           : null,
-      resendEnabled: !busy,
+      resendEnabled: !busy && !ref.watch(djPausedProvider),
     );
   }
 
@@ -1122,7 +1134,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         for (final suggestion in suggestions!)
           IdeaPill(
             label: suggestion,
-            onPressed: busy ? null : () => _takeSuggestion(suggestion),
+            onPressed: busy || ref.watch(djPausedProvider)
+                ? null
+                : () => _takeSuggestion(suggestion),
           ),
       ],
     );
@@ -1288,6 +1302,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           focusNode: _promptFocus,
                           busy: locked,
                           working: working,
+                          paused: ref.watch(djPausedProvider),
+                          // Drawn under the row (below), so the + stays
+                          // level with the field.
+                          showPausedNote: false,
                           onStop:
                               state != null &&
                                   state.sending &&
@@ -1311,6 +1329,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       ),
                     ],
                   ),
+                  if (ref.watch(djPausedProvider))
+                    const Padding(
+                      // In line with the field, past the + beside it.
+                      padding: EdgeInsets.only(
+                        top: 8,
+                        left: ComposerPlusButton.size + 8 + 2,
+                        right: 2,
+                      ),
+                      child: DjPausedNote(),
+                    ),
                 ],
               ),
             ),

@@ -9,6 +9,7 @@ import 'package:mixtape/data/playlists/playlist_models.dart';
 import 'package:mixtape/data/musickit/playlist_apply_bridge.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/dj_status_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_providers.dart';
 import 'package:mixtape/presentation/screens/playlist_browser_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
@@ -877,6 +878,67 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
       expect(h.edit.sends, 1);
+    });
+  });
+
+  // The DJ paused kill switch on a playlist edit.
+  group('DJ paused', () {
+    const draftId = '00000000-0000-4000-8000-000000000010';
+
+    ({ProviderContainer container, FakePlaylistEditApi edit}) make() {
+      final summary = _summary();
+      final playlists = FakePlaylistApi(
+        page: PlaylistPage(playlists: [summary]),
+        detail: PlaylistDetail(playlist: summary, entries: const []),
+      );
+      final edit = FakePlaylistEditApi(view: _editView(changed: false));
+      return (container: _container(playlists, edit), edit: edit);
+    }
+
+    testWidgets('the composer rests with the paused copy and sends nothing', (
+      tester,
+    ) async {
+      final h = make();
+      h.container.read(djStatusProvider.notifier).markPaused();
+      await _pump(
+        tester,
+        h.container,
+        const PlaylistEditScreen(draftId: draftId),
+      );
+      final field = tester.widget<TextField>(
+        find.byKey(const Key('prompt-field')),
+      );
+      expect(field.enabled, isFalse);
+      expect(find.text(MixPromptInput.pausedPlaceholder), findsOneWidget);
+      expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+      expect(h.edit.sends, 0);
+    });
+
+    testWidgets('a 503 dj_paused takes the message back and keeps the text', (
+      tester,
+    ) async {
+      final h = make();
+      h.edit.sendError = const DjPausedException();
+      await _pump(
+        tester,
+        h.container,
+        const PlaylistEditScreen(draftId: draftId),
+      );
+
+      await _compose(tester, 'move the closer later');
+      expect(h.edit.sends, 1);
+      expect(h.container.read(djStatusProvider), DjStatus.paused);
+      expect(find.byKey(ConversationTurn.errorKey), findsNothing);
+      final thread = h.container
+          .read(playlistEditThreadProvider(draftId))
+          .requireValue;
+      expect(thread.messages, isEmpty, reason: 'the turn is taken back');
+      final field = tester.widget<TextField>(
+        find.byKey(const Key('prompt-field')),
+      );
+      expect(field.controller!.text, 'move the closer later');
+      expect(field.enabled, isFalse);
+      expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
     });
   });
 }

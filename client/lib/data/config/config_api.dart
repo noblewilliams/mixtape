@@ -3,8 +3,8 @@ import 'dart:convert';
 import '../api/api_client.dart';
 
 /// The server flags the first run needs before any session exists, from the
-/// unauthenticated `GET /health` (`{ ok, service, neverRefuse }`: no session,
-/// no database).
+/// unauthenticated `GET /health` (`{ ok, service, neverRefuse, djPaused }`:
+/// no session, no database).
 class FirstRunFlags {
   const FirstRunFlags({required this.neverRefuse});
 
@@ -28,6 +28,20 @@ class ConfigApi {
       return FirstRunFlags(neverRefuse: value['neverRefuse'] == true);
     } catch (_) {
       return FirstRunFlags.off;
+    }
+  }
+
+  /// `djPaused`: the operator's kill switch. True only for `djPaused: true`;
+  /// absent (an older server) or anything else is false. Never throws: a
+  /// failed read is null, no answer, so a caller can keep what it last knew
+  /// rather than pause the DJ over a network blip.
+  Future<bool?> djPaused() async {
+    try {
+      final value = jsonDecode((await _client.getJson('/health')).body);
+      if (value is! Map<String, dynamic>) return null;
+      return value['djPaused'] == true;
+    } catch (_) {
+      return null;
     }
   }
 }

@@ -16,6 +16,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
+import 'composer_plus_button.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/liquid_glass_surface.dart';
 import 'foundation/text_action.dart';
@@ -43,6 +44,7 @@ class HomePanel extends StatefulWidget {
     this.composerKey,
     this.focusNode,
     this.busy = false,
+    this.paused = false,
     this.onStop,
     this.error,
     this.attachment,
@@ -98,6 +100,11 @@ class HomePanel extends StatefulWidget {
   /// A mix is being created: the pills go inert and the composer shows the
   /// DJ working. Its field stays open (stop a turn, 2026-11-15).
   final bool busy;
+
+  /// The DJ is paused server-wide: the composer shows its paused state (see
+  /// [MixPromptInput.paused]) and the pills go inert, since a field that
+  /// cannot send has nothing for them to fill.
+  final bool paused;
 
   /// The stop key while [busy]; null draws none (an album ask).
   final VoidCallback? onStop;
@@ -258,7 +265,11 @@ class _HomePanelState extends State<HomePanel> {
         ? keyboard + HomePanel.keyboardGap
         : media.padding.bottom + HomePanel.dockGap;
 
-    final dimmed = widget.busy || widget.controller.text.trim().isNotEmpty;
+    final dimmed =
+        widget.busy ||
+        widget.paused ||
+        widget.controller.text.trim().isNotEmpty;
+    final inert = widget.busy || widget.paused;
     final starters = _starters;
     final error = widget.error;
     final hasRow = widget.modeControl != null || widget.shapeControl != null;
@@ -268,7 +279,7 @@ class _HomePanelState extends State<HomePanel> {
     return RoutinePillSlot(
       onFill: _fill,
       dimmed: dimmed,
-      enabled: !widget.busy,
+      enabled: !inert,
       builder: (context, pill) => ConstrainedBox(
         // At 200% text with the keyboard up the panel wants more room than the
         // phone has; capped here, its content scrolls inside instead of
@@ -348,6 +359,10 @@ class _HomePanelState extends State<HomePanel> {
                             focusNode: widget.focusNode,
                             busy: false,
                             working: widget.busy,
+                            paused: widget.paused,
+                            // Drawn under the whole row (below), so the +
+                            // stays level with the field.
+                            showPausedNote: widget.leading == null,
                             onStop: widget.onStop,
                             onSubmit: widget.onSubmit,
                             placeholder: widget.placeholder,
@@ -361,6 +376,16 @@ class _HomePanelState extends State<HomePanel> {
                                 : const [],
                           ),
                         ),
+                        if (widget.paused && widget.leading != null)
+                          const Padding(
+                            // In line with the field, past the + beside it.
+                            padding: EdgeInsets.only(
+                              top: 8,
+                              left: ComposerPlusButton.size + 8 + 2,
+                              right: 2,
+                            ),
+                            child: DjPausedNote(),
+                          ),
                         if (error != null) _errorLine(tokens, error),
                         if (widget.switched)
                           _switchedLine(tokens)
@@ -509,7 +534,7 @@ class _HomePanelState extends State<HomePanel> {
           key: HomePanel.refinementPillKey(i),
           label: widget.refinements![i].label,
           dimmed: dimmed,
-          onPressed: widget.busy
+          onPressed: widget.busy || widget.paused
               ? null
               : (widget.refinements![i].onTap ??
                     () => _fill(widget.refinements![i].label)),
@@ -522,7 +547,7 @@ class _HomePanelState extends State<HomePanel> {
         key: HomePanel.starterPillKey(index),
         label: prompt,
         dimmed: dimmed,
-        onPressed: widget.busy ? null : () => _fill(prompt),
+        onPressed: widget.busy || widget.paused ? null : () => _fill(prompt),
       );
 
   /// The board's `.errline`: an error circle and the message in err ink,

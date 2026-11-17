@@ -11,6 +11,7 @@ import '../../data/playlists/playlist_models.dart';
 import '../../data/musickit/musickit_bridge.dart';
 import '../../data/musickit/playlist_apply_bridge.dart';
 import 'auth_provider.dart';
+import 'dj_status_provider.dart';
 import 'library_sync_provider.dart';
 import '../format/network_copy.dart';
 
@@ -310,6 +311,12 @@ class PlaylistEditThreadNotifier
       // Not a failed turn: the server wants consent first. The message is
       // taken back and the screen asks, keeping the text.
       _merge((current) => current.copyWith(messages: messagesBefore));
+      rethrow;
+    } on DjPausedException {
+      // The DJ is paused server-wide: the message is taken back, the app
+      // pauses at once, and the screen keeps the text.
+      _merge((current) => current.copyWith(messages: messagesBefore));
+      ref.read(djStatusProvider.notifier).markPaused();
       rethrow;
     } on PlaylistEditApiException catch (error) {
       if (error.kind == 'conflict') {

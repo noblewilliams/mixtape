@@ -91,6 +91,31 @@ class AiConsentRequiredException implements Exception {
   String toString() => 'AiConsentRequiredException';
 }
 
+/// `503 {error: 'dj_paused'}`: the operator has paused the DJ (credits out,
+/// the model down). Nothing that needs the model goes through until the
+/// server's flag flips back; everything else keeps working. The caller keeps
+/// what was typed and the app shows the paused composer, never an error.
+class DjPausedException implements Exception {
+  const DjPausedException();
+
+  /// The server's error code.
+  static const String code = 'dj_paused';
+
+  /// Whether [statusCode] and [body] are this answer.
+  static bool matches(int statusCode, String body) {
+    if (statusCode != 503) return false;
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map && decoded['error'] == code;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  @override
+  String toString() => 'DjPausedException';
+}
+
 /// What [ApiClient.postEventStream] got back.
 sealed class StreamingReply {
   const StreamingReply();

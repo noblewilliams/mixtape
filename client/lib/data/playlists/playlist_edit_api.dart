@@ -137,6 +137,9 @@ class PlaylistEditApi {
     if (AiConsentRequiredException.matches(error.statusCode, error.body)) {
       return const AiConsentRequiredException();
     }
+    if (DjPausedException.matches(error.statusCode, error.body)) {
+      return const DjPausedException();
+    }
     final decoded = _decode(error.body);
     final serverKind = decoded?['error'];
     final kind = serverKind is String

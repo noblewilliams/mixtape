@@ -35,6 +35,7 @@ import '../providers/auth_provider.dart';
 import '../providers/capabilities_provider.dart';
 import '../providers/home_mode_provider.dart';
 import '../providers/dj_providers.dart';
+import '../providers/dj_status_provider.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/listening_import_provider.dart';
 import '../providers/mix_activity_provider.dart';
@@ -478,6 +479,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     SessionKind kind = SessionKind.mix,
   }) async {
     if (_starting || _askingConsent) return;
+    // The DJ is paused: nothing goes out, and the prompt stays in the field.
+    if (ref.read(djPausedProvider)) return;
     // Sent: the keyboard goes, so the starting state has the open space.
     _promptFocus.unfocus();
     // Nothing reaches the DJ (a mix or an album pick) before the listener
@@ -538,6 +541,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       // Enforcement is on and `/me` was out of date: the sheet, not an
       // error line, once the composer is no longer busy (below).
       consentRefused = true;
+    } on DjPausedException {
+      // Paused server-wide while this went out: the starter has paused the
+      // app, so the composer shows the paused state. No error line; the
+      // prompt was never cleared and stays in the field.
     } on AnonymousCapException {
       // The fourth new mix: the composer stays exactly as it is, prompt and
       // all, and the sign-in page says why (C2). Nothing about the cap is
@@ -687,6 +694,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     // The Mix | Album control is offered only to an account with albums on.
     ref.watch(albumPicksEnabledProvider);
     ref.watch(isAnonymousProvider);
+    final paused = ref.watch(djPausedProvider);
     ref.listen(homeModeRequestProvider, (_, next) {
       if (next != null) _takeModeRequest();
     });
@@ -789,6 +797,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                       controller: _promptController,
                       focusNode: _promptFocus,
                       busy: _starting,
+                      paused: paused,
                       onStop: _newMixStop == null ? null : _stopStart,
                       error: _error,
                       onSubmit: _submit,

@@ -340,4 +340,16 @@ void main() {
       expect(rejected, hasLength(4));
     });
   });
+
+  group('DjPausedException.matches', () {
+    test('503 {error: dj_paused} only', () {
+      expect(DjPausedException.matches(503, '{"error":"dj_paused"}'), isTrue);
+      expect(DjPausedException.code, 'dj_paused');
+      expect(DjPausedException.matches(503, '{"error":"other"}'), isFalse);
+      expect(DjPausedException.matches(403, '{"error":"dj_paused"}'), isFalse);
+      expect(DjPausedException.matches(503, 'Service Unavailable'), isFalse);
+      expect(DjPausedException.matches(503, '["dj_paused"]'), isFalse);
+      expect(DjPausedException.matches(503, ''), isFalse);
+    });
+  });
 }

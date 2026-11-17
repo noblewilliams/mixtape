@@ -25,6 +25,8 @@ import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/capabilities_provider.dart';
 import 'package:mixtape/presentation/providers/home_mode_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/dj_status_provider.dart';
+import '../helpers/auth_ui_snapshot.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/suggestions_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
@@ -1753,5 +1755,172 @@ void main() {
       expect(find.byKey(AiConsentCopy.titleKey), findsNothing);
       expect(api.prompts, ['rainy drive']);
     });
+  });
+
+  // The DJ paused kill switch: `/health` says djPaused (or a send was refused
+  // with 503 dj_paused) and Home's composer rests, with nothing sent.
+  group('DJ paused', () {
+    FakeDjApi recordingApi() {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      api.onCreateSession = (prompt) async {
+        api.prompts.add(prompt);
+        return SessionDetail(
+          session: _session(id: 'new-1'),
+          messages: [],
+          queue: [],
+        );
+      };
+      api.onGetSession = (id) async =>
+          SessionDetail(session: _session(id: id), messages: [], queue: []);
+      return api;
+    }
+
+    TextField field(WidgetTester tester) =>
+        tester.widget<TextField>(find.byKey(const Key('prompt-field')));
+
+    testWidgets('the field is disabled with the paused copy, send and mic '
+        'are off, the pills are inert, and nothing is sent', (tester) async {
+      final api = recordingApi();
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+      );
+      container.read(djStatusProvider.notifier).markPaused();
+      await _pump(tester, container);
+
+      expect(field(tester).enabled, isFalse);
+      expect(find.text(MixPromptInput.pausedPlaceholder), findsOneWidget);
+      expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(find.byKey(const Key('voice-input')))
+            .onPressed,
+        isNull,
+      );
+      for (final pill in tester.widgetList<IdeaPill>(find.byType(IdeaPill))) {
+        expect(pill.onPressed, isNull, reason: pill.label);
+      }
+      // Not an error: no alert line.
+      expect(find.byKey(HomePanel.errorKey), findsNothing);
+
+      await tester.tap(find.byKey(const Key('prompt-field')));
+      await tester.pumpAndSettle();
+      expect(api.prompts, isEmpty);
+    });
+
+    testWidgets('a draft typed before the pause stays, and send does nothing', (
+      tester,
+    ) async {
+      final api = recordingApi();
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+      );
+      await _pump(tester, container);
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'rainy drive',
+      );
+      await tester.pump();
+
+      container.read(djStatusProvider.notifier).markPaused();
+      await tester.pumpAndSettle();
+
+      expect(field(tester).controller!.text, 'rainy drive');
+      final send = tester.widget<IconButton>(
+        find.byKey(const Key('start-session')),
+      );
+      expect(send.onPressed, isNull);
+      await tester.tap(
+        find.byKey(const Key('start-session')),
+        warnIfMissed: false,
+      );
+      await tester.pumpAndSettle();
+      expect(api.prompts, isEmpty);
+      expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+    });
+
+    testWidgets('a 503 dj_paused keeps the prompt, pauses the composer and '
+        'shows no error', (tester) async {
+      final api = recordingApi();
+      api.onCreateSession = (prompt) async {
+        api.prompts.add(prompt);
+        throw const DjPausedException();
+      };
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+      );
+      await _pump(tester, container);
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'rainy drive',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+
+      expect(api.prompts, ['rainy drive']);
+      expect(container.read(djStatusProvider), DjStatus.paused);
+      expect(field(tester).controller!.text, 'rainy drive');
+      expect(field(tester).enabled, isFalse);
+      expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+      expect(find.byKey(HomePanel.errorKey), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(find.byType(ChatScreen), findsNothing);
+    });
+
+    testWidgets('reopens once the DJ is back', (tester) async {
+      final api = recordingApi();
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+      );
+      container.read(djStatusProvider.notifier).markPaused();
+      await _pump(tester, container);
+      expect(field(tester).enabled, isFalse);
+
+      container.invalidate(djStatusProvider);
+      await tester.pumpAndSettle();
+      expect(field(tester).enabled, isTrue);
+      expect(find.text(MixPromptInput.pausedNote), findsNothing);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('captures the paused Home ${brightness.name}', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await loadAuthSnapshotFonts(tester);
+        final container = _makeContainer(recordingApi());
+        container.read(djStatusProvider.notifier).markPaused();
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: RepaintBoundary(
+              key: authSnapshotKey,
+              child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                theme: authSnapshotTheme(brightness).copyWith(
+                  extensions: [
+                    brightness == Brightness.dark
+                        ? MixtapeTokens.dark
+                        : MixtapeTokens.light,
+                  ],
+                ),
+                home: const HomeScreen(),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+        await captureAuthSnapshot(tester, 'dj-paused-home-${brightness.name}');
+      });
+    }
   });
 }

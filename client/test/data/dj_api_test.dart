@@ -295,6 +295,30 @@ void main() {
       );
     });
 
+    test('503 dj_paused -> DjPausedException on a start, a turn and a remake', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'dj_paused'}), 503));
+      await expectLater(
+        _api(inner: inner).createSession('late'),
+        throwsA(isA<DjPausedException>()),
+      );
+      await expectLater(
+        _api(inner: inner).sendMessage('s1', 'more'),
+        throwsA(isA<DjPausedException>()),
+      );
+      await expectLater(
+        _api(inner: inner).sendRemake('s1'),
+        throwsA(isA<DjPausedException>()),
+      );
+    });
+
+    test('any other 503 stays a plain ApiException', () async {
+      final inner = MockClient((_) async => http.Response('Service Unavailable', 503));
+      await expectLater(
+        _api(inner: inner).createSession('late'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 503)),
+      );
+    });
+
     test('403 anonymous_cap -> AnonymousCapException carrying the limit', () async {
       final inner = MockClient((req) async {
         expect(req.method, 'POST');

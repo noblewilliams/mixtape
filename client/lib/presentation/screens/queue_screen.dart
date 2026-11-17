@@ -40,6 +40,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
 import '../providers/dj_providers.dart';
+import '../providers/dj_status_provider.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/mix_operation_gate.dart';
 import '../providers/music_platform_provider.dart';
@@ -579,7 +580,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
                 // Remake runs in the conversation, where the listener sees
                 // it happen; it waits while this mix has a turn out.
                 child: _NotPersonalBlock(
-                  onRemake: state.sending || operation != null
+                  onRemake:
+                      state.sending ||
+                          operation != null ||
+                          ref.watch(djPausedProvider)
                       ? null
                       : () => remakeInConversation(context, widget.sessionId),
                 ),

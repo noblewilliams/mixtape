@@ -21,6 +21,8 @@ import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/dj_status_provider.dart';
+import '../helpers/auth_ui_snapshot.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
@@ -2815,5 +2817,168 @@ void main() {
       expect(find.text('Sixteen loud ones from your likes.'), findsOneWidget);
       expect(find.widgetWithText(IdeaPill, label), findsNothing);
     });
+  });
+
+  // The DJ paused kill switch in a mix's conversation: the composer rests,
+  // nothing reaches the DJ, and the mix itself (its tape, Play) is untouched.
+  group('DJ paused', () {
+    SessionDetail mix({bool notPersonal = false}) => SessionDetail(
+      session: _session(notPersonal: notPersonal),
+      messages: [
+        _msg('m1', 'user', 'a long run'),
+        _msg('m2', 'dj', 'A steady run for you.', queueVersion: 1),
+      ],
+      queue: [_track(0), _track(1)],
+    );
+
+    TextField field(WidgetTester tester) =>
+        tester.widget<TextField>(find.byKey(const Key('prompt-field')));
+
+    testWidgets('the composer is disabled with the paused copy and sends '
+        'nothing', (tester) async {
+      final sent = <String>[];
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => mix();
+      api.onSendMessage = (id, text) async {
+        sent.add(text);
+        throw StateError('must not send while paused');
+      };
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+      );
+      container.read(djStatusProvider.notifier).markPaused();
+      await _pump(tester, container);
+
+      expect(field(tester).enabled, isFalse);
+      expect(find.text(MixPromptInput.pausedPlaceholder), findsOneWidget);
+      expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(find.byKey(const Key('voice-input')))
+            .onPressed,
+        isNull,
+      );
+      // The mix is all still there.
+      expect(find.text('A steady run for you.'), findsOneWidget);
+      expect(sent, isEmpty);
+    });
+
+    testWidgets('a draft typed before the pause stays, and send does nothing', (
+      tester,
+    ) async {
+      final sent = <String>[];
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => mix();
+      api.onSendMessage = (id, text) async {
+        sent.add(text);
+        throw StateError('must not send while paused');
+      };
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+      );
+      await _pump(tester, container);
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'more jazz');
+      await tester.pump();
+
+      container.read(djStatusProvider.notifier).markPaused();
+      await tester.pumpAndSettle();
+      expect(field(tester).controller!.text, 'more jazz');
+      await tester.tap(
+        find.byKey(const Key('start-session')),
+        warnIfMissed: false,
+      );
+      await tester.pumpAndSettle();
+      expect(sent, isEmpty);
+      expect(field(tester).controller!.text, 'more jazz');
+    });
+
+    testWidgets('a 503 dj_paused takes the turn back, keeps the text and '
+        'pauses, with no error turn or toast', (tester) async {
+      final sent = <String>[];
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => mix();
+      api.onSendMessage = (id, text) async {
+        sent.add(text);
+        throw const DjPausedException();
+      };
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+      );
+      await _pump(tester, container);
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'more jazz');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+
+      expect(sent, ['more jazz']);
+      expect(container.read(djStatusProvider), DjStatus.paused);
+      expect(field(tester).controller!.text, 'more jazz');
+      expect(field(tester).enabled, isFalse);
+      expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+      expect(find.byKey(LyricTurn.errorKey), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
+      // Only the conversation as it was: the sent line was taken back.
+      expect(
+        container.read(chatProvider('s1')).value!.messages.map(
+          (m) => m.message.content,
+        ),
+        ['a long run', 'A steady run for you.'],
+      );
+    });
+
+    testWidgets('Remake waits out the pause', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => mix(notPersonal: true);
+      final container = _makeContainer(
+        api,
+        account: FakeConsentAccountApi(aiConsent: true),
+        listening: FakeListeningApi(),
+      );
+      container.read(djStatusProvider.notifier).markPaused();
+      await _pump(tester, container);
+      final door = tester.widget<MusicDoor>(find.byType(MusicDoor).first);
+      expect(door.onRemake, isNull);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('captures the paused conversation ${brightness.name}', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await loadAuthSnapshotFonts(tester);
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => mix();
+        final container = _makeContainer(api);
+        container.read(djStatusProvider.notifier).markPaused();
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: RepaintBoundary(
+              key: authSnapshotKey,
+              child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                theme: authSnapshotTheme(brightness).copyWith(
+                  extensions: [
+                    brightness == Brightness.dark
+                        ? MixtapeTokens.dark
+                        : MixtapeTokens.light,
+                  ],
+                ),
+                home: const ChatScreen(sessionId: 's1'),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(MixPromptInput.pausedNote), findsOneWidget);
+        await captureAuthSnapshot(tester, 'dj-paused-chat-${brightness.name}');
+      });
+    }
   });
 }

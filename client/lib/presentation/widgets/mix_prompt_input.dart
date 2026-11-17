@@ -17,6 +17,8 @@ class MixPromptInput extends StatefulWidget {
     required this.busy,
     required this.onSubmit,
     this.working = false,
+    this.paused = false,
+    this.showPausedNote = true,
     this.onStop,
     this.attachment,
     this.focusNode,
@@ -42,6 +44,28 @@ class MixPromptInput extends StatefulWidget {
   /// submit does nothing and keeps the draft; the mic goes, and the stop
   /// key takes send's place whether or not there is a draft.
   final bool working;
+
+  /// The DJ is paused server-wide (the operator's kill switch): the field is
+  /// disabled with [pausedPlaceholder] as its hint, send and the mic are
+  /// disabled, and [pausedNote] sits under the composer as one quiet line.
+  /// A draft already in the field stays there, untouched, for when the DJ
+  /// is back.
+  final bool paused;
+
+  /// Draws [pausedNote] under the field while [paused]. An owner with a key
+  /// beside the composer (Home's and a conversation's +) passes false and
+  /// draws a [DjPausedNote] under the whole row, so the key stays level with
+  /// the field.
+  final bool showPausedNote;
+
+  /// The disabled field's placeholder while [paused].
+  static const String pausedPlaceholder = 'The DJ is taking a short break';
+
+  /// The one quiet line under the composer while [paused].
+  static const String pausedNote =
+      "New mixes and changes are paused for now. Everything you've made still plays.";
+
+  static const Key pausedNoteKey = Key('dj-paused-note');
 
   /// What the stop key does while [working]. Null draws no stop key: a turn
   /// that cannot be stopped (an album's).
@@ -193,6 +217,7 @@ class _MixPromptInputState extends State<MixPromptInput>
           !_resumed ||
           widget.busy ||
           widget.working ||
+          widget.paused ||
           // A fixed placeholder is the caller's, and does not rotate.
           widget.placeholder != null ||
           // A hint that changed under the level meter would be a second
@@ -301,7 +326,9 @@ class _MixPromptInputState extends State<MixPromptInput>
   /// Open the microphone, or close it and land what was said.
   Future<void> _toggleVoice() async {
     final voice = _voice;
-    if (voice == null || widget.busy || widget.working) return;
+    if (voice == null || widget.busy || widget.working || widget.paused) {
+      return;
+    }
     if (voice.state == VoiceComposerState.listening) {
       final transcript = await voice.stop();
       if (!mounted) return;
@@ -330,7 +357,8 @@ class _MixPromptInputState extends State<MixPromptInput>
     if (current == null ||
         current.busy ||
         widget.busy ||
-        widget.working) {
+        widget.working ||
+        widget.paused) {
       return;
     }
     _beginDictation();
@@ -453,8 +481,8 @@ class _MixPromptInputState extends State<MixPromptInput>
     // The composer locked while someone was talking — the owner took the
     // field away — or a turn went out from somewhere else (a pill, Remake).
     // The clip goes rather than the mic staying open with its key gone.
-    final quiet = widget.busy || widget.working;
-    if (quiet && !(oldWidget.busy || oldWidget.working)) {
+    final quiet = widget.busy || widget.working || widget.paused;
+    if (quiet && !(oldWidget.busy || oldWidget.working || oldWidget.paused)) {
       unawaited(_voice?.cancel() ?? _idle);
       _endDictation(restore: true);
     }
@@ -488,6 +516,7 @@ class _MixPromptInputState extends State<MixPromptInput>
     // is the next message, sent once this turn is over.
     if (!widget.busy &&
         !widget.working &&
+        !widget.paused &&
         widget.controller.text.trim().isNotEmpty) {
       widget.onSubmit();
     }
@@ -522,7 +551,8 @@ class _MixPromptInputState extends State<MixPromptInput>
     final transcribing = voice?.state == VoiceComposerState.transcribing;
     // The board shows the composer lit while the mic is open, even though the
     // field gives up its focus (and the keyboard) while the listener speaks.
-    final focused = _focus.hasFocus || listening;
+    final paused = widget.paused;
+    final focused = !paused && (_focus.hasFocus || listening);
     final failure = voice?.failure;
 
     final fieldStyle = tokens.body.copyWith(
@@ -533,6 +563,9 @@ class _MixPromptInputState extends State<MixPromptInput>
       key: const Key('prompt-field'),
       controller: widget.controller,
       focusNode: _focus,
+      // Disabled while the DJ is paused: no keyboard, no caret, and the
+      // draft (if any) kept exactly as it was.
+      enabled: !paused,
       // Read-only while the microphone is writing into it.
       readOnly: widget.busy || listening,
       scrollController: _fieldScroll,
@@ -549,12 +582,14 @@ class _MixPromptInputState extends State<MixPromptInput>
       cursorColor: tokens.plum,
       // The words heard live wait in muted ink while the better pass over
       // them is on its way, then land at full ink.
-      style: transcribing
+      style: transcribing || paused
           ? fieldStyle.copyWith(color: tokens.muted)
           : fieldStyle,
       decoration: InputDecoration(
         hint: Text(
-          listening
+          paused
+              ? MixPromptInput.pausedPlaceholder
+              : listening
               ? (transcribing ? 'Transcribing…' : 'Listening…')
               : widget.placeholder ?? _rotation[_example % _rotation.length],
           maxLines: 1,
@@ -620,13 +655,17 @@ class _MixPromptInputState extends State<MixPromptInput>
                             tooltip: listening
                                 ? 'Stop listening'
                                 : 'Speak your idea',
-                            onPressed: transcribing
+                            onPressed: transcribing || paused
                                 ? null
                                 : () => unawaited(_toggleVoice()),
                             child: Icon(
                               listening ? Icons.pause : Icons.mic_none,
                               size: 18,
-                              color: listening ? tokens.errInk : tokens.plum,
+                              color: listening
+                                  ? tokens.errInk
+                                  : paused
+                                  ? tokens.muted
+                                  : tokens.plum,
                             ),
                           ),
                         // Nothing to send, nothing drawn: the key arrives
@@ -637,11 +676,13 @@ class _MixPromptInputState extends State<MixPromptInput>
                           _iconKey(
                             key: const Key('start-session'),
                             tooltip: widget.sendLabel,
-                            onPressed: _submit,
+                            onPressed: paused ? null : _submit,
                             child: DecoratedBox(
                               key: const Key('send-surface'),
                               decoration: BoxDecoration(
-                                color: isDark
+                                color: paused
+                                    ? Colors.transparent
+                                    : isDark
                                     ? Colors.white.withValues(alpha: 0.12)
                                     : tokens.plum.withValues(alpha: 0.10),
                                 borderRadius: _sendRadius,
@@ -652,7 +693,7 @@ class _MixPromptInputState extends State<MixPromptInput>
                                   child: Icon(
                                     Icons.arrow_upward,
                                     size: 18,
-                                    color: tokens.plum,
+                                    color: paused ? tokens.muted : tokens.plum,
                                   ),
                                 ),
                               ),
@@ -686,7 +727,8 @@ class _MixPromptInputState extends State<MixPromptInput>
             bottom: 0,
             child: Opacity(
               key: const Key('prompt-stripe'),
-              opacity: focused ? 0 : 0.85,
+              // At rest while the DJ is paused: still the composer, quieter.
+              opacity: focused ? 0 : (paused ? 0.3 : 0.85),
               child: const PrismStripe(
                 horizontal: true,
                 width: double.infinity,
@@ -739,8 +781,13 @@ class _MixPromptInputState extends State<MixPromptInput>
               child: surface,
             ),
           ),
-          if (failure != null && widget.showVoiceInput)
+          if (failure != null && widget.showVoiceInput && !paused)
             _failureLine(tokens, voice!, failure),
+          if (paused && widget.showPausedNote)
+            const Padding(
+              padding: EdgeInsets.only(top: 8, left: 2, right: 2),
+              child: DjPausedNote(),
+            ),
         ],
       ),
     );
@@ -846,4 +893,25 @@ class _MixPromptInputState extends State<MixPromptInput>
       icon: Semantics(label: tooltip, child: child),
     ),
   );
+}
+
+/// [MixPromptInput.pausedNote]: one small muted line attached to a composer
+/// while the DJ is paused, in the voice of the app's intro lines rather than
+/// an error. No icon, no container, no alert colour.
+class DjPausedNote extends StatelessWidget {
+  const DjPausedNote({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Text(
+        MixPromptInput.pausedNote,
+        key: MixPromptInput.pausedNoteKey,
+        style: tokens.secondary.copyWith(color: tokens.muted),
+      ),
+    );
+  }
 }
