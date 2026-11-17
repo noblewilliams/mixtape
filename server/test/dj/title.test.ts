@@ -79,6 +79,36 @@ describe('generateSessionTitle', () => {
     expect(capturedTimeoutMs).toBe(5000)
   })
 
+  // Founder 2026-11-17: brief-only names were too short and flat ("Sunset
+  // Rhythms Dreaming"); they run 4 to 7 words and aim for creative.
+  it('asks for a 4 to 7 word creative name, with filler words banned and no em dashes in its rules', async () => {
+    let system = ''
+    let maxTokens: number | undefined
+    const complete: LlmComplete = async (opts) => {
+      system = opts.system
+      maxTokens = opts.maxTokens
+      return 'Fine'
+    }
+    await generateSessionTitle(complete, 'x', FALLBACK)
+    expect(system).toMatch(/4 to 7 words/)
+    expect(system).not.toMatch(/2-5 word/)
+    expect(system).toMatch(/Vibes/)
+    expect(system).not.toContain('—')
+    expect(maxTokens).toBeGreaterThanOrEqual(30)
+  })
+
+  it('treats a sentence-length answer (the model replying to the brief instead of titling it) as no title', async () => {
+    const complete: LlmComplete = async () => "I appreciate the request, but I don't have access to your playlist"
+    expect(await generateSessionTitle(complete, 'extend my running playlist', FALLBACK)).toBe(FALLBACK)
+    expect(await generateMixTitle(complete, 'x', [{ title: 'A', artist: 'B', album: null }], FALLBACK)).toBe(FALLBACK)
+  })
+
+  it('tells the model the brief is something to title, never something to answer', async () => {
+    let system = ''
+    await generateSessionTitle(async (opts) => ((system = opts.system), 'Fine'), 'x', FALLBACK)
+    expect(system).toMatch(/never answer/i)
+  })
+
   it('ignores maxTokens/system content — treats output as opaque display text', async () => {
     let capturedSystem: string | undefined
     const complete: LlmComplete = async (opts) => {

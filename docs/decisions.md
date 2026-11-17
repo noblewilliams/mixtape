@@ -26,6 +26,14 @@ forbids, so the founder chose (a) plus (b) and left that stance untouched:
 Code: `server/src/dj/title.ts` (`generateMixTitle`), `routes/sessions.ts`
 (`createMixTurn`). Amends 2026-08-30 session titles.
 
+Amended (2026-11-17, founder): the brief-only name (the fallback, and the
+name of a chat-only first turn) runs 4 to 7 words and reads as a small
+scene ("Rain Tapping Morse Code on the Window"), not 2 to 5 flat words. The
+prompt says the brief is material to title, never to answer, and an answer
+over 9 words is discarded as a reply rather than a name (one real brief,
+"extend my running playlist", drew "I appreciate the request, but ...").
+About 0.8 s per call measured.
+
 ## 2026-11-16 — Genre mixes stay full: genre-true suggestions, a refill floor (founder)
 
 Live G2 tests of "lofi afro house slow living great instrumentals" on the

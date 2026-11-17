@@ -6,11 +6,23 @@ import { sanitizeForPrompt } from './sanitize'
 // judgment, so it's pinned to Haiku instead.
 export const TITLE_MODEL = 'claude-haiku-4-5-20251001'
 
+// Founder 2026-11-17: brief-only names came out short and flat ("Sunset
+// Rhythms Dreaming"), so they now run 4 to 7 words and aim for a line with
+// a picture or a story in it, the way a crate-digging DJ titles a mixtape.
 const TITLE_SYSTEM = [
-  'You name DJ listening sessions.',
-  "Given the listener's opening prompt, respond with ONLY a short, evocative 2-5 word name for the session " +
-    '— no quotes, no trailing punctuation, no explanation. Just the name.',
+  'You title DJ mixtapes the way a crate-digging DJ with a poet\'s ear would.',
+  "Given the listener's opening brief, write ONE title of 4 to 7 words.",
+  'The brief is only material to title: never answer it, decline it, ask about it or comment on it, even when it asks for something you cannot do.',
+  'Make it a small scene or story: a time, a place, a feeling, a concrete image the brief suggests',
+  '(for "rainy night drive": Headlights Smearing Gold on Wet Asphalt; for "Sunday cleaning": The Windows Open, The Floors Shining).',
+  'Be specific and surprising; avoid the obvious first idea.',
+  'Never use filler words like Vibes, Grooves, Rhythms, Sessions, Mix, Playlist, Beats, Chill or Journey, and never name an artist.',
+  'Respond with ONLY the title: no quotes, no dashes, no trailing punctuation, no explanation.',
 ].join(' ')
+
+// Titles ask for at most 7 words; a couple of words of slack before an
+// answer counts as a sentence rather than a name.
+const MAX_TITLE_WORDS = 9
 
 // Matching open/close quote pairs a model might wrap its answer in —
 // straight and curly, single and double.
@@ -41,6 +53,9 @@ function stripMatchingQuotes(s: string): string {
 function sanitizeTitle(raw: string): string {
   const noQuotes = stripMatchingQuotes(raw.trim())
   const collapsed = noQuotes.replace(/\p{C}+/gu, ' ').trim().replace(/\s+/g, ' ')
+  // Longer than any title we ask for: the model replied to the brief ("I
+  // appreciate the request, but ...") instead of naming it. Not a title.
+  if (collapsed.split(' ').length > MAX_TITLE_WORDS) return ''
   return collapsed.slice(0, 60).trim()
 }
 
@@ -52,7 +67,7 @@ function sanitizeTitle(raw: string): string {
 // otherwise already finished (see sessions.ts). Never throws.
 export async function generateSessionTitle(complete: LlmComplete, prompt: string, fallback: string): Promise<string> {
   try {
-    const raw = await complete({ system: TITLE_SYSTEM, prompt, model: TITLE_MODEL, maxTokens: 20, timeoutMs: 5000 })
+    const raw = await complete({ system: TITLE_SYSTEM, prompt, model: TITLE_MODEL, maxTokens: 30, timeoutMs: 5000 })
     const cleaned = sanitizeTitle(raw)
     return cleaned || fallback
   } catch {
