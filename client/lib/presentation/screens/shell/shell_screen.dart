@@ -104,10 +104,13 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   /// Scroll has pushed the tab bar down to the active tab's size.
   bool _minimized = false;
 
-  /// The window is wide enough to dock to the side ([useSideRail]) and this
-  /// is not an iPad: an unfolded foldable iPhone, or an iPhone in landscape. The bottom dock —
+  /// The system's bar stands on a side edge ([useSideRail]) and this is not
+  /// an iPad: the closed iPhone Duo, or an iPhone in landscape. The bottom dock —
   /// native or Flutter — stands down and [SideRail] takes its place.
   bool _wide = false;
+
+  /// The native tabs stand in iOS 27.1's vertical bar ([verticalBarProvider]).
+  bool _verticalBar = false;
 
   /// The one-time "Where do you listen?" sheet is up. It sits on the root
   /// navigator (over the side rail), not on a tab, so the route observers do
@@ -281,7 +284,8 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     }
   }
 
-  /// The window crossed [kSideRailBreakpoint]: a fold, an unfold, a rotation.
+  /// The system's bar moved to or from a side edge: a fold, an unfold, a
+  /// rotation.
   void _setWide(bool wide) {
     if (wide == _wide) return;
     _wide = wide;
@@ -356,7 +360,7 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
         builder: (context) {
           final media = MediaQuery.of(context);
           // Docked to the side, nothing floats over the bottom edge.
-          if (_wide) return root;
+          if (_wide || _verticalBar) return root;
           return MediaQuery(
             data: media.copyWith(
               padding: media.padding.copyWith(
@@ -370,7 +374,7 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     );
   }
 
-  /// Beside the rail on a wide window; [child] untouched otherwise.
+  /// Beside the rail where it docks to the side; [child] untouched otherwise.
   Widget _wideLayout({
     required bool wide,
     required int currentIndex,
@@ -379,9 +383,8 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   }) {
     if (!wide) return child;
     final railExtent = MediaQuery.paddingOf(context).right + kSideRailExtent;
-    // Docked on the trailing edge, under the thumb of the hand holding an
-    // unfolded phone. A Stack rather than a Row: the column's gradient bleeds
-    // under the rail (see [GradientBleed]), so the rail has to paint after it.
+    // A Stack rather than a Row: the column's gradient bleeds under the rail
+    // (see [GradientBleed]), so the rail has to paint after it.
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -394,7 +397,11 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
           child: MediaQuery.removePadding(
             context: context,
             removeRight: true,
-            child: GradientBleed(right: railExtent, child: child),
+            child: GradientBleed(
+              left: GradientBleed.leftOf(context),
+              right: GradientBleed.rightOf(context) + railExtent,
+              child: child,
+            ),
           ),
         ),
         Positioned(
@@ -419,14 +426,25 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     final currentIndex = ref.watch(selectedTabProvider);
     // An iPad keeps the standard layout; only a wide iPhone docks to the side.
     final isPad = ref.watch(isPadProvider).value ?? false;
-    _setWide(!isPad && useSideRail(MediaQuery.sizeOf(context)));
-    final wide = _wide;
     // Until the platform has answered, no dock is drawn and nothing is sent:
     // on iOS 26 a Flutter dock drawn for that frame would flash beside the
     // real one.
     final availability = ref.watch(nativeDockAvailableProvider);
     final resolved = availability.hasValue;
     final nativeDock = availability.value ?? false;
+    // iOS 27.1 stands the native tabs in the vertical bar itself (the Duo's
+    // status column): no Flutter rail then, and no room kept for a bottom
+    // dock.
+    final verticalBar = nativeDock && ref.watch(verticalBarProvider);
+    _verticalBar = verticalBar;
+    // Otherwise the window's own insets (this page's were consumed by
+    // `PageInsets`) say whether a bar stands on a side edge.
+    _setWide(
+      !isPad &&
+          !verticalBar &&
+          useSideRail(MediaQueryData.fromView(View.of(context)).padding),
+    );
+    final wide = _wide;
     if (resolved && !_announced) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _announceIfResolved(),

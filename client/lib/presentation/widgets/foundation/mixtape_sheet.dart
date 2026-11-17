@@ -12,6 +12,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'page_insets.dart';
 
 /// The shared sheet's own metrics, colours and keys.
 abstract final class MixtapeSheet {
@@ -68,7 +69,8 @@ abstract final class MixtapeSheet {
 
   /// A sheet's heading, one step down the scale from the section word it used
   /// to be (smoke round three, note 4).
-  static TextStyle headingOf(BuildContext context) => tokensOf(context).smallTitle;
+  static TextStyle headingOf(BuildContext context) =>
+      tokensOf(context).smallTitle;
 
   /// The line under a heading: the 12 pt floor, in muted ink.
   static TextStyle subtitleOf(BuildContext context) {
@@ -163,7 +165,9 @@ class MixtapeSheetChrome extends StatelessWidget {
               ),
             ),
           ),
-        Flexible(child: child),
+        // A root-navigator sheet spans the whole screen, bar included; its
+        // content stops at the bar like a page does.
+        Flexible(child: PageInsets(top: false, child: child)),
       ],
     ),
   );

@@ -29,6 +29,7 @@ class LargeTitleScaffold extends StatefulWidget {
     this.pinTrailing = false,
     this.titleAccessory,
     this.accessoriesBelowTitle = false,
+    this.trailingBesideTitle = false,
     this.controller,
     this.onRefresh,
     this.contentPadding,
@@ -63,6 +64,13 @@ class LargeTitleScaffold extends StatefulWidget {
   /// segments). Other screens keep the side-by-side row and the large-text
   /// stack above the title.
   final bool accessoriesBelowTitle;
+
+  /// With [accessoriesBelowTitle], keeps [trailing] on the title's own row,
+  /// at its end, so only [titleAccessory] drops below: Mixes' ⋯ beside its
+  /// title, with the segmented control under it (2026-11-17, founder). A tab
+  /// whose buttons share the title row starts its title where every other
+  /// tab does, instead of under a pinned row of its own.
+  final bool trailingBesideTitle;
 
   final ScrollController? controller;
 
@@ -304,11 +312,54 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
       if (trailing != null && !pinned) trailing,
     ];
 
-    final Widget block = widget.accessoriesBelowTitle && accessories.isNotEmpty
+    final besideTitle =
+        widget.trailingBesideTitle &&
+        widget.accessoriesBelowTitle &&
+        trailing != null &&
+        !pinned;
+    final Widget block = besideTitle
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              title,
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minHeight: LargeTitleScaffold.titleRowHeight,
+                ),
+                child: Row(
+                  // As the plain title row does, so every tab's title sits
+                  // on the same line.
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(child: title),
+                    const SizedBox(width: LargeTitleScaffold.titleGap),
+                    trailing,
+                  ],
+                ),
+              ),
+              if (accessory != null) ...[
+                const SizedBox(height: LargeTitleScaffold.titleBottomGap),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: accessory,
+                ),
+              ],
+            ],
+          )
+        : widget.accessoriesBelowTitle && accessories.isNotEmpty
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // The plain title row's height and alignment, so the title
+              // sits on the same line as every other tab's.
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minHeight: LargeTitleScaffold.titleRowHeight,
+                ),
+                child: Align(
+                  alignment: AlignmentDirectional.bottomStart,
+                  child: title,
+                ),
+              ),
               const SizedBox(height: LargeTitleScaffold.titleBottomGap),
               Row(
                 children: [

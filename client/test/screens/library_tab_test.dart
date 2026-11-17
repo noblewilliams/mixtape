@@ -219,11 +219,14 @@ Future<void> _pump(
             return MediaQuery(
               // `dockInset` stands in for the shell, which hands a tab root
               // the dock's own height as bottom padding (task 2.2).
+              // The top stays at the test view's 0: these geometry tests
+              // predate the top floor a page gets where no status bar runs
+              // across the top (`PageInsets`, tested on its own).
               data: media.copyWith(
                 textScaler: TextScaler.linear(textScale),
                 padding: dockInset
-                    ? media.padding.copyWith(bottom: kFrostedDockHeight)
-                    : media.padding,
+                    ? media.padding.copyWith(top: 0, bottom: kFrostedDockHeight)
+                    : media.padding.copyWith(top: 0),
               ),
               child: const LibraryTab(),
             );

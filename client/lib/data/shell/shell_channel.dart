@@ -40,6 +40,7 @@ class ShellChannel {
   final _miniPlayerPlayPause = StreamController<void>.broadcast();
   final _miniPlayerNext = StreamController<void>.broadcast();
   final _reduceTransparencyChanged = StreamController<bool>.broadcast();
+  final _verticalBarChanged = StreamController<bool>.broadcast();
 
   bool _initialized = false;
   Future<bool>? _availability;
@@ -55,6 +56,10 @@ class ShellChannel {
   /// iOS's Reduce Transparency setting changed while the app was running.
   Stream<bool> get onReduceTransparencyChanged =>
       _reduceTransparencyChanged.stream;
+
+  /// iOS 27.1+: the system moved the native tabs into the vertical bar (the
+  /// iPhone Duo's status column) or back to the bottom.
+  Stream<bool> get onVerticalBarChanged => _verticalBarChanged.stream;
 
   /// Start listening for the dock's callbacks. Idempotent.
   void init() {
@@ -74,6 +79,9 @@ class ShellChannel {
         case 'reduceTransparencyChanged':
           final reduced = call.arguments;
           if (reduced is bool) _reduceTransparencyChanged.add(reduced);
+        case 'verticalBarChanged':
+          final vertical = call.arguments;
+          if (vertical is bool) _verticalBarChanged.add(vertical);
       }
       return null;
     });
@@ -110,6 +118,19 @@ class ShellChannel {
     if (!_isIOS) return false;
     try {
       return await _channel.invokeMethod<bool>('isAvailable') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Whether the native tabs stand in the system's vertical bar right now.
+  /// False off iOS, below iOS 27.1, and wherever iOS uses no vertical bar.
+  Future<bool> get isVerticalBar async {
+    if (!_isIOS) return false;
+    try {
+      return await _channel.invokeMethod<bool>('isVerticalBar') ?? false;
     } on PlatformException {
       return false;
     } on MissingPluginException {
@@ -157,5 +178,6 @@ class ShellChannel {
     _miniPlayerPlayPause.close();
     _miniPlayerNext.close();
     _reduceTransparencyChanged.close();
+    _verticalBarChanged.close();
   }
 }

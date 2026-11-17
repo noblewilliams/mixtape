@@ -33,6 +33,15 @@ import UIKit
   private var audioSessionChannel: FlutterMethodChannel?
   private var deviceChannel: FlutterMethodChannel?
 
+  /// The scene's window, once it connects: where the idiom is read from, so
+  /// the answer describes the scene the app renders in, not the hardware.
+  fileprivate weak var sceneWindow: UIWindow? {
+    didSet { answerPendingIdiomQueries() }
+  }
+
+  /// `isPad` asked before the scene connected: answered once it has.
+  private var pendingIdiomQueries: [FlutterResult] = []
+
   /// Where those copies live. Everything under it is a listener's whole
   /// export — the identity and payment files the parser refuses to read
   /// included — so it is emptied at launch, and each copy again as soon as
@@ -147,15 +156,25 @@ import UIKit
   /// docks to the side only on a wide iPhone (unfolded, or in landscape).
   private func registerDeviceChannel(with messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: "mixtape/device", binaryMessenger: messenger)
-    channel.setMethodCallHandler { call, result in
+    channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
       case "isPad":
-        result(UIDevice.current.userInterfaceIdiom == .pad)
+        guard let self else { return result(false) }
+        self.pendingIdiomQueries.append(result)
+        self.answerPendingIdiomQueries()
       default:
         result(FlutterMethodNotImplemented)
       }
     }
     deviceChannel = channel
+  }
+
+  private func answerPendingIdiomQueries() {
+    guard let window = sceneWindow else { return }
+    let isPad = window.traitCollection.userInterfaceIdiom == .pad
+    let queries = pendingIdiomQueries
+    pendingIdiomQueries = []
+    queries.forEach { $0(isPad) }
   }
 
   private func registerOpenArchiveChannel(with messenger: FlutterBinaryMessenger) {
@@ -308,6 +327,7 @@ private final class SceneHooks: NSObject, FlutterSceneLifeCycleDelegate {
 
   private func installDock(on scene: UIScene) {
     guard let window = (scene.delegate as? FlutterSceneDelegate)?.window else { return }
+    app?.sceneWindow = window
     app?.installDock(in: window, messenger: messenger)
   }
 }

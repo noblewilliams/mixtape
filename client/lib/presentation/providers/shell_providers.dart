@@ -87,6 +87,28 @@ final nativeDockAvailableProvider = FutureProvider<bool>(
   (ref) => ShellChannel.instance.isAvailable,
 );
 
+/// The native tabs stand in iOS 27.1's vertical bar (the iPhone Duo's
+/// status column): the system draws them there, so the shell draws no side
+/// rail and leaves no room for a bottom dock. Asked on start, then followed.
+class VerticalBarNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    final channel = ShellChannel.instance;
+    final subscription = channel.onVerticalBarChanged.listen((vertical) {
+      state = vertical;
+    });
+    ref.onDispose(subscription.cancel);
+    channel.isVerticalBar.then((vertical) {
+      if (ref.mounted) state = vertical;
+    });
+    return false;
+  }
+}
+
+final verticalBarProvider = NotifierProvider<VerticalBarNotifier, bool>(
+  VerticalBarNotifier.new,
+);
+
 /// True on an iPad, which keeps the standard bottom-dock layout at every
 /// width; the side rail is for a wide iPhone only (an unfolded foldable, or
 /// any iPhone in landscape). False off iOS and when the platform cannot say.

@@ -11,6 +11,8 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 
+import '../widgets/foundation/page_insets.dart';
+
 /// One radial tint in the background gradient.
 ///
 /// [center] is the CSS percentage pair mapped to an [Alignment] (0% → -1,
@@ -77,6 +79,12 @@ abstract final class MixtapeMetrics {
 
   // Page layout.
   static const double largeTitleTopPadding = 30;
+
+  /// The least top inset a page lays out against. A status bar normally
+  /// holds headers down (about 60 pt on a current iPhone); where the system
+  /// stands its bar on a side edge instead (iPhone Duo, iPhone landscape)
+  /// the top inset is 0 and headers would touch the edge. See [PageInsets].
+  static const double minTopInset = 24;
   static const double screenSidePadding = 20;
 }
 
@@ -733,6 +741,8 @@ abstract final class MixtapeTheme {
       canvasColor: Colors.transparent,
       dividerColor: t.hairline,
       extensions: [t],
+      // Pages stop at a system bar on a side edge (iPhone Duo, landscape).
+      pageTransitionsTheme: insetPageTransitionsTheme(),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,

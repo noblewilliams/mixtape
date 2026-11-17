@@ -79,9 +79,9 @@ describe('generateSessionTitle', () => {
     expect(capturedTimeoutMs).toBe(5000)
   })
 
-  // Founder 2026-11-17: names run 3 to 8 words, in sentence case, in the
+  // Founder 2026-11-17: names run 3 to 6 words, in sentence case, in the
   // voice of the music asked for rather than describing a scene.
-  it('asks for a 3 to 8 word name in sentence case and the voice of the genre, with filler words banned and no em dashes in its rules', async () => {
+  it('asks for a 3 to 6 word name in sentence case and the voice of the genre, with filler words banned and no em dashes in its rules', async () => {
     let system = ''
     let maxTokens: number | undefined
     const complete: LlmComplete = async (opts) => {
@@ -90,7 +90,7 @@ describe('generateSessionTitle', () => {
       return 'Fine'
     }
     await generateSessionTitle(complete, 'x', FALLBACK)
-    expect(system).toMatch(/3 to 8 words/)
+    expect(system).toMatch(/3 to 6 words/)
     expect(system).toMatch(/sentence case/i)
     expect(system).toMatch(/genre/i)
     expect(system).not.toMatch(/2-5 word/)
@@ -105,9 +105,9 @@ describe('generateSessionTitle', () => {
     expect(await generateMixTitle(complete, 'x', [{ title: 'A', artist: 'B', album: null }], FALLBACK)).toBe(FALLBACK)
   })
 
-  it('keeps an 8-word title and drops anything past 10 words as a reply', async () => {
+  it('keeps an 8-word title and drops anything past 8 words as a reply', async () => {
     expect(await generateSessionTitle(async () => 'one two three four five six seven eight', 'x', FALLBACK)).toBe('one two three four five six seven eight')
-    expect(await generateSessionTitle(async () => 'a b c d e f g h i j k', 'x', FALLBACK)).toBe(FALLBACK)
+    expect(await generateSessionTitle(async () => 'a b c d e f g h i', 'x', FALLBACK)).toBe(FALLBACK)
   })
 
   it('tells the model the brief is something to title, never something to answer', async () => {
@@ -183,10 +183,10 @@ describe('generateMixTitle', () => {
     expect(system).not.toContain('—')
   })
 
-  it('asks for 3 to 8 words in sentence case, in the voice of the genre', async () => {
+  it('asks for 3 to 6 words in sentence case, in the voice of the genre', async () => {
     const { seen, complete } = capture()
     await generateMixTitle(complete, 'x', SONGS, FALLBACK)
-    expect(seen.system).toMatch(/3 to 8 words/)
+    expect(seen.system).toMatch(/3 to 6 words/)
     expect(seen.system).toMatch(/sentence case/i)
     expect(seen.system).toMatch(/genre/i)
   })

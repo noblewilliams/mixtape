@@ -167,11 +167,18 @@ Future<void> _enterSelect(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Finder _toolbarText(String text) =>
-    find.descendant(of: find.byKey(MixSelect.toolbarKey), matching: find.text(text));
+Finder _toolbarText(String text) => find.descendant(
+  of: find.byKey(MixSelect.toolbarKey),
+  matching: find.text(text),
+);
 
 bool _enabled(WidgetTester tester, Key key) =>
-    tester.getSemantics(find.byKey(key)).flagsCollection.isEnabled.toBoolOrNull() == true;
+    tester
+        .getSemantics(find.byKey(key))
+        .flagsCollection
+        .isEnabled
+        .toBoolOrNull() ==
+    true;
 
 void main() {
   testWidgets('⋯ opens Select mixes; select mode draws circles on own rows, '
@@ -193,8 +200,11 @@ void main() {
     final container = _container(api);
     await _pump(tester, container);
 
-    expect(find.byType(SegmentedToggle).evaluate().isNotEmpty ||
-        find.byKey(const Key('active-mixes')).evaluate().isNotEmpty, isTrue);
+    expect(
+      find.byType(SegmentedToggle).evaluate().isNotEmpty ||
+          find.byKey(const Key('active-mixes')).evaluate().isNotEmpty,
+      isTrue,
+    );
     expect(find.byKey(MixSelect.moreKey), findsOneWidget);
     await tester.tap(find.byKey(MixSelect.moreKey));
     await tester.pumpAndSettle();
@@ -214,7 +224,21 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('active-mixes')), findsNothing);
+    // Hidden, but its row keeps its room so the list does not jump.
+    expect(find.byKey(const Key('active-mixes')).hitTestable(), findsNothing);
+    expect(
+      tester
+          .widget<Visibility>(
+            find
+                .ancestor(
+                  of: find.byKey(const Key('active-mixes')),
+                  matching: find.byType(Visibility),
+                )
+                .first,
+          )
+          .visible,
+      isFalse,
+    );
     expect(find.byKey(MixSelect.moreKey), findsNothing);
     expect(find.text(MixSelect.selectAllLabel), findsOneWidget);
     expect(find.byKey(MixSelect.doneKey), findsOneWidget);
@@ -265,14 +289,14 @@ void main() {
     expect(_enabled(tester, MixSelect.deleteKey), isTrue);
     expect(announced, [MixSelect.count(1), MixSelect.count(2)]);
     final row = tester.getSemantics(find.byKey(MixSelect.rowKey('b')));
-    expect(row.flagsCollection.isSelected.toBoolOrNull(),
-      isTrue);
+    expect(row.flagsCollection.isSelected.toBoolOrNull(), isTrue);
     expect(row.label, startsWith('Smooth Cruise Through Lagos, '));
     expect(
       tester
           .getSemantics(find.byKey(MixSelect.rowKey('a')))
           .flagsCollection
-          .isSelected.toBoolOrNull(),
+          .isSelected
+          .toBoolOrNull(),
       isFalse,
     );
     semantics.dispose();
@@ -322,7 +346,8 @@ void main() {
       tester
           .getSemantics(find.byKey(MixSelect.rowKey('c')))
           .flagsCollection
-          .isSelected.toBoolOrNull(),
+          .isSelected
+          .toBoolOrNull(),
       isTrue,
     );
   });
@@ -525,7 +550,12 @@ void main() {
 
   testWidgets('at the largest text the count drops out first and nothing '
       'overflows (S9)', (tester) async {
-    await _pump(tester, _container(_api()), textScale: 3.1, size: const Size(390, 844));
+    await _pump(
+      tester,
+      _container(_api()),
+      textScale: 3.1,
+      size: const Size(390, 844),
+    );
     await _enterSelect(tester);
     await tester.tap(find.byKey(MixSelect.rowKey('a')));
     await tester.pumpAndSettle();

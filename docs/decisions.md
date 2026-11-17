@@ -26,7 +26,8 @@ forbids, so the founder chose (a) plus (b) and left that stance untouched:
 Code: `server/src/dj/title.ts` (`generateMixTitle`), `routes/sessions.ts`
 (`createMixTurn`). Amends 2026-08-30 session titles.
 
-Amended (2026-11-17, founder): both namers write 3 to 8 words in sentence
+Amended (2026-11-17, founder): both namers write 3 to 6 words (4 is the
+sweet spot; about 5.7 measured, down from about 7) in sentence
 case, in the voice of the music asked for (its slang, places, rituals and
 attitude), and almost always as an imperative action rather than a
 description: "Move your legs faster than your doubt", not "Legs moving
@@ -39,7 +40,8 @@ reused them and the examples verbatim. Seen: "Brew your coffee while
 Johannesburg dreams", "Drown your phone before it rings". The song namer usually writes its own line from what the songs
 share and lifts a song or album title only when one of 3 or more words
 sums up the mix ("Sunset in Pretoria"). The brief is material to name,
-never to answer; an answer over 10 words is discarded as a reply (one real
+never to answer; an answer over 8 words (the 6-word limit plus two of
+slack) is discarded as a reply (one real
 brief, "extend my running playlist", drew "I appreciate the request, but
 ..."). The song-based call has no retry, so it adds at most 5 s after the
 picks (usually under 1 s); the parallel brief-only call keeps the SDK's one
@@ -2011,3 +2013,72 @@ write fails open so the pause can never take the DJ down by itself. To clear
 it by hand: `DELETE FROM dj_pauses;`. **Reopens if:** the probe holds a pause
 long after credits are back (a model or outage problem, not billing), or the
 tripping turn's failure needs to read as the notice too.
+
+## 2026-11-17 — Pages stop at a side-edge system bar (iPhone Duo)
+
+The iPhone Duo stands its status column on a side edge in three poses
+(closed outer screen in portrait and landscape, unfolded inner screen in
+landscape) and reports it as an 84 pt left or right safe-area inset that lasts
+the whole pose, with a top inset of 0. Every page route is now wrapped in
+`PageInsets` through the theme's `pageTransitionsTheme`
+(`InsetPageTransitionsBuilder`):
+
+- **Sides.** The page is padded by the left and right insets, which it then
+  removes from `MediaQuery`, so nested tab pages inset once. `GradientBleed`
+  now carries a left as well as a right reach, so the gradient keeps running
+  under the bar with no seam. Dialog and sheet barriers are not pages, so they
+  still dim the whole screen; sheet content clears the bar in
+  `MixtapeSheetChrome` (sides only). The native dock and mini-player are
+  pinned to the window's safe-area leading/trailing anchors instead of its
+  edges, so they centre under the content.
+- **Top.** With no status bar across the top, headers touched the edge
+  (founder, 2026-11-17: "way too close to the top"). A page lays out against
+  at least `MixtapeMetrics.minTopInset` (24 pt). Only the reported inset
+  changes; the page's background still starts at the edge. Real iPhones in
+  portrait report more than 24 pt, so they are unaffected.
+
+The same wrapper also keeps pages clear of the sensor housing on an iPhone in
+landscape. The native `isPad` answer now reads the scene window's trait
+collection instead of `UIDevice.current`, answered once the scene connects.
+Rejected: insetting the whole navigator in `MaterialApp.builder` (barriers
+then leave the bar's strip undimmed), and per-screen padding (51 call sites).
+**Reopens if:** a screen needs content under the bar on purpose, or Flutter
+grows a side-bar-aware safe area of its own.
+
+## 2026-11-17 — Every tab's title on one line; Mixes' ⋯ beside its title (founder)
+
+Mixes' ⋯ (and, in select mode, Select all and Done) now shares the large
+title's row (`LargeTitleScaffold.trailingBesideTitle`) instead of a pinned row
+of its own above the title, and the Active / Listen later control always takes
+the row under the title. This reverses the 2026-11-16 pinned row: a whole row
+for one 34 pt button pushed Mixes' title about 55 pt below the other tabs'
+and read as unbalanced (founder: "so much space, so much lack of balance").
+The control's row keeps its room while selecting, so the list never jumps.
+Every title row is now the same 46 pt, bottom-aligned, so Home, Mixes,
+Library and You put their titles on one line (Library's sat 12 pt higher).
+Pushed screens (Back + ⋯) keep their pinned row.
+
+## 2026-11-17 — On the iPhone Duo the tabs live in the system's vertical bar (founder)
+
+iOS 27.1 gives the iPhone Duo a "vertical bar": the column its status items
+stand in whenever a side edge holds them (closed, or open in landscape). The
+system places a `UITabBarController`'s own tab bar there, in its own Liquid
+Glass, at the bottom of the column under the time and Wi-Fi, as Apple's apps
+do. A bare `UITabBar` (our dock) is never placed there. So on iOS 27.1 and
+later the window's root is now a `ShellTabController`: four empty tab slots,
+with the one Flutter controller moved into whichever is selected (slots
+forward no appearance calls, so a move never pauses Flutter). Its tab bar
+shows only while the system uses the vertical bar (`verticalBarEdge`) and
+Flutter wants the tabs; everywhere else it stays hidden and the existing bare
+dock (bottom glass bar, mini-player, scroll-to-shrink) carries on unchanged.
+Flutter hears `verticalBarChanged` and then draws no rail and keeps no bottom
+padding. The system, not us, picks the bar's side (it follows the status
+column). The Flutter `SideRail` remains only as the fallback where no vertical
+bar exists (earlier iOS, other iPhones in landscape): always on the right,
+low (founder: "it should always be on the right"). This replaces the
+same-day width/inset rules and the left rail. Rejected: a hand-drawn native
+rail (close to the system look, but no system lens, compression or future
+behaviour). **Open:** the mini-player in vertical-bar mode still floats at
+the bottom (candidate: `UITabBarController.bottomAccessory`). **Reopens if:**
+a plugin needs Flutter at the window root, or tab moves disturb Flutter's
+lifecycle on device.

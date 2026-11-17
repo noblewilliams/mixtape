@@ -388,27 +388,40 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
                     controller: _scroll,
                     title: 'Mixes',
                     // The ⋯ (select mode's way in, board S1) and, while
-                    // selecting, Select all and Done: one pinned row whose room
-                    // stays, so the title never jumps.
-                    pinTrailing: true,
-                    leading: selecting ? selectAllButton() : null,
+                    // selecting, Select all and Done share the title's row
+                    // (2026-11-17, founder): Mixes' title then sits as high
+                    // as every other tab's. The control takes the row under
+                    // the title at every width.
                     trailing: selecting
-                        ? doneButton()
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              selectAllButton(),
+                              const SizedBox(
+                                width: LargeTitleScaffold.titleGap,
+                              ),
+                              doneButton(),
+                            ],
+                          )
                         : canSelect
                         ? moreButton()
                         : null,
-                    accessoriesBelowTitle:
-                        showControl &&
-                        !_MixesSegmentedControl.fitsBesideTitle(
-                          context,
-                          'Mixes',
-                        ),
-                    // Listen later has no select mode: the control hides.
-                    titleAccessory: showControl
-                        ? _MixesSegmentedControl(
-                            segment: _segment,
-                            onChanged: (value) =>
-                                setState(() => _segment = value),
+                    trailingBesideTitle: true,
+                    accessoriesBelowTitle: albumsOn,
+                    // Listen later has no select mode: the control hides
+                    // while selecting, but its row keeps its room so the
+                    // list never jumps.
+                    titleAccessory: albumsOn
+                        ? Visibility(
+                            visible: showControl,
+                            maintainSize: true,
+                            maintainAnimation: true,
+                            maintainState: true,
+                            child: _MixesSegmentedControl(
+                              segment: _segment,
+                              onChanged: (value) =>
+                                  setState(() => _segment = value),
+                            ),
                           )
                         : null,
                     onRefresh: _refresh,
@@ -726,54 +739,6 @@ class _MixesSegmentedControl extends StatelessWidget {
   static const double maxLabelScale = GlassSegmentedControl.maxTextScale;
 
   static const List<String> _labels = ['Active', 'Listen later'];
-
-  /// Whether the segments leave [title] its full width beside them; where
-  /// they would squeeze the large title, the control drops to its own row
-  /// below it, leading-aligned, as the board's `.large-title` wraps.
-  static bool fitsBesideTitle(BuildContext context, String title) {
-    final scaler = MediaQuery.textScalerOf(context);
-    final labelScaler = scaler.clamp(maxScaleFactor: maxLabelScale);
-    // Measured in the styles the Scaffold's text actually resolves to: a bare
-    // style misses the theme's iOS font family, which measured the control
-    // narrower than it draws and let "Mixes" wrap beside it (founder,
-    // 2026-11-03).
-    final inherited = Theme.of(context).textTheme.bodyMedium!;
-    final labelStyle = inherited.merge(
-      const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-    );
-    double measure(String text, TextStyle style, TextScaler s) {
-      final painter = TextPainter(
-        text: TextSpan(text: text, style: style),
-        textDirection: TextDirection.ltr,
-        textScaler: s,
-        maxLines: 1,
-      )..layout();
-      final width = painter.width;
-      painter.dispose();
-      return width;
-    }
-
-    final widest = _labels
-        .map((label) => measure(label, labelStyle, labelScaler))
-        .reduce((a, b) => a > b ? a : b)
-        .ceilToDouble();
-    // The wider of the two drawings: the native control's segments, or the
-    // house toggle's with its inset.
-    final native =
-        _labels.length * (widest + 2 * GlassSegmentedControl.segmentPadding);
-    final drawn =
-        _labels.length * (widest + 2 * SegmentedToggle.segmentPadding) +
-        2 * SegmentedToggle.chrome;
-    final control = native > drawn ? native : drawn;
-    final titleWidth = measure(
-      title,
-      inherited.merge(context.tokens.largeTitle),
-      scaler,
-    ).ceilToDouble();
-    final available =
-        MediaQuery.sizeOf(context).width - 2 * MixtapeMetrics.screenSidePadding;
-    return titleWidth + LargeTitleScaffold.titleGap + control <= available;
-  }
 
   @override
   Widget build(BuildContext context) => MediaQuery.withClampedTextScaling(

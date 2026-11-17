@@ -42,6 +42,7 @@ import '../../providers/dj_status_provider.dart';
 import '../../providers/mix_activity_provider.dart';
 import '../../providers/playlist_context_provider.dart';
 import '../mixes_screen.dart';
+import '../shell/shell_screen.dart';
 
 class MixesPreview extends StatefulWidget {
   const MixesPreview({super.key});
@@ -53,6 +54,12 @@ class MixesPreview extends StatefulWidget {
   static const bool djPaused = bool.fromEnvironment(
     'MIXTAPE_PREVIEW_DJ_PAUSED',
   );
+
+  /// `--dart-define=MIXTAPE_PREVIEW=shell`: the whole shell (dock or side
+  /// rail, every tab) on the same made-up data, so the shell's chrome can be
+  /// checked on any screen size without signing in.
+  static const bool shell =
+      String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell';
 
   /// A made-up share its sender stopped.
   static const String goneToken = 'PreviewShareStoppedXyz';
@@ -74,8 +81,7 @@ class _MixesPreviewState extends State<MixesPreview> {
       playlistContextApiProvider.overrideWithValue(_PreviewContextApi()),
       // `--dart-define=MIXTAPE_PREVIEW_DJ_PAUSED=true`: every composer in
       // its paused state (the DJ paused kill switch).
-      if (MixesPreview.djPaused)
-        djStatusProvider.overrideWith(_PausedDj.new),
+      if (MixesPreview.djPaused) djStatusProvider.overrideWith(_PausedDj.new),
     ],
   );
 
@@ -105,8 +111,10 @@ class _MixesPreviewState extends State<MixesPreview> {
   Widget build(BuildContext context) => UncontrolledProviderScope(
     container: _container,
     child: Navigator(
-      onGenerateRoute: (_) =>
-          MaterialPageRoute(builder: (_) => const MixesScreen()),
+      onGenerateRoute: (_) => MaterialPageRoute(
+        builder: (_) =>
+            MixesPreview.shell ? const ShellScreen() : const MixesScreen(),
+      ),
     ),
   );
 }
