@@ -31,6 +31,9 @@ import '../data/playback/playback_controller_test.dart'
     as playback
     show FakeApi, FakeBridge;
 import 'chat_screen_test.dart' show FakeDjApi, FakeBridge, TestAuthNotifier;
+import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
+import '../presentation/providers/playlist_context_provider_test.dart'
+    show FakeContextApi;
 
 class _AlbumApi extends FakeDjApi {
   Object? saveFails;
@@ -144,6 +147,8 @@ ProviderContainer _container(_AlbumApi api, {_AlbumBridge? bridge}) {
       mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
+      // Readable, nothing attached: an unreadable seed toasts.
+      playlistContextApiProvider.overrideWithValue(FakeContextApi()),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
       onboardingProvider.overrideWith(_Onboarding.new),
       playbackProvider.overrideWithValue(

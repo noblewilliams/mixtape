@@ -44,6 +44,7 @@ import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
+import 'package:mixtape/presentation/widgets/mix_handoff.dart';
 import 'package:mixtape/presentation/widgets/tape_strip.dart';
 import 'package:mixtape/presentation/widgets/version_marker.dart';
 
@@ -449,8 +450,12 @@ ProviderContainer _makeContainer(
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
-      if (inspiration != null)
-        playlistContextApiProvider.overrideWithValue(inspiration),
+      // Readable, nothing attached, unless a test says otherwise: an
+      // unreadable seed now toasts, and the toast would sit over the
+      // composer in every test.
+      playlistContextApiProvider.overrideWithValue(
+        inspiration ?? FakeContextApi(),
+      ),
       // The real controller reaches the player method channel and GET
       // /playback; the mix actions watch it to know whether THIS mix plays.
       playbackProvider.overrideWithValue(
@@ -585,24 +590,27 @@ void main() {
       expect(find.byKey(const Key('chat-not-personal')), findsNothing);
     });
 
-    testWidgets('tapping the strip away from Play opens the tape for this mix', (
+    testWidgets('the strip is one row: no cassette, title or count', (
       tester,
     ) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
-        session: _session(id: 'session-42'),
+        session: _session(id: 'session-42', title: 'Night bus notes'),
         messages: [],
         queue: [_track(0)],
       );
       await _pump(tester, _makeContainer(api), sessionId: 'session-42');
 
-      await tester.tap(find.byKey(TapeStrip.openKey));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester.widget<QueueScreen>(find.byType(QueueScreen)).sessionId,
-        'session-42',
-      );
+      final strip = find.byKey(TapeStrip.stripKey);
+      expect(strip, findsOneWidget);
+      // The header and the transcript's version marker already say these,
+      // and the marker opens the tape.
+      expect(find.byKey(TapeStrip.openKey), findsNothing);
+      expect(find.descendant(of: strip, matching: find.text('Night bus notes')), findsNothing);
+      expect(find.descendant(of: strip, matching: find.byType(CassetteTile)), findsNothing);
+      final play = tester.getRect(find.text(MixActions.playLabel));
+      final shape = tester.getRect(find.byKey(ChatScreen.shapeKey));
+      expect((play.center.dy - shape.center.dy).abs(), lessThan(4), reason: 'one row');
     });
 
     testWidgets('a corpus-mode session carries the Not personal yet subtitle', (
@@ -695,8 +703,8 @@ void main() {
           .widgetList<CassetteTile>(find.byType(CassetteTile))
           .map((tile) => tile.caseColor)
           .toSet();
-      // Two markers and the strip.
-      expect(find.byType(CassetteTile), findsNWidgets(3));
+      // The two markers; the strip draws no cassette.
+      expect(find.byType(CassetteTile), findsNWidgets(2));
       expect(colours, {const Color(0xFF617F9C)});
     });
 
@@ -1506,7 +1514,7 @@ void main() {
       expect(find.text('Start from a playlist'), findsNothing);
     });
 
-    testWidgets('a mix: the strip holds the tape, Play and Create playlist', (tester) async {
+    testWidgets('a mix: the strip holds Play and Create playlist', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 2, title: 'Smooth Cruise'),
@@ -1516,26 +1524,12 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       expect(find.byKey(TapeStrip.stripKey), findsOneWidget);
-      expect(find.text('Version 2 · 2 songs'), findsOneWidget);
       expect(find.byKey(const Key('chat-play-now')), findsOneWidget);
-      // The same pair as the tape's bar, on a row under the title; no arrow.
+      // The same pair as the tape's bar, with no arrow.
       expect(find.byKey(const Key('chat-create-playlist')), findsOneWidget);
       expect(find.byIcon(Icons.keyboard_arrow_down_rounded), findsNothing);
       expect(find.text('Play now'), findsNothing);
       expect(find.text('Play'), findsOneWidget);
-      expect(
-        tester.getRect(find.byKey(const Key('chat-play-now'))).top,
-        greaterThan(
-          tester
-              .getRect(
-                find.descendant(
-                  of: find.byKey(TapeStrip.stripKey),
-                  matching: find.text('Smooth Cruise'),
-                ),
-              )
-              .bottom,
-        ),
-      );
 
       // Once a mix exists Shape leaves the + menu.
       await tester.tap(find.byKey(const Key('chat-plus')));
@@ -1572,6 +1566,32 @@ void main() {
       }
       expect(player.sessionId, 's1');
       expect(player.version, 3);
+    });
+
+    testWidgets('with a tape, Shape sits in the strip and the actions are compact', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [_msg('m1', 'dj', 'here you go', queueVersion: 2)],
+        queue: [_track(0)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      // Above the strip's line, beside the actions, not over the composer.
+      expect(
+        find.descendant(of: find.byKey(TapeStrip.stripKey), matching: find.byKey(ChatScreen.shapeKey)),
+        findsOneWidget,
+      );
+      final strip = tester.getRect(find.byKey(TapeStrip.stripKey));
+      expect(tester.getRect(find.byKey(ChatScreen.shapeKey)).bottom, lessThan(strip.bottom));
+
+      // Play and Create playlist shrink-wrap side by side, 34 pt drawn.
+      final play = tester.getRect(find.text(MixActions.playLabel));
+      final create = tester.getRect(find.text(MixActions.createPlaylistLabel));
+      expect(create.left, greaterThan(play.right));
+      expect(create.right, lessThan(strip.right - 40), reason: 'the pair no longer fills the row');
     });
 
     testWidgets('the shape sits over the composer, changeable while the DJ works', (
@@ -1706,7 +1726,14 @@ void main() {
         chip.ink(tester.element(find.byType(InspirationChip))),
         MixtapeTokens.light.errInk,
       );
-      expect(find.text('At least 3 matched recordings are needed.'), findsOneWidget);
+      // Said once, as a toast, not as a line in the panel.
+      expect(
+        find.descendant(
+          of: find.byType(SnackBar),
+          matching: find.text('At least 3 matched recordings are needed.'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('a selection changed elsewhere refreshes and toasts, keeping the draft', (
@@ -2098,11 +2125,18 @@ void main() {
         };
       await _pump(tester, _makeContainer(api, inspiration: inspiration));
 
-      expect(find.text('Couldn’t read the current inspiration.'), findsOneWidget);
-      expect(find.byKey(const Key('inspiration-reload')), findsOneWidget);
+      // A toast with Reload, not a line in the panel.
+      final toast = find.byType(SnackBar);
+      expect(
+        find.descendant(of: toast, matching: find.text('Couldn’t read the current inspiration.')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('inspiration-status')), findsNothing);
       final before = reads;
 
-      await tester.tap(find.byKey(const Key('inspiration-reload')));
+      await tester.tap(
+        find.descendant(of: toast, matching: find.text(ChatScreen.reloadInspirationLabel)),
+      );
       await tester.pumpAndSettle();
 
       expect(reads, before + 1);
@@ -2115,8 +2149,33 @@ void main() {
       final inspiration = FakeContextApi()..read = () async => seed(1, id: 'Late nights');
       await _pump(tester, _makeContainer(api, inspiration: inspiration));
 
-      expect(find.byKey(const Key('inspiration-reload')), findsNothing);
-      expect(find.byKey(const Key('inspiration-status')), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('detaching the playlist takes its row away once there is a tape', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [_msg('m1', 'dj', 'here you go', queueVersion: 2)],
+        queue: [_track(0)],
+      );
+      final inspiration = FakeContextApi()..read = () async => seed(1, id: 'Late nights');
+      await _pump(tester, _makeContainer(api, inspiration: inspiration));
+      expect(find.byType(InspirationChip), findsOneWidget);
+
+      inspiration.write = () async => seed(2);
+      await tester.tap(find.byKey(InspirationChip.detachKey));
+      await tester.pumpAndSettle();
+
+      // Shape lives in the strip, so nothing is left between the line and
+      // the composer.
+      expect(find.byType(InspirationChip), findsNothing);
+      expect(
+        find.descendant(of: find.byKey(TapeStrip.stripKey), matching: find.byKey(ChatScreen.shapeKey)),
+        findsOneWidget,
+      );
     });
   });
 
@@ -2147,8 +2206,7 @@ void main() {
       );
 
       expect(tester.takeException(), isNull);
-      // The strip stacks: Play, then Create playlist, each a full row under
-      // the wrapped title.
+      // The strip stacks: Play, then Create playlist, each a full row.
       expect(find.byKey(TapeStrip.stripKey), findsOneWidget);
       final play = tester.getRect(find.byKey(const Key('chat-play-now')));
       final create = tester.getRect(
@@ -2156,13 +2214,6 @@ void main() {
       );
       expect(create.top, greaterThanOrEqualTo(play.bottom));
       expect(create.width, play.width);
-      final title = tester.getRect(
-        find.descendant(
-          of: find.byKey(TapeStrip.stripKey),
-          matching: find.text('Night bus notes'),
-        ),
-      );
-      expect(play.top, greaterThan(title.bottom));
       // The composer stays reachable above the keyboard-free bottom.
       expect(find.byKey(const Key('prompt-field')).hitTestable(), findsOneWidget);
     });

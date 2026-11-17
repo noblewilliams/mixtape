@@ -17,6 +17,7 @@ class LabelChip extends StatelessWidget {
     this.leading,
     this.hole = true,
     this.fill = false,
+    this.minHeight,
   });
 
   final String label;
@@ -30,6 +31,10 @@ class LabelChip extends StatelessWidget {
   /// actions' `.strip .acts .chip` / `.sticky .chip` (`flex: 1;
   /// min-height: 44px`). Otherwise it shrink-wraps its label at 36 pt.
   final bool fill;
+
+  /// The drawn floor when a caller wants another (the conversation strip's
+  /// compact pair); otherwise 36 pt, or 44 pt when it fills.
+  final double? minHeight;
 
   static const BorderRadius _radius = BorderRadius.only(
     topLeft: Radius.circular(MixtapeMetrics.tapeRadiusTop),
@@ -59,7 +64,9 @@ class LabelChip extends StatelessWidget {
     final chip = Container(
       // A floor, not a fixed height: the label must grow at 200% text.
       constraints: BoxConstraints(
-        minHeight: fill ? MixtapeMetrics.minTarget : MixtapeMetrics.chipHeight,
+        minHeight:
+            minHeight ??
+            (fill ? MixtapeMetrics.minTarget : MixtapeMetrics.chipHeight),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 11),
       decoration: BoxDecoration(

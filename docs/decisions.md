@@ -2102,3 +2102,22 @@ avoid repeating it. The + beside the composer (Home and conversations) is a
 is gone, since nothing dragged it. The space under the pills is the dock's
 reserved mini-player band and stays as it is. Widget tests see the row still
 (`test/flutter_test_config.dart`).
+
+## 2026-11-17 — A mix's panel: compact actions, Shape above the line (founder)
+
+In a conversation with a tape, Play and Create playlist no longer split the
+strip's row at 44 pt: they shrink-wrap their labels side by side at 34 pt
+drawn (`MixActions.compact`, still 44 pt to touch), and stack full width at
+large text as before. The mix's Shape moves up from the row over the
+composer into the strip, at its trailing edge, so everything
+about the tape sits above the strip's line and only the composer (with an
+attached playlist, when there is one) sits below it. Before the first tape
+there is no strip, and Shape keeps its place over the composer. The tape
+screen and shared mixes keep the full-width pair.
+
+The strip then collapses to that one row (founder, same day): no cassette,
+title or "Version n · N songs". The header already names the mix, the
+transcript's version marker just above already says the version and count,
+and that marker opens the tape, so the row only repeated them. The panel is
+about 55 pt shorter (`TapeStrip.collapsed`; the old layout stays for the
+handoff tests and any future host that has no marker).

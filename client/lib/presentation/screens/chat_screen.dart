@@ -50,7 +50,6 @@ import '../widgets/foundation/idea_pill.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/liquid_glass_surface.dart';
 import '../widgets/foundation/tape_button.dart';
-import '../widgets/foundation/text_action.dart';
 import '../widgets/home_panel.dart' show HomePanel;
 import '../widgets/keep_sheet.dart';
 import '../widgets/mix_energy_summary.dart';
@@ -126,6 +125,9 @@ class ChatScreen extends ConsumerStatefulWidget {
   static const String historyPillLabel = 'Add my listening history';
 
   /// The + beside the composer.
+  /// The inspiration toast's action when the seed could not be read.
+  static const String reloadInspirationLabel = 'Reload';
+
   static const Key plusKey = Key('chat-plus');
 
   /// The Shape control over a mix's composer.
@@ -538,12 +540,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
-  /// The line under the attachment row when the chip alone cannot say it.
+  /// What the chip alone cannot say, as a toast rather than a line in the
+  /// panel (founder, 2026-11-17). Null while it loads or when all is well.
   String? _inspirationStatus(SessionPlaylistContextState contextState) {
     if (contextState.error case ApiException(statusCode: 401)) {
       return 'Your session expired. Sign in again.';
     }
-    if (contextState.loading) return 'Loading inspiration…';
+    if (contextState.loading) return null;
     if (contextState.seed == null) {
       return 'Couldn’t read the current inspiration.';
     }
@@ -556,6 +559,37 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         'At least 3 matched recordings are needed.',
       _ => null,
     };
+  }
+
+  /// Toasts an inspiration problem once, as it appears — with Reload when
+  /// the seed could not be read, so the listener reads again rather than
+  /// writing blind.
+  void _toastInspiration(
+    SessionPlaylistContextState? before,
+    SessionPlaylistContextState now,
+  ) {
+    final message = _inspirationStatus(now);
+    if (message == null ||
+        (before != null && _inspirationStatus(before) == message)) {
+      return;
+    }
+    // An expired session needs signing in, not another read.
+    final error = now.error;
+    final expired = error is ApiException && error.statusCode == 401;
+    _snack(
+      message,
+      kind: FeedbackKind.error,
+      action: _canReloadInspiration(now) && !expired
+          ? SnackBarAction(
+              label: ChatScreen.reloadInspirationLabel,
+              onPressed: () => ref
+                  .read(
+                    sessionPlaylistContextProvider(widget.sessionId).notifier,
+                  )
+                  .refresh(),
+            )
+          : null,
+    );
   }
 
   /// The seed could not be read (or its last read failed): offer another
@@ -573,6 +607,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(
+      sessionPlaylistContextProvider(widget.sessionId),
+      _toastInspiration,
+    );
     final chatAsync = ref.watch(chatProvider(widget.sessionId));
     final inspiration = ref.watch(
       sessionPlaylistContextProvider(widget.sessionId),
@@ -1214,14 +1252,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final stopping = state?.stopping ?? false;
     final locked =
         state == null || inspiration.writing || (busy && !working && !stopping);
-    final status = _inspirationStatus(inspiration);
     final album = state?.kind == SessionKind.album;
     final attached = inspiration.seed?.playlistId != null;
-    final showStatus =
-        state != null &&
-        status != null &&
-        // Nothing attached and nothing wrong: nothing to say.
-        (attached || _canReloadInspiration(inspiration));
+    final stripShown = state != null && !album && state.queue.isNotEmpty;
 
     return ConstrainedBox(
       // At 200% text with the keyboard up the panel wants more room than the
@@ -1256,27 +1289,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (state != null && !album && state.queue.isNotEmpty)
-                    _strip(state),
+                  if (stripShown) _strip(state),
                   // The attached playlist at the panel's leading edge, over
                   // the +, with the line that says what is wrong with it, if
                   // anything, beside it; a mix's Shape at the trailing edge,
-                  // as Home's row has it.
-                  if (state != null && (attached || showStatus || !album))
+                  // as Home's row has it — until there is a tape, when Shape
+                  // moves up into the strip's title row.
+                  if (state != null && (attached || (!album && !stripShown)))
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Expanded(
-                          child: attached || showStatus
-                              ? _attachmentRow(
-                                  inspiration,
-                                  enabled: enabled,
-                                  attached: attached,
-                                  status: showStatus ? status : null,
-                                )
+                          child: attached
+                              ? _attachmentRow(inspiration, enabled: enabled)
                               : const SizedBox.shrink(),
                         ),
-                        if (!album)
+                        if (!album && !stripShown)
                           Padding(
                             padding: const EdgeInsets.only(left: 8, bottom: 4),
                             child: _shapeControl(state),
@@ -1368,12 +1396,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       songs: state.queue.length,
       caseColor: _tapeColour(state),
       onOpen: _openArrangement,
+      collapsed: true,
+      trailing: _shapeControl(state),
       reason: Padding(
         padding: const EdgeInsets.only(top: 4),
         child: MixPlayReason(keys: keys, queue: state.queue),
       ),
       actions: MixActions(
         keys: keys,
+        compact: true,
         queue: state.queue,
         isPlayingThisMix: isPlayingThisMix,
         onPlay: () => unawaited(playHere(state, state.queue)),
@@ -1449,62 +1480,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// What rides over the field: the attached playlist's tile, and beside it
   /// the line (and the Reload) for a selection that cannot be used as is.
+  /// The attached playlist's chip. What is wrong with it, if anything, goes
+  /// out as a toast instead of a line beside it.
   Widget _attachmentRow(
     SessionPlaylistContextState inspiration, {
     required bool enabled,
-    required bool attached,
-    required String? status,
-  }) {
-    final tokens = context.tokens;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          if (attached)
-            Flexible(child: _inspirationChip(inspiration, enabled: enabled)),
-          if (status != null)
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(left: attached ? 6 : 2, bottom: 2),
-                // A Wrap, not a Row: at 200% text the message and the
-                // action do not fit on one line, and each needs the whole
-                // width to wrap into.
-                child: Wrap(
-                  spacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      status,
-                      key: const Key('inspiration-status'),
-                      style: tokens.meta.copyWith(color: tokens.muted),
-                    ),
-                    // A selection that cannot be read is a READ failure: the
-                    // way out is another read, never a write against a
-                    // revision we do not have.
-                    if (_canReloadInspiration(inspiration))
-                      TextAction(
-                        key: const Key('inspiration-reload'),
-                        label: 'Reload inspiration',
-                        quiet: true,
-                        onPressed: inspiration.loading || inspiration.writing
-                            ? null
-                            : () => ref
-                                  .read(
-                                    sessionPlaylistContextProvider(
-                                      widget.sessionId,
-                                    ).notifier,
-                                  )
-                                  .refresh(),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: _inspirationChip(inspiration, enabled: enabled),
+    ),
+  );
 
   /// The attached playlist's chip, with Replace and Detach as locked.
   Widget _inspirationChip(

@@ -8,6 +8,9 @@
 ///
 /// At the largest text sizes the title may wrap to two lines and the actions
 /// stack, each full width (the actions do that themselves).
+///
+/// The conversation uses it [collapsed] (founder, 2026-11-17): just the
+/// actions and Shape on one row.
 library;
 
 import 'dart:math' as math;
@@ -27,6 +30,8 @@ class TapeStrip extends StatelessWidget {
     required this.onOpen,
     required this.actions,
     this.reason,
+    this.trailing,
+    this.collapsed = false,
   });
 
   final String title;
@@ -41,6 +46,16 @@ class TapeStrip extends StatelessWidget {
 
   /// Why Play cannot work, under the strip; may draw nothing.
   final Widget? reason;
+
+  /// At the title row's trailing edge, outside the tap that opens the tape:
+  /// the mix's Shape (founder, 2026-11-17), so everything about the tape sits
+  /// above the line and only the composer sits below it.
+  final Widget? trailing;
+
+  /// One row only: the actions, then [trailing] at the far edge. No
+  /// cassette, title or count, since the header and the transcript's version
+  /// marker already say them, and the marker opens the tape.
+  final bool collapsed;
 
   static const Key stripKey = Key('tape-strip');
   static const Key openKey = Key('tape-strip-open');
@@ -60,6 +75,31 @@ class TapeStrip extends StatelessWidget {
     final tokens = context.tokens;
     final stacked =
         MediaQuery.textScalerOf(context).scale(100) / 100 >= stackScale;
+    if (collapsed) {
+      return Container(
+        key: stripKey,
+        padding: const EdgeInsets.fromLTRB(2, 2, 4, 10),
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: tokens.hairline)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Align(alignment: Alignment.centerLeft, child: actions),
+                ),
+                if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+              ],
+            ),
+            ?reason,
+          ],
+        ),
+      );
+    }
     final details = Semantics(
       button: true,
       label: '$title, version $version, $songs song${songs == 1 ? '' : 's'}',
@@ -128,7 +168,16 @@ class TapeStrip extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            details,
+            if (trailing == null)
+              details
+            else
+              Row(
+                children: [
+                  Expanded(child: details),
+                  const SizedBox(width: 8),
+                  trailing!,
+                ],
+              ),
             // `.strip { gap: 10px }` plus `.acts { margin-top: 4px }`: the
             // 44 pt row above already carries about 4 pt below its text.
             const SizedBox(height: 10),

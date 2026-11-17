@@ -615,7 +615,15 @@ class MixActions extends ConsumerWidget {
     this.sharing = false,
     this.sendingToMusic = false,
     this.spacing = 8,
+    this.compact = false,
   });
+
+  /// The conversation's strip (founder, 2026-11-17): the pair shrink-wraps
+  /// its labels at [compactHeight] side by side instead of splitting the row
+  /// at 44 pt. Each keeps a 44 pt touch target.
+  final bool compact;
+
+  static const double compactHeight = 34;
 
   final MixHandoffKeys keys;
 
@@ -683,7 +691,8 @@ class MixActions extends ConsumerWidget {
     final create = LabelChip(
       key: keys.createPlaylist,
       label: createPlaylistLabel,
-      fill: true,
+      fill: !compact || stacked,
+      minHeight: compact && !stacked ? compactHeight : null,
       onPressed: live && !creatingPlaylist ? onCreatePlaylist : null,
     );
     return ListenableBuilder(
@@ -700,7 +709,8 @@ class MixActions extends ConsumerWidget {
           label: playing ? playingLabel : playLabel,
           semanticsHint: playing ? playingHint : null,
           playing: playing,
-          fill: true,
+          fill: !compact || stacked,
+          minHeight: compact && !stacked ? compactHeight : null,
           leading: Icon(Icons.play_arrow_rounded, size: 16, color: ink),
           onPressed: playing
               ? onOpenNowPlaying
@@ -715,6 +725,16 @@ class MixActions extends ConsumerWidget {
               SizedBox(height: spacing),
               create,
             ],
+          );
+        }
+        if (compact) {
+          // Side by side when they fit; where they don't (a narrow phone,
+          // a larger text size short of stacking), Create playlist wraps
+          // under Play instead of overflowing.
+          return OverflowBar(
+            spacing: spacing,
+            overflowSpacing: spacing,
+            children: [play, create],
           );
         }
         return Row(

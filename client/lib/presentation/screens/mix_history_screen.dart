@@ -40,6 +40,7 @@ import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
+import '../widgets/foundation/shimmer.dart';
 import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
@@ -81,6 +82,15 @@ class MixHistoryScreen extends ConsumerStatefulWidget {
   /// Opened from the tape screen: "Now" goes back to it rather than stacking
   /// a second copy on top.
   final bool fromTape;
+
+  /// The skeleton list while nothing has loaded yet, and the skeleton row
+  /// under the list while older versions load.
+  static const Key loaderKey = Key('mix-history-skeleton');
+  static const Key inlineLoaderKey = Key('mix-history-skeleton-more');
+
+  /// What VoiceOver hears while the skeleton shows.
+  static const String loadingLabel = 'Loading versions';
+
   @override
   ConsumerState<MixHistoryScreen> createState() => _MixHistoryScreenState();
 }
@@ -310,20 +320,23 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
               ),
             ),
           ),
-        if (_busy)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Semantics(
-              liveRegion: true,
-              child: Text(
-                _workingMessage,
-                style: tokens.secondary.copyWith(color: tokens.smoke),
-              ),
-            ),
+        // Older versions loading under a list already on screen: one more
+        // skeleton row in line, so the rows above it stay put.
+        if (_busy && _list != null)
+          const _VersionsSkeleton(
+            key: MixHistoryScreen.inlineLoaderKey,
+            sections: [1],
+            headers: false,
           ),
       ],
     );
   }
+
+  /// Nothing loaded yet: the list's own shape, shimmering — Now with one
+  /// row, Earlier with three (founder, 2026-11-17: no bare spinner).
+  Widget _firstLoad() => const SliverToBoxAdapter(
+    child: _VersionsSkeleton(key: MixHistoryScreen.loaderKey, sections: [1, 3]),
+  );
 
   Widget _doneState(BuildContext context) {
     final tokens = context.tokens;
@@ -354,7 +367,8 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
     ChatState? transcript,
   ) {
     final versions = [
-      for (final v in (_list?['versions'] as List?) ?? const []) v as Map<String, dynamic>,
+      for (final v in (_list?['versions'] as List?) ?? const [])
+        v as Map<String, dynamic>,
     ];
     final currentVersion = _list?['currentVersion'];
     final now = versions.where((v) => v['version'] == currentVersion).toList();
@@ -381,13 +395,14 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
       );
     }
 
+    // Also the frame before the first request goes out, so nothing flashes.
+    if (_list == null && _error == null) return [_firstLoad()];
+
     return [
       SliverToBoxAdapter(child: _status(context)),
       if (now.isNotEmpty) ...[
         const SliverToBoxAdapter(child: _SectionHeader('Now')),
-        SliverList.list(
-          children: [for (final v in now) row(v, isFirst: true)],
-        ),
+        SliverList.list(children: [for (final v in now) row(v, isFirst: true)]),
       ],
       if (earlier.isNotEmpty) ...[
         const SliverToBoxAdapter(child: _SectionHeader('Earlier')),
@@ -620,6 +635,86 @@ String? madeFromMessage(List<ChatMessage>? messages, int version) {
 }
 
 /// `.vh`: Now and Earlier.
+/// Placeholder version rows in the real rows' geometry: the tilted 64 pt
+/// cassette, a title bar and a meta bar, under section headers when
+/// [headers]. [sections] is how many rows each section holds. The app's
+/// [Shimmer] sweeps across the lot; the bars say nothing to a screen reader,
+/// and one live region announces the wait instead.
+class _VersionsSkeleton extends StatelessWidget {
+  const _VersionsSkeleton({
+    super.key,
+    required this.sections,
+    this.headers = true,
+  });
+
+  final List<int> sections;
+  final bool headers;
+
+  static const _titles = ['Now', 'Earlier'];
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final base = tokens.hairline;
+    Widget bar(double width, double height) => Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: base,
+        borderRadius: BorderRadius.circular(3),
+      ),
+    );
+    Widget row() => Padding(
+      padding: const EdgeInsets.symmetric(
+        vertical: FlushRow.defaultVerticalPadding,
+      ),
+      child: Row(
+        children: [
+          Transform.rotate(
+            angle: TapeHeader.tilt,
+            child: Opacity(
+              opacity: .16,
+              child: CassetteTile(
+                width: _VersionRow._tile,
+                caseColor: tokens.muted,
+              ),
+            ),
+          ),
+          const SizedBox(width: FlushRow.gap),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [bar(96, 15), const SizedBox(height: 8), bar(150, 11)],
+            ),
+          ),
+        ],
+      ),
+    );
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: MixHistoryScreen.loadingLabel,
+      child: ExcludeSemantics(
+        child: Shimmer(
+          base: base,
+          highlight: Color.lerp(base, tokens.muted, .35)!,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < sections.length; i++) ...[
+                if (headers) _SectionHeader(_titles[i % _titles.length]),
+                for (var r = 0; r < sections[i]; r++) row(),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader(this.label);
 

@@ -289,6 +289,9 @@ class _PreviewApi
     await _latency;
     final session = _sessions.firstWhere((s) => s.id == id);
     final at = DateTime.now().subtract(const Duration(minutes: 5));
+    // The first two stay as they were (a new mix, one the DJ is on); every
+    // other mix has a tape, so its strip, actions and Shape can be seen.
+    if (id != 'a0' && id != 'a1') return _withTape(session, at);
     return SessionDetail(
       session: _copyAt(session, queueVersion: 0),
       messages: [
@@ -310,6 +313,73 @@ class _PreviewApi
         ),
       ],
       queue: const [],
+    );
+  }
+
+  /// Two turns and a 15-song tape at version 2.
+  SessionDetail _withTape(DjSession session, DateTime at) {
+    const songs = [
+      ('Says', 'Nils Frahm'),
+      ('On The Nature Of Daylight', 'Max Richter'),
+      ('Infra 5', 'Max Richter'),
+      ('Ambre', 'Nils Frahm'),
+      ('November', 'Max Richter'),
+      ("Vladimir's Blues", 'Max Richter'),
+      ('Time', 'Hans Zimmer'),
+      ('Cornfield Chase', 'Hans Zimmer'),
+      ('Can You Hear the Music', 'Ludwig Göransson'),
+      ('Them', 'Nils Frahm'),
+      ('Spring 1', 'Max Richter'),
+      ('Re', 'Nils Frahm'),
+      ('Experience', 'Ludovico Einaudi'),
+      ('Crown', 'Kendrick Lamar'),
+      ('hey now', 'Kendrick Lamar'),
+    ];
+    return SessionDetail(
+      session: _copyAt(session, queueVersion: 2),
+      messages: [
+        DjMessage(
+          id: '${session.id}-1',
+          role: 'user',
+          content: 'focus music, no vocals',
+          createdAt: at,
+        ),
+        DjMessage(
+          id: '${session.id}-2',
+          role: 'dj',
+          content:
+              'Got your focus queue going: 13 instrumental tracks for steady '
+              'concentration, mostly ambient and neo-classical.',
+          createdAt: at,
+          queueVersion: 1,
+        ),
+        DjMessage(
+          id: '${session.id}-3',
+          role: 'user',
+          content: 'swap in some Kendrick',
+          createdAt: at,
+        ),
+        DjMessage(
+          id: '${session.id}-4',
+          role: 'dj',
+          content:
+              'Swapped in two Kendrick tracks at the end of the queue. Heads '
+              'up: those have vocals.',
+          createdAt: at,
+          queueVersion: 2,
+        ),
+      ],
+      queue: [
+        for (var i = 0; i < songs.length; i++)
+          QueueTrack(
+            position: i,
+            trackId: 'p${session.id}-$i',
+            appleId: '${1000 + i}',
+            title: songs[i].$1,
+            artist: songs[i].$2,
+            durationMs: 240000,
+          ),
+      ],
     );
   }
 
@@ -502,8 +572,39 @@ class _PreviewContextApi implements PlaylistContextApi {
     profile: null,
   );
 
+  /// Detaching takes it off that mix only, for this run.
+  final Map<String, PlaylistSeedState> _changed = {};
+
   @override
-  Future<PlaylistSeedState?> getSessionSeed(String sessionId) async => _seed;
+  Future<PlaylistSeedState?> getSessionSeed(String sessionId) async =>
+      _changed[sessionId] ?? _seed;
+
+  /// Only detach is wired: there is no library here to pick another from.
+  @override
+  Future<PlaylistSeedState> selectSeed(
+    String sessionId, {
+    required String? playlistId,
+    required int expectedRevision,
+    bool excludeSourceTracks = false,
+  }) async {
+    if (playlistId != null) {
+      throw UnimplementedError('picking is not wired in the Mixes preview');
+    }
+    return _changed[sessionId] = PlaylistSeedState(
+      playlistId: null,
+      revision: expectedRevision + 1,
+      excludeSourceTracks: false,
+      status: PlaylistSeedStatus.none,
+      name: null,
+      source: null,
+      fingerprint: null,
+      updatedAt: null,
+      entries: 0,
+      resolvedEntries: 0,
+      recordings: 0,
+      profile: null,
+    );
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart' show CupertinoDialogAction;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -70,12 +72,16 @@ class FakeHistory implements MixHistoryApi {
   int listCalls = 0;
   bool loseResponse = false, conflict = false, listFails = false;
 
+  /// Holds the list request open until completed.
+  Completer<void>? listGate;
+
   @override
   ApiClient get client => throw UnimplementedError();
 
   @override
   Future<Map<String, dynamic>> list(String id, {int? before}) async {
     listCalls++;
+    await listGate?.future;
     if (listFails && listCalls == 1) throw Exception('offline');
     return {
       'currentVersion': 3,
@@ -160,6 +166,24 @@ Future<void> open(WidgetTester tester, FakeHistory api) async {
 }
 
 void main() {
+  testWidgets('a shimmering skeleton, not a line of text, while versions load', (
+    tester,
+  ) async {
+    final api = FakeHistory()..listGate = Completer<void>();
+    await tester.pumpWidget(_app(api));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(MixHistoryScreen.loaderKey), findsOneWidget);
+    expect(find.text('Working…'), findsNothing);
+    expect(find.bySemanticsLabel('Loading versions'), findsOneWidget);
+
+    api.listGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(MixHistoryScreen.loaderKey), findsNothing);
+    expect(find.byKey(const ValueKey('mix-version-3')), findsOneWidget);
+  });
+
   testWidgets('Versions: Now and Earlier, readable times, made-from lines', (
     tester,
   ) async {

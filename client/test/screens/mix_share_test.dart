@@ -47,6 +47,9 @@ import '../data/playback/playback_controller_test.dart'
 import '../helpers/fake_clipboard_writer.dart';
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart' show FakeLinkOpener;
+import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
+import '../presentation/providers/playlist_context_provider_test.dart'
+    show FakeContextApi;
 
 const _url = 'https://miixtape.netlify.app/m/AbCdEfGhIjKlMnOpQrStUv';
 
@@ -177,6 +180,8 @@ class _Harness {
     final c = ProviderContainer(
       overrides: [
         djApiProvider.overrideWithValue(api),
+        // Readable, nothing attached: an unreadable seed toasts.
+        playlistContextApiProvider.overrideWithValue(FakeContextApi()),
         tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
         authProvider.overrideWith(_Auth.new),
         isAnonymousProvider.overrideWithValue(anonymous),
