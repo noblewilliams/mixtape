@@ -330,6 +330,70 @@ describe('session routes', () => {
       expect(row.title).toBe('Rainy Night Drive')
     })
 
+    // Decision 2026-11-16 (mix titles from the songs).
+    it("names a mix that came back with songs from those songs, after the turn picked them", async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const seeded = await seedLibrary(db, 'u1', 4)
+      await db.update(tracks).set({ album: 'Home Brewed' }).where(eq(tracks.id, seeded[0].id))
+      const { llm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'afro house', targetCount: 3 })] },
+        { text: 'here you go.' },
+      ])
+      const songPrompts: string[] = []
+      const titleComplete: LlmComplete = async (opts) => {
+        if (!opts.prompt.includes('Songs:')) return 'Brief Only Name'
+        songPrompts.push(opts.prompt)
+        return 'Home Brewed'
+      }
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'lofi afro house' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { id: string; title: string }; queue: Array<{ title: string }> }
+      expect(body.queue.length).toBeGreaterThan(0)
+      expect(body.session.title).toBe('Home Brewed')
+      expect(songPrompts).toHaveLength(1)
+      for (const q of body.queue) expect(songPrompts[0]).toContain(q.title)
+      if (body.queue.some((q) => q.title === seeded[0].title)) expect(songPrompts[0]).toContain('Home Brewed')
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, body.session.id))
+      expect(row.title).toBe('Home Brewed')
+    })
+
+    it('keeps the brief-only name when the song-based name fails', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedLibrary(db, 'u1', 4)
+      const { llm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'x', targetCount: 3 })] },
+        { text: 'here you go.' },
+      ])
+      const titleComplete: LlmComplete = async (opts) => {
+        if (opts.prompt.includes('Songs:')) throw new LlmError('boom', 500)
+        return 'Brief Only Name'
+      }
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+      const res = await postJson(app, '/sessions', { prompt: 'something' })
+      const body = (await res.json()) as { session: { title: string } }
+      expect(body.session.title).toBe('Brief Only Name')
+    })
+
+    it('a chat-only first turn makes no song-based title call', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'tell me more?' }])
+      let songCalls = 0
+      const titleComplete: LlmComplete = async (opts) => {
+        if (opts.prompt.includes('Songs:')) songCalls += 1
+        return 'Brief Only Name'
+      }
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+      const res = await postJson(app, '/sessions', { prompt: 'hmm' })
+      const body = (await res.json()) as { session: { title: string } }
+      expect(body.session.title).toBe('Brief Only Name')
+      expect(songCalls).toBe(0)
+    })
+
     it('with no titleComplete wired at all, behaves exactly as before (truncated-prompt title)', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')

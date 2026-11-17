@@ -1,4 +1,5 @@
 import type { LlmComplete } from './llm'
+import { sanitizeForPrompt } from './sanitize'
 
 // Naming call, not curation — deliberately NOT DJ_MODEL (see llm.ts): a
 // session title costs fractions of a cent and doesn't need Sonnet's
@@ -54,6 +55,59 @@ export async function generateSessionTitle(complete: LlmComplete, prompt: string
     const raw = await complete({ system: TITLE_SYSTEM, prompt, model: TITLE_MODEL, maxTokens: 20, timeoutMs: 5000 })
     const cleaned = sanitizeTitle(raw)
     return cleaned || fallback
+  } catch {
+    return fallback
+  }
+}
+
+// Decision 2026-11-16 (mix titles from the songs): once a mix has songs, it
+// is named from them, not from the brief alone (the brief-only name came out
+// as "Sunset Rhythms ..." five times for one brief). The model may lift a
+// song or album title, or a fragment of one, or name the places, imagery and
+// references the songs share. Never a lyric line: the lyrics stance
+// (decision 2026-08-29, derive-don't-display) forbids displaying lyric text,
+// and a song's own title is catalogue metadata, not a lyric.
+const MIX_TITLE_SYSTEM = [
+  'You name a DJ mix after the songs in it, the way a crate-digging DJ would title a mixtape.',
+  'You get the listener\'s brief and the songs (title, artist, album).',
+  'Choose exactly ONE source: a single song title or album title from the list, or a striking fragment of one;',
+  'or your own short phrase for the places, imagery, story or references these songs share.',
+  'Never join two titles together or tack words onto a lifted title; a lifted title stands alone.',
+  'Lift a title only when it sums up the whole mix, not just one song; otherwise write your own phrase.',
+  'Prefer the specific and surprising over the generic. Never use filler words like Vibes, Grooves, Rhythms,',
+  'Sessions, Mix, Playlist, Beats or Chill, and never name an artist.',
+  'Never quote or paraphrase a lyric line from any song; only titles of songs and albums may be used verbatim.',
+  'Drop "(feat. ...)", "- Single", "- EP" and remaster tags from anything you lift.',
+  'Respond with ONLY the name, 1 to 5 words: no quotes, no dashes, no trailing punctuation, no explanation.',
+].join(' ')
+
+// How many songs the namer sees: enough for a full first mix, bounded so a
+// long edited mix can't bloat a fast call.
+const MIX_TITLE_MAX_SONGS = 25
+
+export type MixTitleSong = { title: string; artist: string; album: string | null }
+
+function mixTitlePrompt(prompt: string, songs: MixTitleSong[]): string {
+  const lines = songs.slice(0, MIX_TITLE_MAX_SONGS).map((s) => {
+    const album = s.album ? ` [${sanitizeForPrompt(s.album)}]` : ''
+    return `- ${sanitizeForPrompt(s.title)} / ${sanitizeForPrompt(s.artist)}${album}`
+  })
+  return `Brief: ${sanitizeForPrompt(prompt, 300)}\n\nSongs:\n${lines.join('\n')}`
+}
+
+// Same contract as generateSessionTitle: never throws, never empty, bounded
+// to 5s on the fast model. No songs means nothing to name from: the caller's
+// fallback (the brief-only title) stands and no call is made.
+export async function generateMixTitle(
+  complete: LlmComplete,
+  prompt: string,
+  songs: MixTitleSong[],
+  fallback: string,
+): Promise<string> {
+  if (songs.length === 0) return fallback
+  try {
+    const raw = await complete({ system: MIX_TITLE_SYSTEM, prompt: mixTitlePrompt(prompt, songs), model: TITLE_MODEL, maxTokens: 20, timeoutMs: 5000 })
+    return sanitizeTitle(raw) || fallback
   } catch {
     return fallback
   }

@@ -3,7 +3,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { mixHistoryRoutes } from './mix-history'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../db/schema'
@@ -14,7 +14,7 @@ import { runAlbumTurn, AlbumTurnError, type AlbumDeps, type AlbumTurnResult } fr
 import { AlbumStoreError, choosePick, goBack, readPickState, type AlbumPickState } from '../albums/store'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
 import { intentSchema, queueOpsSchema } from '../dj/contracts'
-import { generateSessionTitle } from '../dj/title'
+import { generateMixTitle, generateSessionTitle, type MixTitleSong } from '../dj/title'
 import { isUsableName } from '../auth/profile-name'
 import { createOrReuseShare, hasActiveShare, revokeShares } from '../shares/store'
 import { sanitizeTitleText } from '../dj/sanitize'
@@ -293,6 +293,17 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
     return c.json({ session: sessionRow, messages, ...albumTurnBody(turnResult.value) })
   }
 
+  // The mix's songs in queue order with their albums (the queue view carries
+  // no album), for the song-based title.
+  async function mixTitleSongs(queue: Array<{ trackId: string; title: string; artist: string }>): Promise<MixTitleSong[]> {
+    const rows = await db
+      .select({ id: tracks.id, album: tracks.album })
+      .from(tracks)
+      .where(inArray(tracks.id, queue.map((q) => q.trackId)))
+    const albums = new Map(rows.map((r) => [r.id, r.album]))
+    return queue.map((q) => ({ title: q.title, artist: q.artist, album: albums.get(q.trackId) ?? null }))
+  }
+
   // The mix creation turn once its persist-first row exists: the DJ turn and
   // the title job side by side, the closing UPDATE, the messages read, and
   // the body. The JSON path and the stream (turn-stream.ts) both answer with
@@ -348,7 +359,17 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
         : turnResult.reason instanceof DjError
           ? turnResult.reason.sessionTitle
           : undefined
-    const title = renamedTitle ?? (titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle)
+    const briefTitle = titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle
+
+    // Decision 2026-11-16 (mix titles from the songs): a first turn that
+    // came back with songs is named from them, so this call waits for the
+    // picks (about 0.6 s on the fast model, 5 s cap). The brief-only title
+    // above is its fallback; a rename or a chat-only turn skips it.
+    const title =
+      renamedTitle ??
+      (turnResult.status === 'fulfilled' && turnResult.value.queue.length > 0 && deps.titleComplete
+        ? await generateMixTitle(deps.titleComplete, prompt, await mixTitleSongs(turnResult.value.queue), briefTitle)
+        : briefTitle)
 
     // A text-only first turn never touches dj_sessions itself (no queue
     // write to ride $onUpdate's automatic bump) — bumped explicitly, same as
