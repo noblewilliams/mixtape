@@ -2121,3 +2121,47 @@ transcript's version marker just above already says the version and count,
 and that marker opens the tape, so the row only repeated them. The panel is
 about 55 pt shorter (`TapeStrip.collapsed`; the old layout stays for the
 handoff tests and any future host that has no marker).
+
+## 2026-11-20 — Over-the-air updates with Shorebird; the update note closes the app (founder)
+
+Dart-only changes to the iOS app ship as Shorebird code-push patches, so they
+no longer wait on TestFlight and App Store review. Releases are built with
+`shorebird release ios` (`scripts/build-ios-release.sh`, pinned to Flutter
+3.50.0, which Shorebird 1.6.144 supports) and patched with
+`scripts/patch-ios.sh` from a clean worktree of committed HEAD. Anything
+native (Info.plist, entitlements, pods, Swift, a new plugin) still needs a
+store build. `shorebird.yaml` sets `auto_update: false`: the app owns every
+check (`AppUpdateNotifier`: after launch, on each return to the foreground,
+every 30 minutes) so the UI always knows where a patch stands.
+
+A downloaded patch only runs from the next process start, and iOS cannot
+relaunch an app. The founder chose close-on-tap over apply-on-next-open. The
+update shows as a tiny note at the end of the Home and You title rows (board
+`docs/mockups/2026-11-20-ota-update-states.html`, approval
+`docs/mockups/approved/2026-11-20-ota-update-states.md`): "Update available"
+with a still record dot once a patch is waiting. The tap shows "Updating" with
+three level bars for 1.8 s, then calls `exit(0)`. The start that boots the
+patch the app recorded plays "Updating" for 1.4 s, then "Updated" with a check
+for 2.5 s, then the note fades; the app is usable underneath throughout. The
+timeline lives in `AppUpdateNotifier`, so Home and You stay in step and a
+listener on another tab simply misses it. A listener who never taps gets the
+patch, and "Updated", on their next cold start. The recorded patch is read
+and cleared once per launch, so a rolled-back patch never shows "Updated".
+Signed-out listeners in first run have no title row, so they get no note.
+
+The founder turned down the first build, a full-screen updating screen with a
+tilted cassette plus a "Restart" toast, as too big, and then asked for a
+loader other than tape ("there's too much tape on the screen"). The level bars
+are the one exception to the house rule that loading is the turning reel.
+
+Found on the way: the hidden native mini-player kept answering taps for its
+play and next buttons (its `hitTest` override ran before UIKit's hidden
+check), which swallowed any toast action or row tap at that spot above the
+tab bar; `MiniPlayerView.hitTest` now returns nothing while the pill is
+hidden.
+
+Accepted risk: Apple's guidance discourages apps quitting themselves. The
+app only closes on an explicit tap, with the reason given to VoiceOver.
+**Reopens if:** App Review rejects it (fall back to apply-on-next-open: drop
+the tap and keep "Updated" on the next start), or Shorebird ships an in-process
+restart that loads a patch.

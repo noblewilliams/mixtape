@@ -42,6 +42,7 @@ import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/icon_tile.dart';
 import '../../widgets/foundation/inset_group.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
+import '../../widgets/update_status_note.dart';
 import '../../widgets/foundation/mixtape_menu.dart';
 import '../../widgets/suggestion_settings.dart';
 import '../account_screen.dart';
@@ -104,6 +105,9 @@ class YouTab extends ConsumerWidget {
         backgroundColor: Colors.transparent,
         body: LargeTitleScaffold(
           title: 'You',
+          // Over-the-air updates: "Update available" at the title's end.
+          titleNote: UpdateStatusNote.inTitle,
+          titleNoteWidth: UpdateStatusNote.widestWidth,
           slivers: [
             SliverPadding(
               padding: const EdgeInsets.only(bottom: defaultBottomInset),

@@ -15,6 +15,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/updates/app_updater.dart';
+import 'package:mixtape/presentation/providers/app_update_provider.dart';
 import 'package:mixtape/presentation/widgets/foundation/liquid_glass_surface.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
@@ -44,6 +46,8 @@ import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
 
 import '../helpers/fake_listening_api.dart';
 import '../data/playback/playback_controller_test.dart' show FakeApi, song;
+import '../presentation/providers/app_update_provider_test.dart'
+    show FakeAppUpdater;
 
 TestDefaultBinaryMessenger get messenger =>
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -518,6 +522,29 @@ void main() {
 
       expect(find.byType(FrostedDock), findsOneWidget);
       expect(callsTo('show'), isNotEmpty);
+    });
+
+    iosWidgets('the native dock stays up while the app closes for an update '
+        '(update note board, 2026-11-20)', (tester) async {
+      final updater = FakeAppUpdater(waiting: 3);
+      final container = shellContainer(
+        extra: [
+          appUpdaterProvider.overrideWithValue(updater),
+          pendingPatchStoreProvider.overrideWithValue(
+            InMemoryPendingPatchStore(),
+          ),
+        ],
+      );
+      await pumpShell(tester, container);
+      await container.read(appUpdateProvider.notifier).check();
+      await tester.pumpAndSettle();
+      calls.clear();
+
+      unawaited(container.read(appUpdateProvider.notifier).restart());
+      await tester.pump();
+      expect(callsTo('hide'), isEmpty);
+      await tester.pump(updateCloseDelay);
+      expect(updater.closes, 1);
     });
 
     iosWidgets('a select toolbar holding the bottom takes the dock\'s place '

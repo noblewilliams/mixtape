@@ -20,6 +20,7 @@ import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/segmented_toggle.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
+import '../widgets/update_status_note.dart';
 import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/energy_journey.dart';
@@ -748,6 +749,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
               removeBottom: true,
               child: LargeTitleScaffold(
                 title: 'Home',
+                // Over-the-air updates: "Update available" at the title's end.
+                titleNote: UpdateStatusNote.inTitle,
+                titleNoteWidth: UpdateStatusNote.widestWidth,
                 // No pull-to-refresh on Home: there is no list to refresh.
                 slivers: [
                   SliverLayoutBuilder(

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/config.dart';
 import 'data/api/api_client.dart' show ApiClient;
 import 'data/api/reachability.dart' show probeInternet;
+import 'presentation/providers/app_update_provider.dart';
 import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/dj_status_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
@@ -13,6 +14,7 @@ import 'presentation/providers/pending_share_save_provider.dart';
 import 'presentation/theme/mixtape_theme.dart';
 import 'presentation/screens/debug/foundation_gallery_screen.dart';
 import 'presentation/screens/debug/mixes_preview.dart';
+import 'presentation/screens/debug/update_preview.dart';
 import 'presentation/screens/first_run/first_run_flow.dart';
 import 'presentation/screens/first_run/name_screen.dart';
 import 'presentation/screens/shell/shell_screen.dart';
@@ -40,7 +42,12 @@ void main() {
     shareBaseUrl: AppConfig.shareBaseUrl,
   );
   if (problem != null) throw StateError(problem);
-  runApp(const ProviderScope(child: MixtapeApp()));
+  runApp(
+    ProviderScope(
+      overrides: kDebugMode ? updatePreviewOverrides(debugPreview) : const [],
+      child: const MixtapeApp(),
+    ),
+  );
 }
 
 /// What the root shows. The first-run flow covers no session at all and an
@@ -74,6 +81,8 @@ class MixtapeApp extends ConsumerWidget {
     // Whether the DJ is paused (the operator's kill switch): read now, on
     // every return to the foreground and on a timer, whatever the root.
     ref.listen(djStatusMonitorProvider, (_, _) {});
+    // Over-the-air updates: looked for from launch, whatever the root.
+    ref.listen(appUpdateMonitorProvider, (_, _) {});
     final root = switch (auth) {
       AuthStatus.unknown => _Root.unknown,
       AuthStatus.noSession => _Root.firstRun,
@@ -106,11 +115,27 @@ class MixtapeApp extends ConsumerWidget {
         // Custom routes and floating overlays may sit outside a Scaffold.
         // Replace MaterialApp's fallback style instead of inheriting it.
         style: Theme.of(context).textTheme.bodyMedium!,
-        child: GradientBackground(child: child!),
+        // While the app closes for an update (1.8 s after the tap on
+        // "Update available"), taps elsewhere are ignored.
+        child: Consumer(
+          builder: (context, ref, child) => AbsorbPointer(
+            absorbing: ref.watch(
+              appUpdateProvider.select(
+                (s) => s.phase == AppUpdatePhase.closing,
+              ),
+            ),
+            child: child,
+          ),
+          child: GradientBackground(child: child!),
+        ),
       ),
       home: showFoundationGallery && kDebugMode
           ? const FoundationGalleryScreen()
-          : (debugPreview == 'mixes' || debugPreview == 'shell') && kDebugMode
+          : (debugPreview == 'mixes' ||
+                    debugPreview == 'shell' ||
+                    debugPreview == 'shell-update' ||
+                    debugPreview == 'shell-update-applied') &&
+                kDebugMode
           ? const MixesPreview()
           : switch (root) {
               _Root.unknown => const Scaffold(

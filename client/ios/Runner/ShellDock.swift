@@ -607,7 +607,13 @@ final class MiniPlayerView: UIView {
 
   /// A 36 pt glyph still has to answer a 44 pt touch, so the pill widens the
   /// two buttons' hit areas rather than their frames.
+  ///
+  /// Only while the pill is on screen: UIKit's own hidden/alpha check lives
+  /// in `super.hitTest`, so without this guard a hidden pill kept taking taps
+  /// for its two buttons out of the Flutter content under it (2026-11-20,
+  /// found when a toast's action at that spot did nothing).
   override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard !isHidden, alpha > 0.01, isUserInteractionEnabled else { return nil }
     for button in [nextButton, playPauseButton] {
       let target = button.convert(button.bounds, to: self)
         .insetBy(dx: -4, dy: -4)

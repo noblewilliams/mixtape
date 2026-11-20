@@ -53,6 +53,7 @@ dependencies:
   google_sign_in: ^7.2.0
   record: ^7.2.0
   app_links: ^7.2.2
+  shorebird_code_push: ^2.0.7
 
 dev_dependencies:
   flutter_test:
@@ -80,6 +81,7 @@ flutter:
     - assets/illustrations/
     # First-run backgrounds, 780 x 1688 (2x). No 3x variants yet.
     - assets/first_run/
+    - shorebird.yaml
 
   # To add assets to your application, add an assets section, like this:
   # assets:

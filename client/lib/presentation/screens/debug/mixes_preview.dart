@@ -35,6 +35,7 @@ import '../../../data/dj/dj_api.dart';
 import '../../../data/dj/dj_models.dart';
 import '../../../data/playlists/playlist_context_api.dart';
 import '../../../data/playlists/playlist_context_models.dart';
+import '../../providers/app_update_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/capabilities_provider.dart';
 import '../../providers/dj_providers.dart';
@@ -43,6 +44,7 @@ import '../../providers/mix_activity_provider.dart';
 import '../../providers/playlist_context_provider.dart';
 import '../mixes_screen.dart';
 import '../shell/shell_screen.dart';
+import 'update_preview.dart';
 
 class MixesPreview extends StatefulWidget {
   const MixesPreview({super.key});
@@ -59,7 +61,9 @@ class MixesPreview extends StatefulWidget {
   /// rail, every tab) on the same made-up data, so the shell's chrome can be
   /// checked on any screen size without signing in.
   static const bool shell =
-      String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell';
+      String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell' ||
+      String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell-update' ||
+      String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell-update-applied';
 
   /// A made-up share its sender stopped.
   static const String goneToken = 'PreviewShareStoppedXyz';
@@ -82,12 +86,18 @@ class _MixesPreviewState extends State<MixesPreview> {
       // `--dart-define=MIXTAPE_PREVIEW_DJ_PAUSED=true`: every composer in
       // its paused state (the DJ paused kill switch).
       if (MixesPreview.djPaused) djStatusProvider.overrideWith(_PausedDj.new),
+      // `shell-update` / `shell-update-applied`: the update note on Home and
+      // You (the root's update state is the app's, not this container's).
+      ...updatePreviewOverrides(
+        const String.fromEnvironment('MIXTAPE_PREVIEW'),
+      ),
     ],
   );
 
   @override
   void initState() {
     super.initState();
+    _container.listen(appUpdateMonitorProvider, (_, _) {});
     // After the first frame: a provider must not change while the tree is
     // being built.
     WidgetsBinding.instance.addPostFrameCallback((_) {

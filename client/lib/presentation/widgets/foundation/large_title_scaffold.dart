@@ -30,10 +30,15 @@ class LargeTitleScaffold extends StatefulWidget {
     this.titleAccessory,
     this.accessoriesBelowTitle = false,
     this.trailingBesideTitle = false,
+    this.titleNote,
+    this.titleNoteWidth,
     this.controller,
     this.onRefresh,
     this.contentPadding,
-  });
+  }) : assert(
+         (titleNote == null) == (titleNoteWidth == null),
+         'A title note needs its widest width',
+       );
 
   final String title;
 
@@ -71,6 +76,18 @@ class LargeTitleScaffold extends StatefulWidget {
   /// whose buttons share the title row starts its title where every other
   /// tab does, instead of under a pinned row of its own.
   final bool trailingBesideTitle;
+
+  /// A tiny status at the end of the title's own line (the update note,
+  /// `docs/mockups/approved/2026-11-20-ota-update-states.md`). Beside the
+  /// title when it fits at its widest ([titleNoteWidth]); otherwise on its own
+  /// line under the title, end-aligned, so it never wraps or truncates. Given
+  /// the title's line height beside it, or null on its own line. For a host
+  /// with no trailing cluster or accessory (Home, You).
+  final Widget Function(BuildContext context, double? lineHeight)? titleNote;
+
+  /// The note's widest width at the current text size, whatever it shows
+  /// now, so the choice of line never flips between states.
+  final double Function(BuildContext context)? titleNoteWidth;
 
   final ScrollController? controller;
 
@@ -284,6 +301,65 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
     );
   }
 
+  /// The title with [LargeTitleScaffold.titleNote] at its end, or under it
+  /// when the two don't fit on one line.
+  Widget _titleWithNote(BuildContext context, Widget title) {
+    final tokens = context.tokens;
+    final scaler = MediaQuery.textScalerOf(context);
+    final noteWidth = widget.titleNoteWidth!(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: widget.title, style: tokens.largeTitle),
+          textScaler: scaler,
+          textDirection: Directionality.of(context),
+          maxLines: 1,
+        )..layout();
+        final titleWidth = painter.width;
+        final lineHeight = painter.height;
+        painter.dispose();
+        final fits =
+            titleWidth + LargeTitleScaffold.titleGap + noteWidth <=
+            constraints.maxWidth;
+        if (!fits) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minHeight: LargeTitleScaffold.titleRowHeight,
+                ),
+                child: Align(
+                  alignment: AlignmentDirectional.bottomStart,
+                  child: title,
+                ),
+              ),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: widget.titleNote!(context, null),
+              ),
+            ],
+          );
+        }
+        return ConstrainedBox(
+          constraints: const BoxConstraints(
+            minHeight: LargeTitleScaffold.titleRowHeight,
+          ),
+          child: Row(
+            // The plain title row's alignment, so the title sits on the same
+            // line as every other tab's; the note centres itself on it.
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(child: title),
+              const SizedBox(width: LargeTitleScaffold.titleGap),
+              widget.titleNote!(context, lineHeight),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _titleBlock(BuildContext context, double topInset, EdgeInsets side) {
     final tokens = context.tokens;
     final accessory = widget.titleAccessory;
@@ -317,7 +393,9 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
         widget.accessoriesBelowTitle &&
         trailing != null &&
         !pinned;
-    final Widget block = besideTitle
+    final Widget block = widget.titleNote != null
+        ? _titleWithNote(context, title)
+        : besideTitle
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

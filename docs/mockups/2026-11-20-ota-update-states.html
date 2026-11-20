@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Update indicator</title>
+<style>
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1320px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:56px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+p{max-width:860px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:860px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:860px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.rec,.was,.gone{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;margin-left:6px;vertical-align:1px}
+.rec{color:#a7d8b4;border:1px solid rgba(112,151,120,.6)}
+.was{color:#cfc5d1;border:1px solid #5a5560}
+.gone{color:#e7a3b2;border:1px solid rgba(201,104,127,.6)}
+.frames{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+figure{margin:0}
+figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+figcaption b{color:#fff;font-weight:600;display:block}
+.meas{font:12px ui-monospace,Menlo,monospace;color:#a79fab;margin-top:4px;display:block}
+
+/* ---------- Product language (shell r3, reel loader) ---------- */
+.phone{width:390px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+.phone.tall{height:844px}
+.slice{width:390px;max-width:100%;border-radius:26px;padding:8px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.slice.narrow{width:336px}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --ok:#4f7a5a;
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet));
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);--group:rgba(255,255,255,.62);
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.slice .screen{border-radius:20px;padding-bottom:14px}
+.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);--ok:#9fcba9;
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);--group:rgba(255,255,255,.07);
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.large .screen{--scale:1.5}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif}
+.titlerow{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:30px 20px 8px;min-height:72px}
+.titlerow h1{margin:0;font:800 28px/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.large .titlerow h1{font-size:42px}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px;padding:0 54px 260px}
+
+/* ---------- The indicator ---------- */
+.upd{position:relative;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 2px;color:var(--plum);font:600 12px/1 -apple-system,sans-serif;white-space:nowrap;transition:opacity .32s ease-out}
+.upd .lbl{display:inline-block}
+.large .upd{font-size:18px;height:30px}
+.upd .g{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none}
+.large .upd .g{width:20px;height:20px}
+.upd.done .lbl,.upd.done .g{color:var(--ok)}
+/* ready: the record dot (transport glyph), same plum as the Mixes ready dot */
+.rec-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.large .rec-dot{width:10px;height:10px}
+/* loader A: three level bars, the voice meter's shape in plain ink */
+.bars{display:flex;align-items:center;gap:2px;height:12px}
+.bars i{width:2.5px;border-radius:1.25px;background:currentColor;height:6px}
+.bars i:nth-child(1){height:7px}.bars i:nth-child(2){height:12px}.bars i:nth-child(3){height:9px}
+.large .bars{height:17px;gap:3px}.large .bars i{width:3.5px}
+.large .bars i:nth-child(1){height:10px}.large .bars i:nth-child(2){height:17px}.large .bars i:nth-child(3){height:13px}
+.moving .bars i{animation:lvl .9s ease-in-out infinite}
+.moving .bars i:nth-child(2){animation-delay:-.3s}.moving .bars i:nth-child(3){animation-delay:-.6s}
+@keyframes lvl{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+.still .bars i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.bars i,.ring{animation:none!important}}
+/* loader B: thin ring filling over the timed step */
+.ring{width:12px;height:12px;border-radius:50%;background:conic-gradient(currentColor var(--p,35%),rgba(127,120,130,.25) 0);-webkit-mask:radial-gradient(circle,transparent 3.6px,#000 4px);mask:radial-gradient(circle,transparent 3.6px,#000 4px)}
+.check{width:12px;height:12px}
+.upd.fade{opacity:.35}
+/* 44 pt target, drawn as a dashed band for the board only */
+.upd.target::before{content:"";position:absolute;left:-8px;right:-8px;top:-9px;bottom:-9px;border:1px dashed rgba(201,104,127,.75);border-radius:8px}
+.capsule{height:28px;padding:0 10px 0 6px;border-radius:14px;background:rgba(255,255,255,.55);box-shadow:0 0 0 .5px rgba(50,44,50,.18),0 4px 12px rgba(23,22,26,.12)}
+.dark .capsule{background:rgba(255,255,255,.12)}
+
+/* ---------- Dock and Home panel (as shipped) ---------- */
+.bpanel{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 120px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px)}
+.seg{display:inline-flex;border-radius:16px;background:rgba(127,120,130,.15);padding:2px;font:500 13px -apple-system,sans-serif}
+.seg span{padding:5px 14px;border-radius:14px}.seg span:first-child{background:var(--plum);color:#fff}
+.dark .seg span:first-child{color:#1c1a1e}
+.composer{position:relative;margin-top:10px;min-height:48px;padding:12px 16px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;font-size:15px}
+.composer::after{content:"";position:absolute;left:18px;right:18px;bottom:-1px;height:2px;border-radius:2px;background:var(--prism)}
+.composer .ph{color:var(--muted)}
+.dock{position:absolute;left:24px;right:24px;bottom:26px;height:62px;border-radius:31px;background:rgba(255,255,255,.72);box-shadow:0 6px 20px rgba(23,22,26,.12);display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font:600 11px -apple-system,sans-serif;color:#1c1a1e}
+.dark .dock{background:rgba(80,70,120,.55);color:#f2eef1}
+.dock span.on{background:rgba(127,120,130,.16);margin:5px;border-radius:26px;padding:16px 0}
+
+/* ---------- You tab rows ---------- */
+.group{margin:8px 20px 0;border-radius:22px;background:var(--group)}
+.urow{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:56px;padding:8px 16px;position:relative}
+.urow+.urow::before{content:"";position:absolute;left:58px;right:0;top:0;height:1px;background:var(--hair)}
+.ico{width:30px;height:30px;border-radius:8px}
+.urow strong{font-weight:500;font-size:16px;display:block}
+.urow small{display:block;color:var(--muted);font-size:12.5px}
+.avatar{width:46px;height:46px;border-radius:50%;background:conic-gradient(var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet),var(--pink));display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}
+.chev{color:var(--muted);font-size:18px}
+
+/* ---------- Full-screen takeover (being removed) ---------- */
+.takeover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 40px 120px}
+.takeover .t{font:600 16px -apple-system,sans-serif;margin-top:30px}
+.takeover .h{color:var(--smoke);font-size:12.5px;margin-top:4px}
+
+/* ---------- Reel artwork (CassettePainter, icon crop) ---------- */
+.reel{display:block;flex:none;overflow:hidden;border-radius:23%;box-shadow:0 1px 3px rgba(23,22,26,.3)}
+.reel svg,.tile svg{display:block;width:100%;height:100%}
+.spin .hubL{animation:hub 1.05s linear infinite}
+.spin .hubR{animation:hub 1.05s linear infinite reverse}
+.hubL{transform-origin:61px 61px}.hubR{transform-origin:139px 61px}
+@keyframes hub{to{transform:rotate(360deg)}}
+.still .hubL,.still .hubR{animation:none!important}
+@media (prefers-reduced-motion:reduce){.hubL,.hubR{animation:none!important}}
+.tilt{transform:rotate(-4deg)}
+
+/* timeline */
+.timeline{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;max-width:1000px;margin-top:14px}
+.step{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:14px}
+.step b{color:#fff;font-size:13px}
+.step .swatch,.cell .swatch{margin:12px 0 8px;padding:14px 12px;border-radius:12px;display:flex;justify-content:space-between;align-items:center}
+.swatch.l{background:linear-gradient(180deg,#f9f7f4,#f1eeee)}
+.swatch.d{background:linear-gradient(180deg,#050507,#0c0b12)}
+.swatch h1{margin:0;font:800 22px -apple-system,sans-serif;letter-spacing:-.02em}
+.swatch.l h1{color:#1c1a1e}.swatch.d h1{color:#f2eef1}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;max-width:1000px;margin-top:14px}
+.cell{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:16px}
+.fix{max-width:860px;display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+</style>
+<body>
+<main>
+<p class="kicker">Mobile · iOS · board for approval · revision 2 · 2026-11-20</p>
+<h1>Over-the-air updates: a tiny note in the title row</h1>
+<p class="note">Founder notes so far: the updating screen shouldn't take over the whole screen, so a small status sits on the same row as the "Home" title and on the "You" title row (revision 1). Revision 2: the ready word is <b>"Update available"</b>, and the loader is no longer a cassette, because there's too much tape on screen already. The update itself works as before (decision 2026-11-20): a patch downloads quietly, runs from the next start, and tapping the note closes the app so it starts on the new version.</p>
+
+<div class="callout"><strong>What you are approving</strong>
+<ul class="tight">
+<li><b>The note:</b> one 12 pt semibold line plus a 14 pt glyph pinned to the right edge of the Home and You title rows. 26 pt drawn, 44 pt to touch. No capsule, no glow, no prism, no tape.</li>
+<li><b>Glyphs:</b> a 7 pt record dot when an update is available (the transport "record" mark, the same plum as the Mixes ready dot) · <b>loader A</b>, three level bars while updating · a check when it's done.</li>
+<li><b>Four states:</b> nothing (almost always) · <i>Update available</i> · <i>Updating</i> after the tap (1.8 s, then the app closes) · on the next start <i>Updating</i> for 1.4 s, then <i>Updated</i> in green for 2.5 s, then a 320 ms fade.</li>
+<li><b>Removed:</b> the full-screen updating screen and the "A new version of mixtape is ready · Restart" toast.</li>
+<li>Covers light and dark, 200% text, 320 and 390 pt widths, reduced motion. Mixes and Library are unchanged.</li>
+</ul>
+<strong>A departure to note:</strong> the house rule says loading is "the cassette with its hubs turning". This note is the one exception, at your request; everywhere else keeps the reel.<br>
+<strong>No visual change, but part of this work:</strong> the hidden mini-player was taking taps above the tab bar. Fixed, see the last section.</div>
+
+<h2>Before and after</h2>
+<div class="frames">
+  <figure><div class="phone tall"><div class="screen" id="before"></div></div>
+    <figcaption><b>First build <span class="gone">Removed</span></b>Full screen over everything; the native glass panel and dock showed through it.</figcaption></figure>
+  <figure><div class="phone tall"><div class="screen" id="afterHome"></div></div>
+    <figcaption><b>Proposed · Home, update available <span class="rec">Recommended</span></b>On the title's line, right-aligned to the 20 pt margin, centred on the title's height. The dot is still: nothing happens until the listener taps.<span class="meas">label 12 pt/600 plum · gap 6 pt · glyph box 14 pt (dot 7 pt) · drawn 26 pt · target 44 pt tall</span></figcaption></figure>
+  <figure><div class="phone tall dark"><div class="screen" id="afterYou"></div></div>
+    <figcaption><b>Proposed · You, update available (dark)</b>The same note in the You title row, so it can be found from the profile too. One source of state keeps the two in step.</figcaption></figure>
+</div>
+
+<h2>The states, in order</h2>
+<p class="note">The glyph stays pinned to the right edge, so the moving part never shifts between states; only the word's width changes, and the title never moves.</p>
+<div class="timeline" id="timeline"></div>
+
+<h2>Tap to update</h2>
+<div class="frames">
+  <figure><div class="slice"><div class="screen" id="ready"></div></div>
+    <figcaption><b>1 · Update available</b>Accessible name: <i>"Update available. Double-tap to restart mixtape and finish the update."</i> The dashed band is the 44 pt touch area (board only).</figcaption></figure>
+  <figure><div class="slice"><div class="screen moving" id="closing"></div></div>
+    <figcaption><b>2 · After the tap</b>"Updating" with the bars moving for 1.8 s, then mixtape closes and the listener opens it again. Taps elsewhere are ignored while it closes. VoiceOver hears: <i>"Updating. mixtape will close. Open it again to finish."</i></figcaption></figure>
+</div>
+
+<h2>The next start</h2>
+<div class="frames">
+  <figure><div class="slice"><div class="screen moving" id="applying"></div></div>
+    <figcaption><b>3 · Opening on the new version</b>"Updating" for 1.4 s while the app comes up. The app is usable underneath straight away: no cover, no wait.</figcaption></figure>
+  <figure><div class="slice"><div class="screen" id="updated"></div></div>
+    <figcaption><b>4 · Updated</b>Bars become a check, word and glyph turn green, with a 280 ms fade-through (out, then in). Word, glyph and colour all change, so it never relies on colour. Announced once: <i>"mixtape updated."</i></figcaption></figure>
+  <figure><div class="slice"><div class="screen" id="gone"></div></div>
+    <figcaption><b>5 · Gone</b>After 2.5 s it fades out over 320 ms (ease-out). If the listener starts on another tab, it plays on Home or You if they get there within those 4 s; otherwise it's skipped.</figcaption></figure>
+</div>
+
+<h2>Dark mode, large text, narrow width, reduced motion</h2>
+<div class="frames">
+  <figure><div class="slice dark"><div class="screen" id="darkUpdated"></div></div>
+    <figcaption><b>Dark · Updated</b>Plum ink becomes the light text colour; green becomes the dark-mode okay green.</figcaption></figure>
+  <figure><div class="slice large"><div class="screen moving" id="large"></div></div>
+    <figcaption><b>200% text, 390 pt</b>The line grows to 18 pt and the glyph box to 20 pt. Still on the title's row.</figcaption></figure>
+  <figure><div class="slice large narrow"><div class="screen" id="largeNarrow"></div></div>
+    <figcaption><b>200% text, 320 pt</b>"Update available" no longer fits beside the title, so the note drops to its own line under it, right-aligned. It never wraps or truncates.</figcaption></figure>
+  <figure><div class="slice narrow"><div class="screen" id="narrow"></div></div>
+    <figcaption><b>320 pt, standard text</b>Fits beside "Home" with room to spare.</figcaption></figure>
+  <figure><div class="slice dark"><div class="screen still" id="rm"></div></div>
+    <figcaption><b>Reduced motion</b>The bars hold still at their resting heights; the word "Updating" carries it. The fade-out becomes an instant hide.</figcaption></figure>
+</div>
+
+<h2>Loader: considered</h2>
+<div class="cmp">
+  <div class="cell"><b>A · Three level bars</b><span class="rec">Recommended</span>
+    <div class="swatch l" style="margin-top:12px"><h1>Home</h1><span class="screen moving" style="background:none;height:auto;display:inline-flex;border-radius:0" id="optA"></span></div>
+    <p class="note">Music's own "something is playing" shape, borrowed from the composer's voice meter (five prism bars there; three plain bars here, so the prism stays the composer's). Tiny, readable at 14 pt, and not tape.</p></div>
+  <div class="cell"><b>B · Thin ring filling</b>
+    <div class="swatch l" style="margin-top:12px"><h1>Home</h1><span class="screen" style="background:none;height:auto;display:inline-flex;border-radius:0" id="optB"></span></div>
+    <p class="note">A 12 pt ring that fills over the 1.8 s and 1.4 s steps. <b>Why it lost:</b> it reads as a generic system spinner, and the house rules ban spinners.</p></div>
+  <div class="cell"><b>C · Reel (revision 1)</b>
+    <p class="note">The app icon's turning hub. <b>Why it lost:</b> founder, revision 2: there's already too much tape on screen.</p></div>
+</div>
+
+<h2>Fixed, nothing to see: the hidden mini-player's taps</h2>
+<div class="fix">
+  <div class="cell"><b>Before</b><p class="note">With nothing playing, the mini-player is hidden, but its play and next buttons still answered taps in a 44 pt patch just above the tab bar on the right. Anything Flutter drew there, a toast's action or the right side of a list row, did nothing.</p></div>
+  <div class="cell"><b>After</b><p class="note">The hidden pill answers no taps (<code>MiniPlayerView.hitTest</code> checks it is visible first). Taps there reach the screen again. Checked in the simulator on iOS 26.5; Undo toasts were very likely hit too but are not checked on a device.</p></div>
+</div>
+
+<h2>Implementation notes</h2>
+<ul class="tight note">
+<li><code>UpdateStatusNote</code> (new) reads <code>appUpdateProvider</code> and draws the line plus its glyph: record dot, three level bars (one 900 ms ease-in-out loop, bars offset by a third each, still under reduced motion), or <code>CupertinoIcons.checkmark</code>. It goes in the large-title row of <code>home_screen.dart</code> and <code>you_tab.dart</code> through <code>LargeTitleScaffold</code>'s trailing slot, falling back to the below-title accessory when it doesn't fit.</li>
+<li><code>UpdatingOverlay</code>, <code>UpdatingScreen</code> and <code>UpdateReadyPrompt</code> are deleted, with the shell's dock-hiding and <code>GlassOcclusion.coverAll</code>, which only existed for the full screen. The launch no longer covers anything while it reads the recorded patch.</li>
+<li>Timings: closing 1.8 s, applying 1.4 s, updated 2.5 s, fade 320 ms ease-out, word swap 280 ms fade-through.</li>
+<li>Signed-out listeners (first run) have no title row; for them the patch runs from the next start with no note. Say if they need a place too.</li>
+</ul>
+</main>
+
+<script>
+const PRISM=['#c9687f','#d18a65','#d2c76f','#709778','#688fa8'];
+function hub(cls,x){let t='';for(let i=0;i<8;i++)t+=`<rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(${i*45})"/>`;
+ return `<g class="${cls}"><g transform="translate(${x} 61)"><circle r="16" fill="#dedbd6" stroke="#28262a" stroke-width="4"/><g fill="#28262a">${t}</g><circle r="5" fill="#f4f1ec"/></g></g>`;}
+function tape(c,vb){const s=PRISM.map((p,i)=>`<rect x="14" y="${39+i*5}" width="172" height="5" fill="${p}"/>`).join('');
+ return `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="1" y="1" width="198" height="126" rx="9" fill="${c}" stroke="#252328" stroke-width="2"/><rect x="14" y="12" width="172" height="73" rx="5" fill="#f2ede2"/><line x1="22" y1="31" x2="178" y2="31" stroke="rgba(75,66,71,.34)"/>${s}<rect x="42" y="42" width="116" height="39" rx="7" fill="#17161a" stroke="#28262a" stroke-width="2"/><rect x="72" y="55" width="56" height="12" rx="2" fill="#493638"/>${hub('hubL',61)}${hub('hubR',139)}<path d="M48 89h104l12 30H36z" fill="#17161a" stroke="#28262a" stroke-width="2"/><circle cx="58" cy="105" r="6" fill="#f2f0eb" stroke="#544e52" stroke-width="2"/><circle cx="142" cy="105" r="6" fill="#f2f0eb" stroke="#544e52" stroke-width="2"/></svg>`;}
+const cassette=(w,spin)=>`<span class="tile ${spin?'spin':''}" style="display:block;width:${w}px;height:${w*128/200}px">${tape('#3f4851','0 0 200 128')}</span>`;
+const GLYPH={
+  dot:'<span class="rec-dot"></span>',
+  bars:'<span class="bars"><i></i><i></i><i></i></span>',
+  ring:'<span class="ring"></span>',
+  check:'<svg class="check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.4l2.6 2.5L10 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+const note=(word,glyph,{done=false,target=false,fade=false}={})=>`<span class="upd ${done?'done':''} ${target?'target':''} ${fade?'fade':''}" role="status"><span class="lbl">${word}</span><span class="g">${GLYPH[glyph]}</span></span>`;
+const AVAIL=()=>note('Update available','dot');
+const UPDATING=()=>note('Updating','bars');
+const UPDATED=(o={})=>note('Updated','check',{done:true,...o});
+const status=`<div class="statusbar"><span>09:41</span><span>●●● 82</span></div>`;
+const title=(t,n='')=>`<div class="titlerow"><h1>${t}</h1>${n}</div>`;
+const dock=(on)=>`<div class="dock">${['Home','Mixes','Library','You'].map(x=>`<span class="${x===on?'on':''}">${x}</span>`).join('')}</div>`;
+const homePanel=`<div class="bpanel"><span class="seg"><span>Mix</span><span>Album</span></span><div class="composer"><span class="ph">Ask for anything</span></div></div>`;
+const homeBody=`<div class="empty">Say what the moment needs, tap an idea, or start from one of your playlists.</div>`;
+const youBody=`<div class="group"><div class="urow" style="grid-template-columns:46px 1fr"><span class="avatar">A</span><span><strong style="font-size:18px">Ada Okafor</strong><small>Apple Music · Google</small></span></div></div>
+<div class="group" style="margin-top:14px"><div class="urow"><span class="ico" style="background:#7b5bc4"></span><span><strong>What the DJ knows</strong></span><span class="chev">›</span></div><div class="urow"><span class="ico" style="background:#d65b7c"></span><span><strong>Learn from my listening</strong><small>On</small></span><span></span></div><div class="urow"><span class="ico" style="background:#e08a3c"></span><span><strong>Listen on</strong><small>Apple Music</small></span><span class="chev">›</span></div></div>`;
+const $=id=>document.getElementById(id);
+$('before').innerHTML=status+`<div class="takeover"><span class="tilt">${cassette(132,true)}</span><div class="t">Updating mixtape</div><div class="h">mixtape will close. Open it again to finish.</div></div>`+dock('Home');
+$('afterHome').innerHTML=status+title('Home',AVAIL())+homeBody+homePanel+dock('Home');
+$('afterYou').innerHTML=status+title('You',AVAIL())+youBody+dock('You');
+const sw=(n,cls='')=>`<span class="screen ${cls}" style="background:none;height:auto;display:inline-flex;border-radius:0">${n}</span>`;
+const steps=[
+ ['Nothing waiting','Almost always. No note, no space kept for it.','',''],
+ ['Available','A patch downloaded. Still dot. Tap to update.',AVAIL(),''],
+ ['After the tap','1.8 s, bars moving, then the app closes.',UPDATING(),'moving'],
+ ['Next start','1.4 s "Updating", then 2.5 s "Updated", then fades.',UPDATED(),''],
+];
+$('timeline').innerHTML=steps.map(([b,t,n,c])=>`<div class="step"><b>${b}</b><div class="swatch l"><h1>Home</h1>${sw(n,c)}</div><div class="swatch d dark"><h1>Home</h1>${sw(n,c)}</div><div class="note" style="font-size:12.5px">${t}</div></div>`).join('');
+const short=`<div class="empty" style="padding:30px 40px 20px;flex:none">Say what the moment needs, tap an idea, or start from one of your playlists.</div>`;
+const slice=(t,n,body=short)=>status+title(t,n)+body;
+$('ready').innerHTML=slice('Home',note('Update available','dot',{target:true}));
+$('closing').innerHTML=slice('Home',UPDATING());
+$('applying').innerHTML=slice('Home',UPDATING());
+$('updated').innerHTML=slice('Home',UPDATED());
+$('gone').innerHTML=slice('Home',UPDATED({fade:true}));
+const pad='<div style="height:40px"></div>';
+$('darkUpdated').innerHTML=slice('You',UPDATED(),pad);
+$('large').innerHTML=slice('Home',UPDATING(),pad);
+$('largeNarrow').innerHTML=status+title('Home')+`<div style="display:flex;justify-content:flex-end;padding:0 20px">${AVAIL()}</div>`+pad;
+$('narrow').innerHTML=slice('Home',AVAIL(),pad);
+$('rm').innerHTML=slice('Home',UPDATING(),pad);
+$('optA').innerHTML=UPDATING();
+$('optB').innerHTML=note('Updating','ring');
+</script>
+</body>
+</html>
