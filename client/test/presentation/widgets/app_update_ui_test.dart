@@ -4,6 +4,7 @@
 // the tap leaves only the loader (the dot becomes the bars) and closes the app;
 // the start that boots the patch plays the bars, then the tick with "Updated".
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/updates/app_updater.dart';
@@ -62,6 +63,27 @@ Future<ProviderContainer> _pump(
 Future<void> _ready(WidgetTester tester, ProviderContainer container) async {
   await container.read(appUpdateProvider.notifier).check();
   await tester.pump();
+}
+
+/// Records the haptics the note asks the platform for.
+List<String> _recordHaptics(WidgetTester tester) {
+  final haptics = <String>[];
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    SystemChannels.platform,
+    (call) async {
+      if (call.method == 'HapticFeedback.vibrate') {
+        haptics.add(call.arguments as String);
+      }
+      return null;
+    },
+  );
+  addTearDown(
+    () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    ),
+  );
+  return haptics;
 }
 
 void main() {
@@ -222,5 +244,34 @@ void main() {
     // Nothing keeps scheduling frames while the bars hold still.
     expect(tester.binding.hasScheduledFrame, isFalse);
     await tester.pump(updateCloseDelay);
+  });
+
+  testWidgets('the tap gives one soft click as the dot becomes the bars', (
+    tester,
+  ) async {
+    final updater = FakeAppUpdater(waiting: 7);
+    final container = await _pump(tester, updater: updater);
+    await _ready(tester, container);
+    final haptics = _recordHaptics(tester);
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(UpdateStatusNote.morphFor);
+    expect(haptics, ['HapticFeedbackType.selectionClick']);
+    await tester.pump(updateCloseDelay);
+  });
+
+  testWidgets('the check finishing gives one soft click on the next start', (
+    tester,
+  ) async {
+    final store = InMemoryPendingPatchStore()..value = 4;
+    final haptics = _recordHaptics(tester);
+    await _pump(tester, updater: FakeAppUpdater(running: 4), store: store);
+    await tester.pump(updateAppliedFor);
+    expect(haptics, isEmpty);
+    // The tick starts a frame after the phase turns, then draws in full.
+    await tester.pump();
+    await tester.pump(UpdateStatusNote.tickFor * 2);
+    expect(haptics, ['HapticFeedbackType.selectionClick']);
+    await tester.pumpAndSettle();
   });
 }

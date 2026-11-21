@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' show ImageFilter, lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/app_update_provider.dart';
@@ -22,7 +23,10 @@ import 'foundation/status_word.dart' show statusOkGlyph;
 ///   point, the check draws out of it, and "Updated" blurs in. Then it fades.
 ///
 /// One glyph throughout: the same three rounded bars are the dot, the loader
-/// and the gathered point of the tick. Everything is drawn in code, because an
+/// and the gathered point of the tick. Two soft haptics mark the changes (the
+/// lightest system click, the one the app uses for its other soft ticks): the
+/// tap as the dot becomes the bars, and the check finishing on the next start.
+/// The breathing dot is silent. Everything is drawn in code, because an
 /// over-the-air patch cannot add icon-font glyphs the release never used.
 class UpdateStatusNote extends ConsumerStatefulWidget {
   const UpdateStatusNote({super.key, this.lineHeight});
@@ -406,12 +410,24 @@ class _MorphGlyphState extends State<_MorphGlyph>
     if (old.glyph != widget.glyph || old.still != widget.still) {
       final morphTo = widget.glyph == _Glyph.dot ? 0.0 : 1.0;
       final tickTo = widget.glyph == _Glyph.tick ? 1.0 : 0.0;
+      if (old.glyph == _Glyph.dot && widget.glyph == _Glyph.bars) {
+        unawaited(HapticFeedback.selectionClick());
+      }
       if (widget.still) {
         _morph.value = morphTo;
         _tick.value = tickTo;
+        if (widget.glyph == _Glyph.tick) {
+          unawaited(HapticFeedback.selectionClick());
+        }
       } else {
         unawaited(_morph.animateTo(morphTo, curve: Curves.easeInOutCubic));
-        unawaited(_tick.animateTo(tickTo, curve: Curves.easeInOut));
+        unawaited(
+          _tick.animateTo(tickTo, curve: Curves.easeInOut).then((_) {
+            if (mounted && widget.glyph == _Glyph.tick) {
+              unawaited(HapticFeedback.selectionClick());
+            }
+          }),
+        );
       }
       _syncLoops();
     }

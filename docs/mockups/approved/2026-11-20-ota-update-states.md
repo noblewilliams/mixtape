@@ -105,6 +105,10 @@ These states replace the ones in the table above:
   - After the tap: "Restarting mixtape. Open it again to finish." (Nothing
     on screen says it, so VoiceOver must.)
   - On the next start: "mixtape updated."
+- Haptics (founder, the same day: "less harsh"): the lightest system click
+  (`selectionClick`, as elsewhere in the app) fires once on the tap as the dot
+  becomes the bars, and once as the check finishes on the next start. The
+  breathing dot is silent.
 - Reduced motion: nothing breathes, bounces, slides or blurs. Shapes and
   words swap at once.
 - Rejected:
