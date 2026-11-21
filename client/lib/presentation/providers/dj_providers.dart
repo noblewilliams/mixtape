@@ -838,6 +838,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         .read(mixActivityProvider.notifier)
         .beginTurn(sessionId);
     var landed = true;
+    // The DJ answered: the reply is the server's, whatever this screen does.
+    var succeeded = false;
     // Once the stream has opened the server has the turn, whatever happens
     // to the connection after.
     var streamed = false;
@@ -935,6 +937,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // The request has answered: from here there is nothing to stop.
         if (identical(_out, out)) _out = null;
       }
+      succeeded = base.kind != SessionKind.album;
       if (!live()) return;
       // The new version wears the shape the turn carried. A pick made while
       // the turn was out is newer than that one, and waits for the next.
@@ -1066,7 +1069,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // a no-op if some other path (e.g. the stale refetch) already
         // cleared it.
         release();
-        endActivity(ready: landed);
+        endActivity(ready: landed, succeeded: succeeded);
         if (_current(generation)) {
           _mergeCurrent(
             (c) => c.sending || c.remaking || c.workingStep != null
@@ -1700,6 +1703,8 @@ final sessionStarterProvider =
               knownIds: listed?.map((session) => session.id).toSet(),
             );
         String? made;
+        // The mix landed (a ping, if the app is away); albums do not ping.
+        var succeeded = false;
         // A streamed create names the mix first, before its turn runs.
         String? named;
         WorkingStep? step;
@@ -1743,6 +1748,7 @@ final sessionStarterProvider =
           if (stop?.stopped ?? false) throw const NewMixStoppedException();
           ref.invalidate(sessionsProvider);
           made = detail.session.id;
+          succeeded = kind == SessionKind.mix;
           offers.put(detail);
           // The milestone, funnel and Keep sheet notes are mix-only.
           if (kind == SessionKind.album) return detail.session.id;
@@ -1801,7 +1807,7 @@ final sessionStarterProvider =
           );
         } finally {
           stop?._ended();
-          endActivity(sessionId: made);
+          endActivity(sessionId: made, succeeded: succeeded);
         }
       };
     });

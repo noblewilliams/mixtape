@@ -19,6 +19,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/mix_activity_provider.dart';
+import '../../providers/mix_background_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/cassette_tile.dart';
 import '../../widgets/lyric_turn.dart' show DjWorkingLine;
@@ -32,7 +33,11 @@ class MakingScreen extends ConsumerStatefulWidget {
 
   /// The step line under it starts on "The DJ is listening…", so this one
   /// does not say it too (turn steps spec, First-run Making screens).
-  static const String line = 'This takes about a minute.';
+  static const String line = 'About a minute.';
+
+  /// Once notifications are allowed: the listener may leave, and hears when
+  /// the mix lands (mix_background_provider.dart).
+  static const String pingLine = "About a minute. We'll ping you.";
   static const String routeName = 'first-run/making';
 
   static const Key cassetteKey = Key('first-run-making-cassette');
@@ -51,7 +56,7 @@ class _MakingScreenState extends ConsumerState<MakingScreen> {
       if (!mounted) return;
       unawaited(
         SemanticsService.announce(
-          MakingScreen.line,
+          _lineFor(ref.read(mixBackgroundProvider)),
           Directionality.maybeOf(context) ?? TextDirection.ltr,
           assertiveness: Assertiveness.polite,
         ),
@@ -59,17 +64,21 @@ class _MakingScreenState extends ConsumerState<MakingScreen> {
     });
   }
 
+  static String _lineFor(bool pings) =>
+      pings ? MakingScreen.pingLine : MakingScreen.line;
+
   @override
   Widget build(BuildContext context) {
     // The new mix's first turn, once its create's stream opens.
     final step = ref.watch(mixActivityProvider.select((a) => a.pendingStep));
+    final line = _lineFor(ref.watch(mixBackgroundProvider));
     return PopScope(
       // The flow pops this page itself when the turn returns.
       canPop: false,
       child: StepScaffold(
         background: FirstRunBackground.welcome,
         headline: MakingScreen.headline,
-        line: MakingScreen.line,
+        line: line,
         showBack: false,
         centerTop: true,
         body: [

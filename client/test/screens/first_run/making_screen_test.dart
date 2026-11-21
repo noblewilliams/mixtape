@@ -10,6 +10,7 @@ import 'package:mixtape/data/dj/dj_api.dart' show TurnStep;
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/first_run_provider.dart';
 import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
+import 'package:mixtape/presentation/providers/mix_background_provider.dart';
 import 'package:mixtape/presentation/providers/working_step.dart';
 import 'package:mixtape/presentation/screens/first_run/artists_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/making_screen.dart';
@@ -21,7 +22,7 @@ import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'first_run_harness.dart';
 
 const _headline = 'Making your mix.';
-const _line = 'This takes about a minute.';
+const _line = 'About a minute.';
 
 /// A stand-in for the page below, so the system back has a route to pop.
 Widget _above(Widget page) => Builder(
@@ -293,6 +294,20 @@ void main() {
           ),
         )
         .data!;
+
+    testWidgets('promises a ping once notifications are allowed', (
+      tester,
+    ) async {
+      final h = await making(tester);
+      expect(find.text(_line), findsOneWidget);
+      h.pings.granted = true;
+      h.container.read(mixBackgroundProvider.notifier).turnsOut(true);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(MakingScreen.pingLine), findsOneWidget);
+      expect(MakingScreen.pingLine, "About a minute. We'll ping you.");
+      expect(find.text(_line), findsNothing);
+    });
 
     testWidgets('under the headline and its line, it starts on listening '
         'and walks the clock while nothing streams', (tester) async {

@@ -262,7 +262,7 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
             <span aria-hidden="true" />
             <span aria-hidden="true" />
             {album ? (
-              <small>Finding your album · checking Apple Music</small>
+              <small>Finding your album</small>
             ) : (
               // The transcript is a live region: the line changes too often to be read, so it says one steady line.
               <small>

@@ -235,7 +235,7 @@ void main() {
 
   group('the turn\'s own steps (turn steps 2026-11-13)', () {
     const listening = 'The DJ is listening';
-    const still = 'Still at the decks. Worth the wait';
+    const still = 'Still at the decks';
     String line(TurnStep? step, {int seconds = 0, int seed = 0}) =>
         DjWorkingPhrases.stepLineAt(
           step,
@@ -324,7 +324,7 @@ void main() {
           for (var seed = 0; seed < 4; seed++)
             line(const TurnStep('picking', artists: tems), seed: seed),
         },
-        {'Pulling records that sit with Tems', 'Finding company for Tems'},
+        {'Finding company for Tems'},
       );
       // Two artists, three read as "and more"; at most two genres.
       expect(
@@ -372,11 +372,11 @@ void main() {
       );
       expect(
         line(const TurnStep('pressing', count: 24)),
-        'Pressing 24 songs to tape',
+        'Pressing 24 songs',
       );
       expect(
         line(const TurnStep('pressing', count: 1)),
-        'Pressing one song to tape',
+        'Pressing one song',
       );
     });
 
