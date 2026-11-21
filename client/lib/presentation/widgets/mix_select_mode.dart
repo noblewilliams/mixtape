@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'foundation/glass_segmented_control.dart';
+import 'foundation/haptics.dart';
 import 'foundation/liquid_glass_surface.dart';
 import 'foundation/mixtape_menu.dart';
 
@@ -256,6 +257,8 @@ class MixSelectToolbar extends StatelessWidget {
                             label: archiveLabel,
                             ink: tokens.plum,
                             muted: tokens.muted,
+                            // Archiving the selection happens at once.
+                            haptic: HapticKind.destructive,
                             onPressed: enabled ? onArchive : null,
                           ),
                         ),
@@ -282,6 +285,9 @@ class MixSelectToolbar extends StatelessWidget {
                               label: MixSelect.deleteLabel,
                               ink: red,
                               muted: tokens.muted,
+                              // Presents the confirm; its Delete plays the
+                              // destructive one.
+                              haptic: HapticKind.open,
                               onPressed: enabled
                                   ? () => onDelete(anchor)
                                   : null,
@@ -308,6 +314,7 @@ class _ToolbarAction extends StatelessWidget {
     required this.label,
     required this.ink,
     required this.muted,
+    required this.haptic,
     required this.onPressed,
   });
 
@@ -315,10 +322,12 @@ class _ToolbarAction extends StatelessWidget {
   final String label;
   final Color ink;
   final Color muted;
+  final HapticKind haptic;
   final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
+    final onPressed = Haptics.on(haptic, this.onPressed);
     final enabled = onPressed != null;
     final color = enabled ? ink : muted.withValues(alpha: 0.55);
     return Semantics(

@@ -8,6 +8,7 @@ import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 
 import '../../data/dj/dj_models.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/reason_band.dart';
 import 'foundation/square_art.dart';
 import 'foundation/status_word.dart';
@@ -163,7 +164,13 @@ class TrackRow extends StatelessWidget {
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [bar, const SizedBox(height: 3), bar, const SizedBox(height: 3), bar],
+          children: [
+            bar,
+            const SizedBox(height: 3),
+            bar,
+            const SizedBox(height: 3),
+            bar,
+          ],
         ),
       ),
     );
@@ -174,26 +181,29 @@ class TrackRow extends StatelessWidget {
     return ReorderableDelayedDragStartListener(index: index, child: grip);
   }
 
-  Widget _spotifyButton(MixtapeTokens tokens) => KeyedSubtree(
-    key: spotifyKey(track.trackId),
-    child: Semantics(
-      button: true,
-      label: 'Open in Spotify: ${track.title}',
-      // `excludeSemantics` drops the detector's own tap action, and a node
-      // with no action cannot be activated by VoiceOver. Declare it here.
-      onTap: onOpenInSpotify,
-      excludeSemantics: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+  Widget _spotifyButton(MixtapeTokens tokens) {
+    final onOpenInSpotify = Haptics.on(HapticKind.tap, this.onOpenInSpotify);
+    return KeyedSubtree(
+      key: spotifyKey(track.trackId),
+      child: Semantics(
+        button: true,
+        label: 'Open in Spotify: ${track.title}',
+        // `excludeSemantics` drops the detector's own tap action, and a node
+        // with no action cannot be activated by VoiceOver. Declare it here.
         onTap: onOpenInSpotify,
-        child: SizedBox(
-          width: MixtapeMetrics.minTarget,
-          height: MixtapeMetrics.minTarget,
-          child: Icon(Icons.open_in_new, size: 18, color: tokens.muted),
+        excludeSemantics: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onOpenInSpotify,
+          child: SizedBox(
+            width: MixtapeMetrics.minTarget,
+            height: MixtapeMetrics.minTarget,
+            child: Icon(Icons.open_in_new, size: 18, color: tokens.muted),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   Widget _art() {
     final base = playlistArtworkColor(track.artworkBgColor);
@@ -214,9 +224,11 @@ class TrackRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onTap = Haptics.on(HapticKind.tap, this.onTap);
     final tokens = context.tokens;
     final brightness = Theme.of(context).brightness;
-    final wraps = MediaQuery.textScalerOf(context).scale(100) / 100 >= wrapScale;
+    final wraps =
+        MediaQuery.textScalerOf(context).scale(100) / 100 >= wrapScale;
     final hasReason = track.reason != null && track.reason!.trim().isNotEmpty;
 
     final lines = Column(
@@ -248,7 +260,9 @@ class TrackRow extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: MixtapeMetrics.minTarget),
+          constraints: const BoxConstraints(
+            minHeight: MixtapeMetrics.minTarget,
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Row(

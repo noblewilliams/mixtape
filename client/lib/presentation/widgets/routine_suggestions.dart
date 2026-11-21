@@ -18,6 +18,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/suggestions/suggestions_api.dart';
 import '../providers/device_providers.dart';
 import '../providers/suggestions_provider.dart';
+import 'foundation/haptics.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/mixtape_sheet.dart';
 import '../theme/mixtape_theme.dart';
@@ -310,8 +311,13 @@ class _RoutinePillBodyState extends State<_RoutinePillBody>
         },
         child: Builder(
           builder: (anchor) => GestureDetector(
+            // The pill lifts before its menu shows; the menu's open is
+            // debounced into this one. A tap is the pill's own suggest.
             onLongPress: live
-                ? () => unawaited(_openMenu(anchor, suggestion))
+                ? Haptics.on(
+                    HapticKind.lift,
+                    () => unawaited(_openMenu(anchor, suggestion)),
+                  )
                 : null,
             child: IdeaPill(
               key: RoutinePillSlot.pillKey,

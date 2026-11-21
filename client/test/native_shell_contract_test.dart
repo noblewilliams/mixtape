@@ -71,7 +71,8 @@ void main() {
     expect(dock, contains('#available(iOS 26'));
     expect(dock, contains('UIVisualEffectView'));
     expect(dock, contains('bringSubviewToFront'));
-    expect(dock, contains('UIImpactFeedbackGenerator'));
+    // Tab switches tick like every other toggler (Haptics → select).
+    expect(dock, contains('UISelectionFeedbackGenerator'));
     // The board's 22 pt margins, pinned by hand: a bare bar is edge-to-edge.
     // Measured from the safe area's sides, so a system bar standing on a
     // side edge (iPhone Duo) pushes the dock over with the content.

@@ -25,6 +25,7 @@ import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/status_word.dart';
+import '../widgets/foundation/haptics.dart';
 
 /// What Library says when the sources fail to load.
 const String kSourcesLoadFailedTitle = 'Couldn’t load your music';
@@ -160,13 +161,19 @@ Future<bool?> confirmSourceRemoval(BuildContext context, MusicSource source) =>
         actions: [
           CupertinoDialogAction(
             key: const Key('remove-keep'),
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: Haptics.on(
+              HapticKind.dismiss,
+              () => Navigator.of(dialogContext).pop(false),
+            ),
             child: const Text('Keep it'),
           ),
           CupertinoDialogAction(
             key: const Key('remove-confirm'),
             isDestructiveAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: Haptics.on(
+              HapticKind.destructive,
+              () => Navigator.of(dialogContext).pop(true),
+            ),
             child: const Text('Remove'),
           ),
         ],

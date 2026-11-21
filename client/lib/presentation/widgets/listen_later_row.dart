@@ -13,6 +13,8 @@
 /// The server's entry carries no "new to you" flag, so the shelf draws none.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 
@@ -20,6 +22,7 @@ import '../../data/dj/dj_models.dart';
 import '../theme/mixtape_theme.dart';
 import 'album_card.dart' show AlbumCover;
 import 'foundation/flush_row.dart';
+import 'foundation/haptics.dart';
 import 'foundation/remove_band.dart';
 import 'foundation/status_word.dart';
 import 'foundation/text_action.dart';
@@ -113,6 +116,12 @@ class _ListenLaterRowState extends State<ListenLaterRow> {
 
   void _toggle() => setState(() => _open = !_open);
 
+  /// The long press that opens the why line: it lifts the row's detail up.
+  void _longPress() {
+    unawaited(Haptics.play(HapticKind.lift));
+    _toggle();
+  }
+
   Future<void> _run(Future<void> Function()? action) async {
     if (action == null || _busy) return;
     setState(() => _busy = true);
@@ -190,7 +199,7 @@ class _ListenLaterRowState extends State<ListenLaterRow> {
       button: widget.onOpen != null,
       label: listenLaterRowLabel(entry),
       onTap: widget.onOpen,
-      onLongPress: _toggle,
+      onLongPress: _longPress,
       customSemanticsActions: {
         if (widget.onOpen != null)
           const CustomSemanticsAction(label: 'Open'): widget.onOpen!,
@@ -203,7 +212,7 @@ class _ListenLaterRowState extends State<ListenLaterRow> {
       },
       child: ExcludeSemantics(
         child: GestureDetector(
-          onLongPress: _toggle,
+          onLongPress: _longPress,
           child: FlushRow(
             leading: cover,
             leadingSize: ListenLaterRow.coverSize,
@@ -255,6 +264,7 @@ class _ListenLaterRowState extends State<ListenLaterRow> {
           ? DismissDirection.none
           : DismissDirection.endToStart,
       confirmDismiss: (_) async {
+        unawaited(Haptics.play(HapticKind.destructive));
         await _run(widget.onRemove);
         // The provider drops the row; a failed removal leaves it in place.
         return false;

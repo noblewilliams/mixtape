@@ -59,6 +59,7 @@ import '../widgets/track_row.dart';
 import 'chat_screen.dart' show remakeInConversation;
 import 'mix_history_screen.dart';
 import '../widgets/foundation/mixtape_menu.dart';
+import '../widgets/foundation/haptics.dart';
 
 /// The conflict copy from the approved board. The provider's own
 /// [staleQueueTransientMessage] is shared with the conversation screen, so it
@@ -436,13 +437,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         ),
         actions: [
           CupertinoDialogAction(
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: Haptics.on(
+              HapticKind.dismiss,
+              () => Navigator.of(dialogContext).pop(),
+            ),
             child: const Text('Cancel'),
           ),
           CupertinoDialogAction(
             key: const Key('rename-confirm-button'),
             isDefaultAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            onPressed: Haptics.on(
+              HapticKind.primary,
+              () => Navigator.of(dialogContext).pop(controller.text),
+            ),
             child: const Text('Save'),
           ),
         ],
@@ -548,9 +555,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     return _shell(
       title: state.session.title,
       hasContent: true,
-      bottomBar: visibleQueue.isEmpty
-          ? null
-          : _stickyBar(state, visibleQueue),
+      bottomBar: visibleQueue.isEmpty ? null : _stickyBar(state, visibleQueue),
       // One scroll view: the cassette header scrolls away with the songs,
       // and at 200% text nothing is pinned that could crowd the list out.
       body: CustomScrollView(
@@ -601,6 +606,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
               ),
               sliver: SliverReorderableList(
                 itemCount: visibleQueue.length,
+                // The row lifts off the list, and settles back with a tick
+                // wherever it lands.
+                onReorderStart: (_) => unawaited(Haptics.play(HapticKind.lift)),
+                onReorderEnd: (_) => unawaited(Haptics.play(HapticKind.select)),
                 onReorder: (oldIndex, newIndex) =>
                     _handleReorder(visibleQueue, oldIndex, newIndex),
                 // The board's lifted row, rebuilt rather than wrapped so the
@@ -772,8 +781,16 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
           ? Duration.zero
           : const Duration(milliseconds: 200),
       background: const RemoveBand(),
-      onDismissed: (_) =>
-          _handleDismiss(track, supportsInsert: state.supportsInsert),
+      // Felt as the swipe arms, then again as the song goes.
+      onUpdate: (details) {
+        if (details.reached && !details.previousReached) {
+          unawaited(Haptics.play(HapticKind.threshold));
+        }
+      },
+      onDismissed: (_) {
+        unawaited(Haptics.play(HapticKind.destructive));
+        _handleDismiss(track, supportsInsert: state.supportsInsert);
+      },
       child: row,
     );
   }
@@ -924,6 +941,7 @@ class _TopBar extends StatelessWidget {
                   key: const Key('arrangement-more'),
                   icon: Icons.more_horiz,
                   label: 'More',
+                  haptic: HapticKind.open,
                   onPressed: onMore == null ? null : () => onMore!(anchor),
                 ),
               ),

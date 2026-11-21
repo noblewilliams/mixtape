@@ -21,7 +21,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
@@ -57,6 +56,7 @@ import 'mix_archive_feedback.dart';
 import 'mix_select_flow.dart';
 import 'shared_mix_screen.dart';
 import '../widgets/mix_select_mode.dart';
+import '../widgets/foundation/haptics.dart';
 
 const _removeFailedMessage = 'Couldn’t remove it from Listen later. Try again.';
 const _restoreFailedMessage =
@@ -170,7 +170,7 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
         notification.dragDetails != null &&
         notification.metrics.pixels <= -MixesScreen.archivedRevealPull) {
       setState(() => _archivedRevealed = true);
-      HapticFeedback.selectionClick();
+      unawaited(Haptics.play(HapticKind.threshold));
     } else if (notification is ScrollEndNotification && _archivedRevealed) {
       _hideArchivedIfOutOfSight();
     }
@@ -829,7 +829,7 @@ class _ArchivedRow extends StatelessWidget {
         type: MaterialType.transparency,
         child: InkWell(
           key: MixesScreen.archivedRowKey,
-          onTap: onOpen,
+          onTap: Haptics.on(HapticKind.tap, onOpen),
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: minHeight),
             child: Padding(
@@ -1045,7 +1045,7 @@ class _RefreshFailedBanner extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           OutlinedButton(
-            onPressed: onRetry,
+            onPressed: Haptics.on(HapticKind.primary, onRetry),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(48, 44),
               padding: const EdgeInsets.symmetric(horizontal: 10),

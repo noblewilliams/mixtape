@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
+import 'foundation/haptics.dart';
 
 class VersionMarker extends StatelessWidget {
   const VersionMarker({
@@ -54,6 +55,7 @@ class VersionMarker extends StatelessWidget {
     final tokens = context.tokens;
     final line = detail(songs: songs, current: current);
     final tappable = onOpen != null;
+    final open = Haptics.on(HapticKind.tap, onOpen);
     final row = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: MixtapeMetrics.minTarget),
       child: Row(
@@ -108,11 +110,11 @@ class VersionMarker extends StatelessWidget {
       child: Semantics(
         button: tappable,
         label: label,
-        onTap: tappable ? onOpen : null,
+        onTap: open,
         excludeSemantics: true,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: tappable ? onOpen : null,
+          onTap: open,
           child: row,
         ),
       ),

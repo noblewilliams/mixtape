@@ -8,6 +8,7 @@ import '../screens/mix_history_screen.dart' show MixHistoryScreen;
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_menu.dart';
 import 'foundation/swipe_actions.dart';
 import 'mix_select_mode.dart';
@@ -368,7 +369,14 @@ class _MixHomeRowState extends State<MixHomeRow> {
     return GestureDetector(
       // No chevron (founder, 2026-11-09); the actions live on long-press and
       // the swipe.
-      onLongPress: _busy ? null : () => _openActionsMenu(context, archived),
+      // The row lifts before the menu shows; the menu's open is debounced
+      // into this one.
+      onLongPress: _busy
+          ? null
+          : Haptics.on(
+              HapticKind.lift,
+              () => _openActionsMenu(context, archived),
+            ),
       child: FlushRow(
         leading: _tile,
         leadingSize: MixHomeRow.artSize,
@@ -389,7 +397,10 @@ class _MixHomeRowState extends State<MixHomeRow> {
                 constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 onPressed: _busy
                     ? null
-                    : () => _openActionsMenu(context, archived),
+                    : Haptics.on(
+                        HapticKind.open,
+                        () => _openActionsMenu(context, archived),
+                      ),
                 icon: Icon(Icons.more_horiz, color: context.tokens.muted),
               )
             : null,
@@ -407,7 +418,8 @@ extension on _MixHomeRowState {
   Widget _buildSelectRow(BuildContext context) {
     final wraps =
         MediaQuery.textScalerOf(context).scale(100) / 100 >= FlushRow.wrapScale;
-    final toggle = widget.onToggleSelected;
+    // Ticking a row in select mode is choosing it.
+    final toggle = Haptics.on(HapticKind.select, widget.onToggleSelected);
     return Semantics(
       key: MixSelect.rowKey(widget.session.id),
       container: true,

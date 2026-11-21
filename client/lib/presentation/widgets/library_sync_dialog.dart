@@ -18,6 +18,7 @@ import '../format/import_format.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/service_marks.dart';
 import 'foundation/status_word.dart';
 
@@ -115,6 +116,12 @@ class _LibrarySyncDialogState extends ConsumerState<LibrarySyncDialog> {
 
   void _close() => Navigator.of(context).pop();
 
+  /// Hide, Done, Not now and Cancel all back out of the dialog.
+  void _dismiss() {
+    unawaited(Haptics.play(HapticKind.dismiss));
+    _close();
+  }
+
   @override
   Widget build(BuildContext context) {
     final sync = ref.watch(librarySyncProvider);
@@ -151,7 +158,7 @@ class _LibrarySyncDialogState extends ConsumerState<LibrarySyncDialog> {
               [
                 CupertinoDialogAction(
                   key: LibrarySyncDialog.hideKey,
-                  onPressed: _close,
+                  onPressed: _dismiss,
                   child: const Text('Hide'),
                 ),
               ],
@@ -163,7 +170,7 @@ class _LibrarySyncDialogState extends ConsumerState<LibrarySyncDialog> {
                 CupertinoDialogAction(
                   key: LibrarySyncDialog.doneKey,
                   isDefaultAction: true,
-                  onPressed: _close,
+                  onPressed: _dismiss,
                   child: const Text('Done'),
                 ),
               ],
@@ -177,13 +184,14 @@ class _LibrarySyncDialogState extends ConsumerState<LibrarySyncDialog> {
               [
                 CupertinoDialogAction(
                   key: LibrarySyncDialog.cancelKey,
-                  onPressed: _close,
+                  onPressed: _dismiss,
                   child: const Text('Not now'),
                 ),
                 CupertinoDialogAction(
                   key: LibrarySyncDialog.settingsKey,
                   isDefaultAction: true,
                   onPressed: () {
+                    unawaited(Haptics.play(HapticKind.tap));
                     _close();
                     unawaited(ref.read(linkOpenerProvider)(appSettingsUrl));
                   },
@@ -197,13 +205,13 @@ class _LibrarySyncDialogState extends ConsumerState<LibrarySyncDialog> {
               [
                 CupertinoDialogAction(
                   key: LibrarySyncDialog.cancelKey,
-                  onPressed: _close,
+                  onPressed: _dismiss,
                   child: const Text('Cancel'),
                 ),
                 CupertinoDialogAction(
                   key: LibrarySyncDialog.retryKey,
                   isDefaultAction: true,
-                  onPressed: _start,
+                  onPressed: Haptics.on(HapticKind.primary, _start),
                   child: const Text('Try again'),
                 ),
               ],
@@ -249,13 +257,13 @@ class _LibrarySyncDialogState extends ConsumerState<LibrarySyncDialog> {
       [
         CupertinoDialogAction(
           key: LibrarySyncDialog.cancelKey,
-          onPressed: _close,
+          onPressed: _dismiss,
           child: const Text('Not now'),
         ),
         CupertinoDialogAction(
           key: LibrarySyncDialog.startKey,
           isDefaultAction: true,
-          onPressed: _start,
+          onPressed: Haptics.on(HapticKind.primary, _start),
           child: const Text('Sync'),
         ),
       ],

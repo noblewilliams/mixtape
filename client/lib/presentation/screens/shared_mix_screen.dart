@@ -49,6 +49,7 @@ import '../widgets/tape_header.dart';
 import '../widgets/tape_palette.dart';
 import '../widgets/track_row.dart';
 import 'chat_screen.dart';
+import '../widgets/foundation/haptics.dart';
 
 /// "From Ada", or "From a friend" when the sender cleared their name.
 String sharedMixByline(String? sharerName) {
@@ -627,11 +628,9 @@ class _Gone extends StatelessWidget {
                 key: SharedMixScreen.removeKey,
                 label: SharedMixScreen.removeLabel,
                 // Remove is eject everywhere a shared mix offers it (board).
-                leading: Icon(
-                  MixMenuIcons.eject,
-                  size: 15,
-                  color: tokens.plum,
-                ),
+                leading: Icon(MixMenuIcons.eject, size: 15, color: tokens.plum),
+                // Removes on the spot; there is no confirmation to carry it.
+                haptic: HapticKind.destructive,
                 onPressed: onRemove,
               ),
             ],

@@ -35,6 +35,7 @@ import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
 import 'interview_screen.dart';
 import '../widgets/foundation/mixtape_sheet.dart';
+import '../widgets/foundation/haptics.dart';
 
 /// How many import sheets are on screen. Home and the sources screen both
 /// open one, and a file handed to the app can arrive over either, so the
@@ -385,6 +386,8 @@ class _ReviewFooter extends StatelessWidget {
           LabelChip(
             key: ImportSheet.newFileKey,
             label: 'New file',
+            // Presents the file picker.
+            haptic: HapticKind.open,
             onPressed: notifier.pick,
           ),
         ],
@@ -532,6 +535,7 @@ class _Inspecting extends StatelessWidget {
           TextAction(
             key: const Key('import-cancel'),
             label: 'Cancel',
+            haptic: HapticKind.dismiss,
             onPressed: onCancel,
           ),
         ],
@@ -590,6 +594,7 @@ class _Inventory extends StatelessWidget {
               TextAction(
                 key: const Key('import-cancel'),
                 label: 'Cancel',
+                haptic: HapticKind.dismiss,
                 onPressed: () {
                   Navigator.of(context).pop();
                   notifier.reset();
@@ -722,8 +727,12 @@ class _Inventory extends StatelessWidget {
                 trailing: Switch.adaptive(
                   key: const Key('import-private-sessions'),
                   value: state.includePrivateSessions,
-                  onChanged: notifier.setIncludePrivateSessions,
+                  onChanged: Haptics.onValue(
+                    HapticKind.toggle,
+                    notifier.setIncludePrivateSessions,
+                  ),
                 ),
+                haptic: HapticKind.toggle,
                 onTap: () => notifier.setIncludePrivateSessions(
                   !state.includePrivateSessions,
                 ),
@@ -755,6 +764,7 @@ class _Inventory extends StatelessWidget {
             child: TextAction(
               key: ImportSheet.newFileKey,
               label: 'Choose a different file',
+              haptic: HapticKind.open,
               // A dismissed picker leaves this step exactly as it was.
               onPressed: notifier.pick,
             ),
@@ -832,6 +842,7 @@ class _Uploading extends StatelessWidget {
             TextAction(
               key: const Key('import-cancel'),
               label: 'Cancel',
+              haptic: HapticKind.dismiss,
               onPressed: onCancel,
             ),
           ],
@@ -952,6 +963,7 @@ class _Done extends ConsumerWidget {
             label: needsInterview
                 ? 'Tell the DJ about your taste'
                 : 'Make your first mix',
+            haptic: needsInterview ? HapticKind.primary : HapticKind.commit,
             onPressed: () {
               if (needsInterview) {
                 notifier.reset();
@@ -973,6 +985,7 @@ class _Done extends ConsumerWidget {
             label: extended
                 ? 'Import the account data too'
                 : 'Import the extended history too',
+            haptic: HapticKind.open,
             onPressed: notifier.pick,
           ),
         ),
@@ -1053,6 +1066,7 @@ class _Partial extends ConsumerWidget {
             label: needsInterview
                 ? 'Tell the DJ about your taste'
                 : 'Make a mix anyway',
+            haptic: needsInterview ? HapticKind.primary : HapticKind.commit,
             onPressed: () {
               if (needsInterview) {
                 notifier.reset();
@@ -1160,14 +1174,18 @@ class _Failed extends StatelessWidget {
             child: LabelChip(
               key: const Key('import-copy-report'),
               label: 'Copy report',
+              haptic: HapticKind.success,
               onPressed: () async {
                 await Clipboard.setData(
                   ClipboardData(text: diagnostics.canonicalJsonString()),
                 );
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(mixtapeSnackBar(message: 'Report copied', kind: FeedbackKind.success));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  mixtapeSnackBar(
+                    message: 'Report copied',
+                    kind: FeedbackKind.success,
+                  ),
+                );
               },
             ),
           ),
@@ -1187,6 +1205,7 @@ class _Failed extends StatelessWidget {
           child: TextAction(
             key: const Key('import-try-another'),
             label: 'Try another file',
+            haptic: HapticKind.open,
             onPressed: notifier.pick,
           ),
         ),

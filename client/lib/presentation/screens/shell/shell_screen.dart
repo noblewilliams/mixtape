@@ -42,6 +42,7 @@ import '../playback_screen.dart';
 import '../tabs/library_tab.dart';
 import '../tabs/you_tab.dart';
 import 'shell_route_observer.dart';
+import '../../widgets/foundation/haptics.dart';
 
 class ShellScreen extends ConsumerStatefulWidget {
   const ShellScreen({super.key});
@@ -139,10 +140,24 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     super.initState();
     _dock.init();
     _subscriptions.addAll([
+      // The native tab bar plays its own selection tick (`ShellDock.swift`),
+      // so a tab change plays nothing here. The native mini-player plays
+      // nothing, so its touches are felt from this side; the Flutter
+      // fallbacks ([FrostedDock], [SideRail]) play their own and never
+      // reach these streams.
       _dock.onTabChanged.listen(_onDockTab),
-      _dock.onMiniPlayerTapped.listen((_) => _openNowPlaying()),
-      _dock.onMiniPlayerPlayPause.listen((_) => _playPause()),
-      _dock.onMiniPlayerNext.listen((_) => _next()),
+      _dock.onMiniPlayerTapped.listen((_) {
+        unawaited(Haptics.play(HapticKind.open));
+        _openNowPlaying();
+      }),
+      _dock.onMiniPlayerPlayPause.listen((_) {
+        unawaited(Haptics.play(HapticKind.primary));
+        _playPause();
+      }),
+      _dock.onMiniPlayerNext.listen((_) {
+        unawaited(Haptics.play(HapticKind.tap));
+        _next();
+      }),
     ]);
     // A fresh shell: the dock is up, on the first tab. Deferred until the
     // platform has answered whether a native dock exists at all — see

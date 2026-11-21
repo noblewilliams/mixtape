@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'foundation/haptics.dart';
+
 /// Owns only an unsaved name. Canonical session/queue data stays with callers.
 class MixNameEditor extends StatefulWidget {
   const MixNameEditor({
@@ -122,7 +124,7 @@ class _MixNameEditorState extends State<MixNameEditor> {
         if (_failed)
           TextButton(
             key: ValueKey('mix-rename-retry-${widget.sessionId}'),
-            onPressed: _busy ? null : _save,
+            onPressed: _busy ? null : Haptics.on(HapticKind.tap, _save),
             child: const Text('Retry'),
           ),
       ],

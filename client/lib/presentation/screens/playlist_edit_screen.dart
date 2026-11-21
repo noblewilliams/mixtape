@@ -35,6 +35,7 @@ import '../widgets/mix_prompt_input.dart';
 import '../widgets/playlist_artwork.dart';
 import '../widgets/foundation/mixtape_sheet.dart';
 import '../widgets/foundation/mixtape_menu.dart';
+import '../widgets/foundation/haptics.dart';
 
 class PlaylistEditScreen extends ConsumerStatefulWidget {
   const PlaylistEditScreen({super.key, required this.draftId});
@@ -340,6 +341,8 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
             TapeButton(
               key: PlaylistEditScreen.reviewActionKey,
               label: 'Review',
+              // Presents the review sheet.
+              haptic: HapticKind.open,
               onPressed: changes > 0 ? () => _openReview(state.view) : null,
             ),
           ],
@@ -412,6 +415,7 @@ class _TopBar extends StatelessWidget {
                 key: PlaylistEditScreen.reviewKey,
                 icon: Icons.checklist_rounded,
                 label: 'Review',
+                haptic: HapticKind.open,
                 onPressed: onReview,
               ),
               Builder(
@@ -419,6 +423,7 @@ class _TopBar extends StatelessWidget {
                   key: PlaylistEditScreen.moreKey,
                   icon: Icons.more_horiz,
                   label: 'More',
+                  haptic: HapticKind.open,
                   onPressed: onMore == null ? null : () => onMore!(anchor),
                 ),
               ),
@@ -446,6 +451,7 @@ class _FailedTurn extends StatelessWidget {
       TextAction(
         key: PlaylistEditScreen.retryKey,
         label: 'Try that request again',
+        haptic: HapticKind.primary,
         onPressed: onRetry,
       ),
     ],
@@ -596,6 +602,8 @@ class _ReviewSheet extends ConsumerWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : null,
+            // Writes the revised playlist: the playlist-creating commit.
+            haptic: HapticKind.commit,
             onPressed:
                 supported &&
                     currentView.capability.applyAvailable &&
@@ -612,6 +620,7 @@ class _ReviewSheet extends ConsumerWidget {
             child: TextAction(
               key: PlaylistEditScreen.keepEditingKey,
               label: 'Keep editing',
+              haptic: HapticKind.dismiss,
               onPressed: () => Navigator.of(context).pop(),
             ),
           ),

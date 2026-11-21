@@ -13,6 +13,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import '../../widgets/foundation/haptics.dart';
 
 /// The six backgrounds, one prism hue per page (spec → Backgrounds).
 enum FirstRunBackground {
@@ -242,7 +243,12 @@ class _TransportPainter extends CustomPainter {
 /// glyph. Cream on the graphic pages; [color] gives the text colour on the
 /// app's gradient screens. The padded tap target exceeds 44 pt.
 class TapeBackButton extends StatelessWidget {
-  const TapeBackButton({super.key = defaultKey, this.onPressed, this.color});
+  const TapeBackButton({
+    super.key = defaultKey,
+    this.onPressed,
+    this.color,
+    this.haptic = HapticKind.tap,
+  });
 
   static const Key defaultKey = Key('first-run-back');
   static const double width = 54;
@@ -258,6 +264,9 @@ class TapeBackButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final Color? color;
 
+  /// What the press feels like (`haptics.dart`); Back is an ordinary tap.
+  final HapticKind haptic;
+
   @override
   Widget build(BuildContext context) {
     final ink = color ?? FirstRunColors.cream;
@@ -271,7 +280,7 @@ class TapeBackButton extends StatelessWidget {
       onTap: press,
       excludeSemantics: true,
       child: TextButton(
-        onPressed: press,
+        onPressed: Haptics.on(haptic, press),
         style: TextButton.styleFrom(
           foregroundColor: ink,
           minimumSize: const Size(width, MixtapeMetrics.tapeButtonHeight),
@@ -422,10 +431,14 @@ class FootLink extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.lead,
+    this.haptic = HapticKind.tap,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// What the press feels like (`haptics.dart`); a text link is a tap.
+  final HapticKind haptic;
 
   /// Quiet words before the link, e.g. "Already have an account?".
   final String? lead;
@@ -445,7 +458,7 @@ class FootLink extends StatelessWidget {
       onTap: onPressed,
       excludeSemantics: true,
       child: TextButton(
-        onPressed: onPressed,
+        onPressed: Haptics.on(haptic, onPressed),
         style: TextButton.styleFrom(
           foregroundColor: FirstRunColors.cream,
           minimumSize: const Size(MixtapeMetrics.minTarget, 44),

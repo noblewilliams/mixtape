@@ -10,6 +10,8 @@
 /// muted line an earlier pick leaves in the transcript.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
@@ -21,6 +23,7 @@ import '../providers/library_sync_provider.dart';
 import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_feedback.dart';
 import 'foundation/square_art.dart';
 import 'foundation/status_word.dart';
@@ -335,6 +338,7 @@ class _AlbumCardState extends ConsumerState<AlbumCard> {
                       heightFactor: 1,
                       child: TapeButton(
                         label: 'Play now',
+                        haptic: HapticKind.commit,
                         onPressed: appleId == null || _playing
                             ? null
                             : () => _play(appleId),
@@ -344,7 +348,10 @@ class _AlbumCardState extends ConsumerState<AlbumCard> {
                 _ListenLaterChip(
                   key: AlbumCard.laterKey,
                   saved: pick.savedForLater,
-                  onPressed: widget.enabled ? _toggleLater : null,
+                  // A chip turning on or off.
+                  onPressed: widget.enabled
+                      ? Haptics.on(HapticKind.select, _toggleLater)
+                      : null,
                 ),
               ],
             ),
@@ -353,6 +360,12 @@ class _AlbumCardState extends ConsumerState<AlbumCard> {
         ],
       ),
     );
+  }
+
+  /// Shows or hides the runners-up in place: an ordinary tap.
+  void _toggleRunners() {
+    unawaited(Haptics.play(HapticKind.tap));
+    setState(() => _runnersOpen = !_runnersOpen);
   }
 
   Widget _runners(BuildContext context) {
@@ -375,12 +388,12 @@ class _AlbumCardState extends ConsumerState<AlbumCard> {
             button: true,
             expanded: _runnersOpen,
             label: label,
-            onTap: () => setState(() => _runnersOpen = !_runnersOpen),
+            onTap: _toggleRunners,
             excludeSemantics: true,
             child: GestureDetector(
               key: AlbumCard.runnersKey,
               behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() => _runnersOpen = !_runnersOpen),
+              onTap: _toggleRunners,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(
                   minHeight: MixtapeMetrics.minTarget,
@@ -713,6 +726,7 @@ class _RunnerRow extends StatelessWidget {
               TextAction(
                 key: AlbumCard.pickKey(album.id),
                 label: 'Pick this',
+                haptic: HapticKind.select,
                 onPressed: onPick,
               ),
             ],
@@ -783,6 +797,7 @@ class PassedOverRow extends StatelessWidget {
             TextAction(
               key: goBackKey(album.version),
               label: 'Go back',
+              haptic: HapticKind.select,
               onPressed: goBack,
             ),
           ],

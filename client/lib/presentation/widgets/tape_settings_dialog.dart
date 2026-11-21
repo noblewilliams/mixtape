@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_feedback.dart';
 import 'foundation/mixtape_sheet.dart';
 import 'tape_palette.dart';
@@ -186,7 +187,8 @@ class _TapeSettingsSheetState extends State<TapeSettingsSheet> {
                       ),
                       TextButton(
                         key: TapeSettingsSheet.doneKey,
-                        onPressed: _done,
+                        // Closes the sheet; the picks already applied.
+                        onPressed: Haptics.on(HapticKind.dismiss, _done),
                         style: TextButton.styleFrom(
                           minimumSize: const Size(
                             MixtapeMetrics.minTarget,
@@ -288,6 +290,7 @@ class _Families extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = MixtapeSheet.tokensOf(context);
+    final pick = Haptics.onValue(HapticKind.select, onPick)!;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -298,11 +301,11 @@ class _Families extends StatelessWidget {
               selected: i == selected,
               label: tapeFamilyNames[i],
               excludeSemantics: true,
-              onTap: () => onPick(i),
+              onTap: () => pick(i),
               child: GestureDetector(
                 key: TapeSettingsSheet.familyKey(i),
                 behavior: HitTestBehavior.opaque,
-                onTap: () => onPick(i),
+                onTap: () => pick(i),
                 child: SizedBox.square(
                   dimension: MixtapeMetrics.minTarget,
                   child: DecoratedBox(
@@ -347,6 +350,7 @@ class _Grid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pick = Haptics.onValue(HapticKind.select, onPick)!;
     return Column(
       children: [
         for (var row = 0; row < colours.length; row += 3) ...[
@@ -361,7 +365,7 @@ class _Grid extends StatelessWidget {
                     name: colours[i].$1,
                     hex: colours[i].$2,
                     selected: colours[i].$2 == selected,
-                    onTap: () => onPick(colours[i].$2),
+                    onTap: () => pick(colours[i].$2),
                   ),
                 ),
               ],

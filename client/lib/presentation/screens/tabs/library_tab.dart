@@ -43,6 +43,7 @@ import '../music_sources_screen.dart'
     show kSourcesLoadFailedTitle, sourceStatusFor;
 import '../playlist_browser_screen.dart';
 import '../spotify_request_screen.dart';
+import '../../widgets/foundation/haptics.dart';
 
 /// The Library tab.
 class LibraryTab extends ConsumerStatefulWidget {
@@ -411,7 +412,7 @@ class _SourceRow extends StatelessWidget {
       onTap: onTap,
       excludeSemantics: true,
       child: InkWell(
-        onTap: onTap,
+        onTap: Haptics.on(HapticKind.tap, onTap),
         child: Stack(
           children: [
             if (!isFirst)

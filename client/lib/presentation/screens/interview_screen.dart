@@ -15,6 +15,7 @@ import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/section_word.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../format/network_copy.dart';
+import '../widgets/foundation/haptics.dart';
 
 const _genericErrorMessage = 'something went wrong on our end — try again';
 
@@ -211,7 +212,10 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
                 key: const Key('interview-add-artist'),
                 tooltip: 'Add',
                 icon: Icon(Icons.add, size: 20, color: tokens.plum),
-                onPressed: _submitting || atCap ? null : _addArtist,
+                // Adds a chip to the list, like a chip turning on.
+                onPressed: _submitting || atCap
+                    ? null
+                    : Haptics.on(HapticKind.select, _addArtist),
               ),
             ],
           ),
@@ -390,7 +394,8 @@ class InterviewArtistChip extends StatelessWidget {
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onRemove,
+        // Taking a chip back out of the answer.
+        onTap: Haptics.on(HapticKind.dismiss, onRemove),
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,

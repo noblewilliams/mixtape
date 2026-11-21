@@ -48,6 +48,7 @@ import '../../widgets/suggestion_settings.dart';
 import '../account_screen.dart';
 import '../memory_screen.dart';
 import '../sign_in_screen.dart';
+import '../../widgets/foundation/haptics.dart';
 
 /// The You tab.
 class YouTab extends ConsumerWidget {
@@ -318,6 +319,8 @@ class _PlaysOnRow extends ConsumerWidget {
         ),
         title: YouTab.playsOnTitle,
         subtitle: platform == null ? notChosen : label(platform),
+        // Presents the platform popover.
+        haptic: HapticKind.open,
         onTap: () async {
           final picked = await showMixtapeMenu<MusicPlatform>(
             rowContext,
@@ -632,6 +635,8 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
     title: 'Sign out',
     destructive: true,
     trailing: const SizedBox.shrink(),
+    // Signs out on the spot; there is no confirmation to carry the tick.
+    haptic: HapticKind.destructive,
     onTap: _signingOut ? null : _signOut,
   );
 }

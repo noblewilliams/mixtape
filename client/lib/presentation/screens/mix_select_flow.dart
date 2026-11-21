@@ -23,6 +23,7 @@ import '../widgets/mix_select_mode.dart';
 import 'mix_archive_feedback.dart';
 import 'shell/shell_route_observer.dart' show ShellTabScope;
 import 'sign_in_screen.dart' show openKeepMixesSignIn;
+import '../widgets/foundation/haptics.dart';
 
 mixin MixSelectFlow<W extends ConsumerStatefulWidget> on ConsumerState<W> {
   bool _selecting = false;
@@ -155,6 +156,7 @@ mixin MixSelectFlow<W extends ConsumerStatefulWidget> on ConsumerState<W> {
   Widget selectAllButton() => GlassLabelButton(
     key: MixSelect.selectAllKey,
     label: allSelected ? MixSelect.deselectAllLabel : MixSelect.selectAllLabel,
+    haptic: HapticKind.select,
     onPressed: selectableSessions.isEmpty ? null : toggleAll,
   );
 
@@ -162,6 +164,8 @@ mixin MixSelectFlow<W extends ConsumerStatefulWidget> on ConsumerState<W> {
     key: MixSelect.doneKey,
     icon: CupertinoIcons.checkmark,
     label: MixSelect.doneLabel,
+    // Leaves select mode: backing out, not going anywhere.
+    haptic: HapticKind.dismiss,
     onPressed: exitSelect,
   );
 
@@ -171,6 +175,7 @@ mixin MixSelectFlow<W extends ConsumerStatefulWidget> on ConsumerState<W> {
       key: MixSelect.moreKey,
       icon: CupertinoIcons.ellipsis,
       label: MixSelect.moreLabel,
+      haptic: HapticKind.open,
       onPressed: () async {
         final choice = await showMixtapeMenu<String>(
           anchor,

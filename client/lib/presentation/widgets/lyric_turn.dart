@@ -24,8 +24,10 @@ import 'package:flutter/rendering.dart';
 import '../../data/dj/dj_api.dart' show TurnStep;
 import '../providers/working_step.dart';
 import '../theme/mixtape_theme.dart';
-import 'conversation_turn.dart' show ConversationTurn, ConversationTurnKind, WorkingIndicator;
+import 'conversation_turn.dart'
+    show ConversationTurn, ConversationTurnKind, WorkingIndicator;
 import 'foundation/cassette_tile.dart';
+import 'foundation/haptics.dart';
 import 'foundation/shimmer.dart';
 
 export 'conversation_turn.dart' show ConversationTurnKind;
@@ -155,6 +157,8 @@ class _FailedLine extends StatelessWidget {
       color: tokens.errInk,
     );
     final enabled = resendEnabled && onResend != null;
+    // Resending is the send again: it makes the mix.
+    final resend = enabled ? Haptics.on(HapticKind.commit, onResend) : null;
     return Align(
       key: LyricTurn.errorKey,
       alignment: Alignment.centerRight,
@@ -178,12 +182,12 @@ class _FailedLine extends StatelessWidget {
               button: true,
               enabled: enabled,
               label: 'Resend',
-              onTap: enabled ? onResend : null,
+              onTap: resend,
               excludeSemantics: true,
               child: GestureDetector(
                 key: LyricTurn.resendKey,
                 behavior: HitTestBehavior.opaque,
-                onTap: enabled ? onResend : null,
+                onTap: resend,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
                     minWidth: MixtapeMetrics.minTarget,
@@ -390,10 +394,7 @@ class DjWorkingPhrases {
     ),
     'checking' => (
       5,
-      const DjStepLines([
-        'Checking the pressings',
-        'Giving it a sound check',
-      ]),
+      const DjStepLines(['Checking the pressings', 'Giving it a sound check']),
     ),
     'editing' => (
       6,

@@ -23,6 +23,7 @@ import '../../providers/capabilities_provider.dart';
 import '../../providers/name_page_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import 'step_scaffold.dart';
+import '../../widgets/foundation/haptics.dart';
 
 /// The account root: the name page, the sign-in image while `/me` decides,
 /// or [child] (the shell). The shell is not built until the question is
@@ -246,7 +247,7 @@ class _NameScreenState extends ConsumerState<NameScreen> {
         key: NameScreen.continueKey,
         label: 'Retry',
         emphasis: true,
-        onPressed: () => unawaited(_continue()),
+        onPressed: Haptics.on(HapticKind.primary, () => unawaited(_continue())),
       );
     } else {
       pill = FirstRunPill(
@@ -254,7 +255,9 @@ class _NameScreenState extends ConsumerState<NameScreen> {
         label: 'Continue',
         forward: true,
         disabledHint: NameScreen.typeName,
-        onPressed: ready ? () => unawaited(_continue()) : null,
+        onPressed: ready
+            ? Haptics.on(HapticKind.primary, () => unawaited(_continue()))
+            : null,
       );
     }
     return StepScaffold(

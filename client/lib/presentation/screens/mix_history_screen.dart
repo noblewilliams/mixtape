@@ -47,6 +47,7 @@ import '../widgets/foundation/text_action.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/tape_header.dart';
 import 'queue_screen.dart';
+import '../widgets/foundation/haptics.dart';
 
 export '../providers/mix_history_provider.dart';
 
@@ -606,6 +607,8 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
             primary: Center(
               child: TapeButton(
                 label: 'Use this version',
+                // Presents the restore confirmation.
+                haptic: HapticKind.open,
                 onPressed: _busy || unavailable ? null : _confirmRestore,
               ),
             ),
@@ -989,12 +992,17 @@ class _ConfirmRestoreDialogState extends State<_ConfirmRestoreDialog> {
             // "Cancel" would read as "it did not happen", which is exactly
             // what an unconfirmed restore cannot promise: the request id is
             // kept on the screen, so closing leaves the retry available.
-            onPressed: _busy ? null : () => Navigator.of(context).pop(),
+            onPressed: _busy
+                ? null
+                : Haptics.on(
+                    HapticKind.dismiss,
+                    () => Navigator.of(context).pop(),
+                  ),
             child: Text(_retry ? 'Close' : 'Cancel'),
           ),
           CupertinoDialogAction(
             isDefaultAction: true,
-            onPressed: _busy ? null : _run,
+            onPressed: _busy ? null : Haptics.on(HapticKind.primary, _run),
             child: Text(
               _retry ? 'Retry restore' : 'Use version ${widget.version}',
             ),

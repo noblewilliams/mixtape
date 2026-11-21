@@ -20,6 +20,7 @@ import '../../data/auth/google_auth_gateway.dart';
 import '../providers/auth_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
+import '../widgets/foundation/haptics.dart';
 import 'first_run/step_scaffold.dart'
     show
         FirstRunBackground,
@@ -659,7 +660,8 @@ class _ProviderSignInButtonState extends State<ProviderSignInButton> {
         onTapDown: enabled ? (_) => _setPressed(true) : null,
         onTapUp: enabled ? (_) => _setPressed(false) : null,
         onTapCancel: enabled ? () => _setPressed(false) : null,
-        onTap: widget.onPressed,
+        // Signing in is the page's call to action.
+        onTap: Haptics.on(HapticKind.primary, widget.onPressed),
         child: AnimatedScale(
           scale: _pressed ? ProviderSignInButton.pressedScale : 1,
           duration: ProviderSignInButton.pressDuration,
@@ -921,7 +923,10 @@ class KeepMixesSignInPage extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 12),
               child: TextButton(
                 key: skipKey,
-                onPressed: () => Navigator.of(context).maybePop(),
+                onPressed: Haptics.on(
+                  HapticKind.dismiss,
+                  () => Navigator.of(context).maybePop(),
+                ),
                 style: TextButton.styleFrom(
                   foregroundColor: FirstRunColors.cream,
                   minimumSize: const Size(

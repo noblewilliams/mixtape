@@ -20,6 +20,7 @@ import '../../widgets/keep_sheet.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
 import 'welcome_screen.dart';
+import '../../widgets/foundation/haptics.dart';
 
 class ArtistsScreen extends ConsumerStatefulWidget {
   const ArtistsScreen({super.key, this.prompt});
@@ -230,7 +231,9 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
           label: 'Continue',
           forward: true,
           disabledHint: 'Add an artist, or skip for now.',
-          onPressed: _ready && !_busy ? () => unawaited(_continue()) : null,
+          onPressed: _ready && !_busy
+              ? Haptics.on(HapticKind.primary, () => unawaited(_continue()))
+              : null,
         ),
       ],
       foot: FootLink(
@@ -357,7 +360,7 @@ class _Chip extends StatelessWidget {
           IconButton(
             key: removeKey,
             tooltip: 'Remove $name',
-            onPressed: onRemove,
+            onPressed: Haptics.on(HapticKind.dismiss, onRemove),
             constraints: const BoxConstraints(
               minWidth: MixtapeMetrics.minTarget,
               minHeight: MixtapeMetrics.minTarget,
