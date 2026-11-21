@@ -8,6 +8,8 @@
 /// `ShellDock.swift` is the other half, behind the same availability answer.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart'
     show Factory, TargetPlatform, defaultTargetPlatform, visibleForTesting;
 import 'package:flutter/gestures.dart' show EagerGestureRecognizer;
@@ -19,6 +21,7 @@ import 'package:flutter/services.dart';
 import '../../../data/shell/shell_channel.dart';
 import 'glass_occlusion.dart';
 import 'segmented_toggle.dart';
+import 'haptics.dart';
 
 class GlassSegmentedControl<T> extends StatefulWidget {
   const GlassSegmentedControl({
@@ -177,6 +180,8 @@ class _GlassSegmentedControlState<T> extends State<GlassSegmentedControl<T>> {
     final index = (call.arguments as Map)['index'] as int;
     if (index < 0 || index >= widget.options.length) return;
     _shown = index;
+    // UISegmentedControl plays nothing itself.
+    unawaited(Haptics.play(HapticKind.select));
     widget.onChanged(widget.options[index].value);
     // Once the parent has had its say, the native control shows its answer.
     WidgetsBinding.instance

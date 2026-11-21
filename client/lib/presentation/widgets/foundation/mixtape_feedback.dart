@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../theme/mixtape_theme.dart';
 import 'prism_stripe.dart';
+import 'haptics.dart';
 
 enum FeedbackKind { success, error, info }
 
@@ -132,6 +135,7 @@ class MixtapeFeedback extends StatelessWidget {
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               onPressed: () {
+                                unawaited(Haptics.play(HapticKind.tap));
                                 ScaffoldMessenger.maybeOf(
                                   context,
                                 )?.hideCurrentSnackBar();

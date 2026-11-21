@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'haptics.dart';
 
 /// A native inset-grouped list: one rounded surface holding [InsetRow]s
 /// separated by an inset hairline.
@@ -102,6 +103,7 @@ class InsetRow extends StatelessWidget {
     this.subtitle,
     this.trailing,
     this.onTap,
+    this.haptic = HapticKind.tap,
     this.destructive = false,
   });
 
@@ -115,6 +117,9 @@ class InsetRow extends StatelessWidget {
   final Widget? trailing;
 
   final VoidCallback? onTap;
+
+  /// What the tap feels like: an ordinary tap unless the row does more.
+  final HapticKind haptic;
 
   /// Draws the title in err ink (Sign out, Forget, Delete).
   final bool destructive;
@@ -181,7 +186,7 @@ class InsetRow extends StatelessWidget {
     if (onTap == null) return row;
     return Material(
       type: MaterialType.transparency,
-      child: InkWell(onTap: onTap, child: row),
+      child: InkWell(onTap: Haptics.on(haptic, onTap), child: row),
     );
   }
 }

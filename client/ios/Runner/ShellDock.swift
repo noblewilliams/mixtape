@@ -22,7 +22,9 @@ class ShellDock: NSObject {
   private let miniPlayer: MiniPlayerView
   private let channel: FlutterMethodChannel
   private weak var hostView: UIView?
-  private let hapticGenerator = UIImpactFeedbackGenerator(style: .light)
+  /// Switching tabs is choosing among peers, so it plays the selection tick
+  /// like every other toggler in the app (Dart's `HapticKind.select`).
+  private let hapticGenerator = UISelectionFeedbackGenerator()
 
   /// Independent of `hide()`/`show()`, which are route-level visibility.
   private var isMinimized = false
@@ -81,7 +83,7 @@ class ShellDock: NSObject {
     host.view.tintColor = host.tabBar.tintColor
     host.onTabSelected = { [weak self] index in
       guard let self else { return }
-      self.hapticGenerator.impactOccurred()
+      self.hapticGenerator.selectionChanged()
       self.hapticGenerator.prepare()
       self.tabBar.selectedItem = self.tabBar.items?[index]
       self.channel.invokeMethod("tabChanged", arguments: index)
@@ -478,7 +480,7 @@ class ShellDock: NSObject {
 
 extension ShellDock: UITabBarDelegate {
   func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
-    hapticGenerator.impactOccurred()
+    hapticGenerator.selectionChanged()
     // The generator goes idle after firing; prime it for the next tap.
     hapticGenerator.prepare()
     channel.invokeMethod("tabChanged", arguments: item.tag)

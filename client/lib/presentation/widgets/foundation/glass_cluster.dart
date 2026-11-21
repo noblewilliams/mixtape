@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
 import 'liquid_glass_surface.dart';
+import 'haptics.dart';
 
 /// Neighbouring [GlassButton]s side by side, 4 pt apart. No capsule: each
 /// button paints its own glass.
@@ -84,6 +85,7 @@ class GlassButton extends StatelessWidget {
     this.child,
     required this.label,
     this.onPressed,
+    this.haptic = HapticKind.tap,
   }) : assert(
          (icon == null) != (child == null),
          'a GlassButton carries either an icon or a child, never both',
@@ -101,6 +103,10 @@ class GlassButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
 
+  /// What the press feels like: an ordinary tap unless the button opens
+  /// something ([HapticKind.open]) or picks ([HapticKind.select]).
+  final HapticKind haptic;
+
   /// The painted circle. The tap target is [MixtapeMetrics.minTarget].
   static const double diameter = 34;
   static const double iconSize = 17;
@@ -109,16 +115,17 @@ class GlassButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final enabled = onPressed != null;
+    final tap = Haptics.on(haptic, onPressed);
 
     return Semantics(
       button: true,
       enabled: enabled,
       label: label,
-      onTap: onPressed,
+      onTap: tap,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
+        onTap: tap,
         child: SizedBox.square(
           dimension: MixtapeMetrics.minTarget,
           child: Center(
@@ -157,6 +164,7 @@ class GlassLabelButton extends StatelessWidget {
     required this.label,
     this.semanticLabel,
     this.onPressed,
+    this.haptic = HapticKind.tap,
   });
 
   /// The glyph before the word; none draws the word alone (select mode's
@@ -170,6 +178,10 @@ class GlassLabelButton extends StatelessWidget {
   final String? semanticLabel;
   final VoidCallback? onPressed;
 
+  /// What the press feels like: an ordinary tap unless the button opens
+  /// something ([HapticKind.open]) or picks ([HapticKind.select]).
+  final HapticKind haptic;
+
   static const double iconSize = 18;
   static const double maxTextScale = 1.3;
 
@@ -177,16 +189,17 @@ class GlassLabelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final enabled = onPressed != null;
+    final tap = Haptics.on(haptic, onPressed);
 
     return Semantics(
       button: true,
       enabled: enabled,
       label: semanticLabel ?? label,
-      onTap: onPressed,
+      onTap: tap,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
+        onTap: tap,
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,

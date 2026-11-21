@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'haptics.dart';
 
 /// A borderless word-sized action; [quiet] drops it to secondary ink.
 class TextAction extends StatelessWidget {
@@ -12,6 +13,7 @@ class TextAction extends StatelessWidget {
     super.key,
     required this.label,
     this.onPressed,
+    this.haptic = HapticKind.tap,
     this.quiet = false,
     this.icon,
     this.iconAfter = false,
@@ -20,6 +22,10 @@ class TextAction extends StatelessWidget {
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// What the press feels like: an ordinary tap unless the caller says
+  /// otherwise (Cancel is [HapticKind.dismiss]).
+  final HapticKind haptic;
   final bool quiet;
 
   /// An optional glyph beside the word, in the same ink; [iconAfter] puts it
@@ -37,6 +43,7 @@ class TextAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final enabled = onPressed != null;
+    final tap = Haptics.on(haptic, onPressed);
 
     return Semantics(
       button: true,
@@ -44,11 +51,11 @@ class TextAction extends StatelessWidget {
       label: label,
       // `excludeSemantics` drops the detector's own tap action, and a node
       // with no action cannot be activated by VoiceOver. Declare it here.
-      onTap: onPressed,
+      onTap: tap,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
+        onTap: tap,
         child: Opacity(
           opacity: enabled ? 1 : 0.5,
           child: ConstrainedBox(
@@ -69,9 +76,7 @@ class TextAction extends StatelessWidget {
                         fontSize: 14,
                         fontWeight: quiet ? FontWeight.w500 : FontWeight.w600,
                         color: ink,
-                        decoration: underline
-                            ? TextDecoration.underline
-                            : null,
+                        decoration: underline ? TextDecoration.underline : null,
                         decorationColor: ink,
                       ),
                     );

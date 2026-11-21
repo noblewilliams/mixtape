@@ -8,9 +8,12 @@
 /// board H1): 26 pt drawn, 11.5 pt labels, 44 pt to touch.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'haptics.dart';
 
 /// One segment: the value it stands for and the word on it.
 @immutable
@@ -252,7 +255,10 @@ class SegmentedToggle<T> extends StatelessWidget {
     final selected = index == _selected;
     // Always reported, selected or not: a caller that cares whether the value
     // changed already compares it (both of ours do).
-    void tap() => onChanged(option.value);
+    void tap() {
+      unawaited(Haptics.play(HapticKind.select));
+      onChanged(option.value);
+    }
 
     return Semantics(
       button: true,

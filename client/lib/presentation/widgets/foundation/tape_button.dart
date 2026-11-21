@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
 import 'prism_stripe.dart';
+import 'haptics.dart';
 
 /// The primary mix action: 40 pt of tape shell with a centred label.
 ///
@@ -26,11 +27,16 @@ class TapeButton extends StatelessWidget {
     this.wrap = false,
     this.minHeight,
     this.leadingPadding,
+    this.haptic = HapticKind.primary,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool playing;
+
+  /// What the press feels like: a call to action by default; the mix's
+  /// Play and Create playlist pass [HapticKind.commit].
+  final HapticKind haptic;
 
   /// A leading mark, when a caller wants one. Nothing is drawn by default —
   /// the reel the board once showed is gone (smoke round two, note 2).
@@ -88,6 +94,7 @@ class TapeButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final enabled = onPressed != null;
+    final tap = Haptics.on(haptic, onPressed);
     final shell = ConstrainedBox(
       // A floor, not a fixed height: the label must grow at 200% text.
       constraints: BoxConstraints(
@@ -209,13 +216,13 @@ class TapeButton extends StatelessWidget {
       hint: semanticsHint,
       // `excludeSemantics` drops the detector's own tap action, and a node
       // with no action cannot be activated by VoiceOver. Declare it here.
-      onTap: onPressed,
+      onTap: tap,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         // Disabled, it still claims the tap rather than passing it to
         // whatever it sits on (the tape strip opens the tape).
-        onTap: onPressed ?? () {},
+        onTap: tap ?? () {},
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,
