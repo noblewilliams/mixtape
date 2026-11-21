@@ -2,7 +2,7 @@
 
 Date: 2026-11-21. Status: **decisions answered 2026-11-21** (see "Founder
 answers" at the end), and the permission pop-up board was approved the same
-day. Gate 0 spikes come before the plan.
+day. Gate 0 spikes passed 2026-11-22. Next: the implementation plan.
 
 ## Why
 
@@ -81,11 +81,13 @@ What these mean for this turn:
   and is ended in a `finally` as `withRequestPool` does today. Hyperdrive is
   not needed and is not proposed (the docs do not cover it from DOs or
   Workflows, and today's direct Neon pool already works).
-- **Deploys restart running code.** A deploy mid-turn interrupts whatever
-  runs it, on all three, and the platform retries it (alarm retry, step
-  retry, message redelivery). We deploy often, so this is the **common**
-  retry case, not a rare one. To confirm in the spike (below): exactly what
-  a DO alarm sees when a deploy lands during it.
+- **A deploy does not cut a running alarm short** (gate 0, 2026-11-22). A
+  60 s and a 170 s alarm, each with a deploy landing 10 to 30 s in, both ran
+  to the end on the old version. There was no retry and no error. The new
+  version takes the next request. That is two runs, not a guarantee, so the
+  retry guard below stays. Evictions, crashes and host moves can still kill
+  a turn halfway, but deploys are not the common cause the first draft
+  feared.
 - **Cost does not decide.** All three are effectively free at our volume
   (see "Costs"). The model calls cost a hundred times more than any of them.
 
@@ -420,15 +422,15 @@ simply there on reopen, as today.
   once. On `429 TooManyRequests` or a 5xx, give up for this turn
   (`notify_outcome = 'failed'`). A ready mix is not worth a retry queue. The
   log records the status and reason code only.
-- **HTTP/2.** Apple requires HTTP/2. The Workers fetch docs do not say
-  which protocol outbound fetch uses to an origin. A Workers APNs client
-  exists (`@fivesheepco/cloudflare-apns2`, "native Cloudflare Workers
-  APIs"), which suggests it works, but nothing official confirms it.
-  **This is gate 0 (spike):** one sandbox push from a deployed Worker
-  before anything else is built. If it fails, the fallback is FCM's HTTP v1
-  API, which accepts HTTP/1.1 and forwards to APNs, with the same table
-  (`provider = 'fcm'`). It adds a Firebase project and its SDK on iOS. The
-  founder decides then.
+- **HTTP/2 works** (gate 0, 2026-11-22). A deployed Worker's plain
+  `fetch` to both `api.sandbox.push.apple.com` and `api.push.apple.com`,
+  sent with a deliberately bogus token and JWT, got Apple's own answer:
+  `403 {"reason":"InvalidProviderToken"}` with an `apns-id` header. Only
+  APNs's HTTP/2 front end answers that way. Cloudflare's egress speaks
+  HTTP/2 to Apple for us. Each push opens a fresh connection
+  (`connection: close`), at 0.3 to 1.2 s, which is fine for one push per
+  turn. A real signed push to a real device remains for the stage-4 device
+  pass. FCM is no longer needed as a fallback.
 
 **Payload** (under 4 KB, which Apple caps):
 
@@ -618,14 +620,16 @@ turn reads as omitted and gets marked failed on the way.
 
 ## Rollout
 
-0. **Gate 0, spikes (half a day, throwaway branch):**
-   - One APNs sandbox push from a deployed Worker, which proves HTTP/2.
-   - A DO alarm running a 60 s fake turn while a deploy lands, to see what
-     the alarm gets (retry, error, or silent loss).
-   - The watch-stream proxy from Worker to DO cancelling cleanly on a client
-     drop.
-
-   Results go into this spec before the plan.
+0. **Gate 0, spikes: done 2026-11-22, all three passed.** They ran on a
+   throwaway Worker (`mixtape-spike-durable-turns`), deleted afterwards.
+   `mixtape-api` was not touched.
+   - **APNs over HTTP/2 from a Worker:** works (see "APNs from Workers").
+   - **A deploy during a running alarm:** a 60 s and a 170 s job both
+     finished on the old version, with no retry (see "Cloudflare facts").
+   - **The watch stream proxied Worker → DO:** steps reached the client
+     once a second through `stub.fetch`. When the client dropped at 8 s,
+     the object's next write failed about 1 s later, the object removed
+     the watcher, and the job ran on to its end at 40 s.
 1. **Server, dark.** Migrations: `dj_turns`, `push_devices`,
    `apns_provider_tokens`, and `dj_sessions.current_turn_id`. Add the
    `TurnRunner` class, its binding and migration, and the routes. Both flags
@@ -757,7 +761,8 @@ our volume.
 - **A per-isolate APNs token:** many isolates would trip
   `TooManyProviderTokenUpdates`.
 - **Firebase Messaging on iOS:** it adds an SDK and a vendor for something a
-  method channel and a fetch do. It returns only as the HTTP/2 fallback.
+  method channel and a fetch do. Gate 0 showed it is not needed as an HTTP/2
+  fallback either.
 - **The server always pushing, with the client always suppressing in the
   foreground:** a listener who backgrounded within 30 s would get both
   notifications from the quick fix. The `push` flag on the stream and the
@@ -781,7 +786,7 @@ our volume.
    storage map, a watcher set), and the risky behaviour lives in
    `runTurnJob`, which Node tests cover fully. The facts fakes cannot show
    (the deploy-mid-alarm retry, a stream cancelling through the proxy) are
-   exactly what gate 0's spike checks on a real deploy, and the stage-2
+   exactly what gate 0's spikes checked on a real deploy (both passed), and the stage-2
    smoke checks again. Add `@cloudflare/vitest-pool-workers` only if the
    spike shows behaviour the fakes miss.
 6. **Durable Object or Workflow (asked):** the Durable Object, (A). It is
