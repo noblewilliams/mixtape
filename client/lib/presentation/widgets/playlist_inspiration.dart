@@ -21,6 +21,7 @@ import '../providers/auth_provider.dart';
 import '../providers/playlist_providers.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/flush_row.dart';
+import 'foundation/haptics.dart';
 import 'foundation/inset_group.dart';
 import 'foundation/mixtape_sheet.dart';
 import 'foundation/status_word.dart';
@@ -289,7 +290,11 @@ class InspirationChip extends StatelessWidget {
     final menu = _hasMenu;
     final enabled = menu || onPick != null;
     final cross = onDetach != null;
-    final open = enabled ? (menu ? () => _openMenu(context) : onPick) : null;
+    // Either way the chip presents something on top: its menu or the picker.
+    final open = enabled
+        ? Haptics.on(HapticKind.open, menu ? () => _openMenu(context) : onPick)
+        : null;
+    final detach = Haptics.on(HapticKind.dismiss, onDetach);
 
     return Opacity(
       opacity: enabled || cross ? 1 : 0.5,
@@ -356,12 +361,12 @@ class InspirationChip extends StatelessWidget {
                 // `excludeSemantics` drops the detector's own tap action, and
                 // a node with no action cannot be activated by VoiceOver.
                 // Declare it here.
-                onTap: onDetach,
+                onTap: detach,
                 excludeSemantics: true,
                 child: GestureDetector(
                   key: detachKey,
                   behavior: HitTestBehavior.opaque,
-                  onTap: onDetach,
+                  onTap: detach,
                   child: SizedBox(
                     width: crossTarget,
                     height: height - 2,
@@ -615,7 +620,10 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker> {
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   key: PlaylistPicker.retryKey,
-                  onPressed: () => _load(reset: _playlists.isEmpty),
+                  onPressed: Haptics.on(
+                    HapticKind.tap,
+                    () => _load(reset: _playlists.isEmpty),
+                  ),
                   child: const Text('Retry'),
                 ),
               ),
@@ -658,6 +666,8 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker> {
               label: PlaylistPicker.notEnoughLabel,
               kind: StatusKind.warn,
             ),
+      // Picking an option in the sheet.
+      haptic: HapticKind.select,
       onTap: enough
           ? () {
               if (!_signedIn) return;
@@ -686,11 +696,16 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker> {
       child: InsetRow(
         title: PlaylistPicker.excludeLabel,
         subtitle: compact ? null : PlaylistPicker.excludeHint,
+        // The row and its switch both flip the switch.
+        haptic: HapticKind.toggle,
         onTap: () => setState(() => _exclude = !_exclude),
         trailing: Switch.adaptive(
           key: PlaylistPicker.excludeKey,
           value: _exclude,
-          onChanged: (value) => setState(() => _exclude = value),
+          onChanged: Haptics.onValue(
+            HapticKind.toggle,
+            (value) => setState(() => _exclude = value),
+          ),
         ),
       ),
     );

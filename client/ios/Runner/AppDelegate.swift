@@ -33,6 +33,10 @@ import UIKit
   private var audioSessionChannel: FlutterMethodChannel?
   private var deviceChannel: FlutterMethodChannel?
 
+  /// Retained so `mixtape/haptics` — the full haptic palette Dart's
+  /// `Haptics` plays on every touch — stays alive for the life of the app.
+  private var hapticsBridge: HapticsBridge?
+
   /// The scene's window, once it connects: where the idiom is read from, so
   /// the answer describes the scene the app renders in, not the hardware.
   fileprivate weak var sceneWindow: UIWindow? {
@@ -73,6 +77,7 @@ import UIKit
     registerOpenArchiveChannel(with: messenger)
     registerVoiceChannels(with: messenger)
     registerDeviceChannel(with: messenger)
+    hapticsBridge = HapticsBridge(binaryMessenger: messenger)
     // Liquid Glass for surfaces that live inside Flutter (the collapsing
     // title bar, the Home panel). Flutter only inserts it when the dock is
     // available, and falls back to `FrostedSurface` otherwise.
@@ -329,5 +334,66 @@ private final class SceneHooks: NSObject, FlutterSceneLifeCycleDelegate {
     guard let window = (scene.delegate as? FlutterSceneDelegate)?.window else { return }
     app?.sceneWindow = window
     app?.installDock(in: window, messenger: messenger)
+  }
+}
+
+/// `mixtape/haptics`: plays one pattern from Dart's haptic vocabulary
+/// (`lib/presentation/widgets/foundation/haptics.dart`). Dart owns the table
+/// of what each touch feels like; this only knows how to play a style at an
+/// intensity, so retuning the feel never needs a new binary.
+final class HapticsBridge: NSObject {
+  private let channel: FlutterMethodChannel
+  private var impacts: [UIImpactFeedbackGenerator.FeedbackStyle: UIImpactFeedbackGenerator] = [:]
+  private let selection = UISelectionFeedbackGenerator()
+  private let notification = UINotificationFeedbackGenerator()
+
+  init(binaryMessenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "mixtape/haptics", binaryMessenger: binaryMessenger)
+    super.init()
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "play" else { return result(FlutterMethodNotImplemented) }
+      let args = call.arguments as? [String: Any]
+      let style = args?["style"] as? String ?? "light"
+      let intensity = CGFloat((args?["intensity"] as? NSNumber)?.doubleValue ?? 1)
+      self?.play(style: style, intensity: intensity)
+      result(nil)
+    }
+  }
+
+  private func play(style: String, intensity: CGFloat) {
+    switch style {
+    case "selection":
+      selection.selectionChanged()
+      selection.prepare()
+    case "success":
+      notification.notificationOccurred(.success)
+      notification.prepare()
+    case "warning":
+      notification.notificationOccurred(.warning)
+      notification.prepare()
+    case "error":
+      notification.notificationOccurred(.error)
+      notification.prepare()
+    default:
+      let generator = impact(for: style)
+      generator.impactOccurred(intensity: min(max(intensity, 0), 1))
+      // The generator goes idle after firing; prime it for the next touch.
+      generator.prepare()
+    }
+  }
+
+  private func impact(for style: String) -> UIImpactFeedbackGenerator {
+    let feedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle
+    switch style {
+    case "soft": feedbackStyle = .soft
+    case "rigid": feedbackStyle = .rigid
+    case "medium": feedbackStyle = .medium
+    case "heavy": feedbackStyle = .heavy
+    default: feedbackStyle = .light
+    }
+    if let existing = impacts[feedbackStyle] { return existing }
+    let generator = UIImpactFeedbackGenerator(style: feedbackStyle)
+    impacts[feedbackStyle] = generator
+    return generator
   }
 }

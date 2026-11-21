@@ -44,6 +44,7 @@ import '../widgets/foundation/tape_button.dart';
 import 'queue_screen.dart';
 import '../widgets/foundation/mixtape_sheet.dart';
 import '../widgets/foundation/mixtape_menu.dart';
+import '../widgets/foundation/haptics.dart';
 
 /// What the More menu offers.
 enum _NowPlayingMenu { repeat, stop, listening }
@@ -302,6 +303,7 @@ class _NowPlaying extends StatelessWidget {
             key: PlaybackScreen.closeKey,
             icon: Icons.keyboard_arrow_down,
             label: 'Close',
+            haptic: HapticKind.dismiss,
             onPressed: () => Navigator.of(context).maybePop(),
           ),
         ),
@@ -590,6 +592,7 @@ class _NowPlaying extends StatelessWidget {
           icon: _playing ? Icons.pause : Icons.play_arrow,
           label: _playing ? 'Pause' : 'Play',
           glyph: PlaybackScreen.transportPlayGlyph,
+          haptic: HapticKind.primary,
           onPressed: enabled
               ? () => player.command(_playing ? 'pause' : 'resume')
               : null,
@@ -629,6 +632,8 @@ class _NowPlaying extends StatelessWidget {
               key: PlaybackScreen.shapeKey,
               icon: Icons.show_chart,
               label: 'Shape',
+              // Presents the shape sheet.
+              haptic: HapticKind.open,
               onPressed: shape == null
                   ? null
                   : () => _openShape(context, detail!),
@@ -656,6 +661,8 @@ class _NowPlaying extends StatelessWidget {
           key: PlaybackScreen.sendToMusicKey,
           icon: Icons.ios_share,
           label: 'Send to Music',
+          // Hands the mix to Apple Music to play now: the commit.
+          haptic: HapticKind.commit,
           onPressed: enabled && !player.busy && player.tracks.isNotEmpty
               ? () => _sendToMusic(context)
               : null,
@@ -730,12 +737,17 @@ class _TransportButton extends StatelessWidget {
     required this.label,
     this.onPressed,
     this.glyph = PlaybackScreen.transportGlyph,
+    this.haptic = HapticKind.tap,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
   final double glyph;
+
+  /// Previous and Next are taps; Play/Pause is the call to action, as on
+  /// the mini-player.
+  final HapticKind haptic;
 
   @override
   Widget build(BuildContext context) {
@@ -751,7 +763,7 @@ class _TransportButton extends StatelessWidget {
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
+        onTap: Haptics.on(haptic, onPressed),
         child: SizedBox.square(
           dimension: PlaybackScreen.transportTarget,
           child: Center(
@@ -774,11 +786,15 @@ class _NowPlayingAction extends StatelessWidget {
     required this.label,
     this.onPressed,
     this.active = false,
+    this.haptic = HapticKind.tap,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
+
+  /// What the press feels like (`haptics.dart`).
+  final HapticKind haptic;
 
   /// The lit action; the rest are muted (`.np-acts button.on`).
   final bool active;
@@ -801,7 +817,7 @@ class _NowPlayingAction extends StatelessWidget {
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
+        onTap: Haptics.on(haptic, onPressed),
         child: Opacity(
           opacity: enabled ? 1 : 0.4,
           child: ConstrainedBox(
@@ -872,9 +888,13 @@ class PlaybackMini extends ConsumerWidget {
                   : 'Paused',
             ),
             trailing: const Icon(Icons.open_in_full),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const PlaybackScreen()),
+            // Presents Now Playing, as the dock's mini-player does.
+            onTap: Haptics.on(
+              HapticKind.open,
+              () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PlaybackScreen()),
+              ),
             ),
           ),
         );
@@ -935,12 +955,18 @@ class _ListeningPreferencesState
         ),
         actions: [
           CupertinoDialogAction(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: Haptics.on(
+              HapticKind.dismiss,
+              () => Navigator.pop(context, false),
+            ),
             child: const Text('Cancel'),
           ),
           CupertinoDialogAction(
             isDestructiveAction: true,
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: Haptics.on(
+              HapticKind.destructive,
+              () => Navigator.pop(context, true),
+            ),
             child: const Text('Clear learned listening'),
           ),
         ],
@@ -996,13 +1022,17 @@ class _ListeningPreferencesState
                       title: 'Learn from my listening in Mixtape',
                       trailing: Switch(
                         value: player.preferences?['enabled'] == true,
-                        onChanged: busy ? null : save,
+                        onChanged: busy
+                            ? null
+                            : Haptics.onValue(HapticKind.toggle, save),
                       ),
                     ),
                     InsetRow(
                       title: 'Clear learned listening',
                       destructive: true,
                       trailing: const SizedBox.shrink(),
+                      // Presents the confirmation.
+                      haptic: HapticKind.open,
                       onTap: busy ? null : clear,
                     ),
                   ],

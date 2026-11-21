@@ -57,6 +57,7 @@ import '../providers/playback_provider.dart';
 import '../screens/playback_screen.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/alert_field_box.dart';
+import 'foundation/haptics.dart';
 import 'foundation/label_chip.dart';
 import 'foundation/mixtape_feedback.dart';
 import 'foundation/service_marks.dart';
@@ -408,7 +409,8 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     } on MusicKitException catch (e) {
       // A plain failureMessage hides Apple's reason from the listener; keep
       // it in the device log so a failure stays diagnosable.
-      if (failureMessage != null) debugPrint('Music app hand-off: ${e.message}');
+      if (failureMessage != null)
+        debugPrint('Music app hand-off: ${e.message}');
       if (!mounted) return;
       showMixSnack(
         failureMessage ?? mixPlayFailureMessage(e.message),
@@ -678,6 +680,9 @@ class MixActions extends ConsumerWidget {
         semanticsLabel: spotifyPlaylistSemantics,
         fill: true,
         leading: SpotifyMark(size: markSize, color: ink),
+        // Copies the mix and hands it to Spotify (the intro sheet, when it
+        // shows, is debounced into this).
+        haptic: HapticKind.commit,
         onPressed: enabled && !sharing && queue.isNotEmpty
             ? onCreateSpotifyPlaylist
             : null,
@@ -693,6 +698,8 @@ class MixActions extends ConsumerWidget {
       label: createPlaylistLabel,
       fill: !compact || stacked,
       minHeight: compact && !stacked ? compactHeight : null,
+      // Presents the save dialog; its Save is the commit.
+      haptic: HapticKind.open,
       onPressed: live && !creatingPlaylist ? onCreatePlaylist : null,
     );
     return ListenableBuilder(
@@ -712,6 +719,9 @@ class MixActions extends ConsumerWidget {
           fill: !compact || stacked,
           minHeight: compact && !stacked ? compactHeight : null,
           leading: Icon(Icons.play_arrow_rounded, size: 16, color: ink),
+          // Playing it is the commit; once it plays, the button only goes
+          // to Now Playing.
+          haptic: playing ? HapticKind.tap : HapticKind.commit,
           onPressed: playing
               ? onOpenNowPlaying
               : (live && !starting && !sendingToMusic ? onPlay : null),
@@ -923,13 +933,20 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
       ),
       actions: [
         CupertinoDialogAction(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          onPressed: _submitting
+              ? null
+              : Haptics.on(
+                  HapticKind.dismiss,
+                  () => Navigator.of(context).pop(),
+                ),
           child: const Text('Cancel'),
         ),
         CupertinoDialogAction(
           key: widget.keys.saveConfirm,
           isDefaultAction: true,
-          onPressed: _submitting || _name.text.trim().isEmpty ? null : _submit,
+          onPressed: _submitting || _name.text.trim().isEmpty
+              ? null
+              : Haptics.on(HapticKind.commit, _submit),
           child: _submitting
               ? const SizedBox(
                   width: 16,

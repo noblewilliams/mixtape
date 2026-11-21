@@ -17,6 +17,7 @@ import 'package:flutter/services.dart';
 
 import '../../../data/shell/shell_channel.dart';
 import 'liquid_glass_surface.dart' show LiquidGlassSurface;
+import 'haptics.dart';
 
 class GlassSwitch extends StatefulWidget {
   const GlassSwitch({
@@ -127,7 +128,11 @@ class _GlassSwitchState extends State<GlassSwitch> {
   @override
   Widget build(BuildContext context) {
     if (_nativeAvailable != true) {
-      return Switch.adaptive(value: widget.value, onChanged: widget.onChanged);
+      // The native UISwitch plays its own haptic; the drawn one needs ours.
+      return Switch.adaptive(
+        value: widget.value,
+        onChanged: Haptics.onValue(HapticKind.toggle, widget.onChanged),
+      );
     }
 
     // The switch resolves its colours against the iOS *system* appearance,

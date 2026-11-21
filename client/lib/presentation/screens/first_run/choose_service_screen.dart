@@ -13,6 +13,7 @@ import '../../widgets/foundation/service_marks.dart';
 import 'choose_method_screen.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
+import '../../widgets/foundation/haptics.dart';
 
 class ChooseServiceScreen extends ConsumerWidget {
   const ChooseServiceScreen({super.key, this.mode = AddMusicMode.firstRun});
@@ -56,13 +57,20 @@ class ChooseServiceScreen extends ConsumerWidget {
         key: appleKey,
         label: 'Apple Music',
         leading: const AppleMusicMark(size: 22, color: FirstRunColors.ink),
-        onPressed: () => _choose(context, MusicService.apple),
+        // Picking one service of two.
+        onPressed: Haptics.on(
+          HapticKind.select,
+          () => _choose(context, MusicService.apple),
+        ),
       ),
       FirstRunPill(
         key: spotifyKey,
         label: 'Spotify',
         leading: const SpotifyMark(size: 22, color: FirstRunColors.ink),
-        onPressed: () => _choose(context, MusicService.spotify),
+        onPressed: Haptics.on(
+          HapticKind.select,
+          () => _choose(context, MusicService.spotify),
+        ),
       ),
     ],
     // From Library the back button is the way out; "Skip" belongs to the

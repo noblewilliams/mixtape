@@ -12,6 +12,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 
 enum ConversationTurnKind { user, dj, error }
 
@@ -127,7 +128,9 @@ class ConversationTurn extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(child: Text(text, style: tokens.body.copyWith(color: ink))),
+                Flexible(
+                  child: Text(text, style: tokens.body.copyWith(color: ink)),
+                ),
                 if (kind == ConversationTurnKind.error && onResend != null) ...[
                   const SizedBox(width: 6),
                   SizedBox.square(
@@ -140,13 +143,18 @@ class ConversationTurn extends StatelessWidget {
                         minWidth: resendSize,
                         minHeight: resendSize,
                       ),
-                      onPressed: resendEnabled ? onResend : null,
+                      // Resending is the send again: it makes the mix.
+                      onPressed: resendEnabled
+                          ? Haptics.on(HapticKind.commit, onResend)
+                          : null,
                       icon: Semantics(
                         label: 'Resend',
                         child: Icon(
                           Icons.sync,
                           size: 18,
-                          color: resendEnabled ? ink : ink.withValues(alpha: 0.4),
+                          color: resendEnabled
+                              ? ink
+                              : ink.withValues(alpha: 0.4),
                         ),
                       ),
                     ),
@@ -197,7 +205,8 @@ class WorkingIndicator extends StatefulWidget {
   static const String caption = 'the DJ is listening…';
 
   /// An album session's line (board A1): says the catalogue check too.
-  static const String albumCaption = 'Finding your album · checking Apple Music';
+  static const String albumCaption =
+      'Finding your album · checking Apple Music';
   static const String albumAnnouncement = 'Finding your album';
 
   @override
@@ -252,7 +261,10 @@ class WorkingIndicatorState extends State<WorkingIndicator>
               Container(
                 key: WorkingIndicator.dotsKey,
                 margin: const EdgeInsets.symmetric(vertical: 5),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: isDark
                       ? ConversationTurn.djFillDark
@@ -269,9 +281,7 @@ class WorkingIndicatorState extends State<WorkingIndicator>
                         DecoratedBox(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: tokens.muted.withValues(
-                              alpha: _alphaFor(i),
-                            ),
+                            color: tokens.muted.withValues(alpha: _alphaFor(i)),
                           ),
                           child: const SizedBox.square(
                             dimension: WorkingIndicator.dotSize,

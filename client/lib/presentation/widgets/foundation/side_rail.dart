@@ -23,6 +23,7 @@ import '../../../data/shell/mini_player_state.dart';
 import '../../theme/mixtape_theme.dart';
 import 'liquid_glass_surface.dart';
 import 'square_art.dart';
+import 'haptics.dart';
 
 /// Whether the shell should dock to the side: the window's own insets (not a
 /// page's, which have consumed them) put the system's bar on a side edge.
@@ -102,7 +103,7 @@ class SideRail extends StatelessWidget {
               final tabs = _Tabs(
                 key: tabsKey,
                 currentIndex: currentIndex,
-                onTap: onTap,
+                onTap: Haptics.onValue(HapticKind.select, onTap)!,
                 compact: compact,
               );
               final player = mini.visible
@@ -110,9 +111,12 @@ class SideRail extends StatelessWidget {
                       key: miniPlayerKey,
                       mini: mini,
                       compact: compact,
-                      onTap: onMiniTap,
-                      onPlayPause: onMiniPlayPause,
-                      onNext: onMiniNext,
+                      onTap: Haptics.on(HapticKind.open, onMiniTap),
+                      onPlayPause: Haptics.on(
+                        HapticKind.primary,
+                        onMiniPlayPause,
+                      ),
+                      onNext: Haptics.on(HapticKind.tap, onMiniNext),
                     )
                   : null;
               // Low: everything gathers at the bottom, the tabs last, by the

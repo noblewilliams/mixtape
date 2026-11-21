@@ -14,6 +14,7 @@ import '../../../data/shell/mini_player_state.dart';
 import '../../theme/mixtape_theme.dart';
 import 'frosted_surface.dart';
 import 'square_art.dart';
+import 'haptics.dart';
 
 /// How much room a screen leaves below its content so the dock never covers
 /// it. The mini-player's band is always reserved — the board's rule is that
@@ -110,9 +111,12 @@ class FrostedDock extends StatelessWidget {
                   child: _MiniPlayer(
                     key: miniPlayerKey,
                     mini: mini,
-                    onTap: onMiniTap,
-                    onPlayPause: onMiniPlayPause,
-                    onNext: onMiniNext,
+                    onTap: Haptics.on(HapticKind.open, onMiniTap),
+                    onPlayPause: Haptics.on(
+                      HapticKind.primary,
+                      onMiniPlayPause,
+                    ),
+                    onNext: Haptics.on(HapticKind.tap, onMiniNext),
                   ),
                 ),
               ),
@@ -127,7 +131,7 @@ class FrostedDock extends StatelessWidget {
               child: _TabBar(
                 key: tabBarKey,
                 currentIndex: currentIndex,
-                onTap: onTap,
+                onTap: Haptics.onValue(HapticKind.select, onTap)!,
               ),
             ),
           ],

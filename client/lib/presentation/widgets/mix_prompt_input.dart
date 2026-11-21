@@ -6,6 +6,7 @@ import '../../core/config.dart';
 import '../providers/voice_providers.dart';
 import '../theme/mixtape_theme.dart';
 import 'ai_consent_sheet.dart';
+import 'foundation/haptics.dart';
 import 'foundation/prism_stripe.dart';
 import 'foundation/text_action.dart';
 import 'voice_level_meter.dart';
@@ -655,9 +656,16 @@ class _MixPromptInputState extends State<MixPromptInput>
                             tooltip: listening
                                 ? 'Stop listening'
                                 : 'Speak your idea',
+                            // Opening the microphone is a call to action;
+                            // closing it is an ordinary tap.
                             onPressed: transcribing || paused
                                 ? null
-                                : () => unawaited(_toggleVoice()),
+                                : Haptics.on(
+                                    listening
+                                        ? HapticKind.tap
+                                        : HapticKind.primary,
+                                    () => unawaited(_toggleVoice()),
+                                  ),
                             child: Icon(
                               listening ? Icons.pause : Icons.mic_none,
                               size: 18,
@@ -676,7 +684,10 @@ class _MixPromptInputState extends State<MixPromptInput>
                           _iconKey(
                             key: const Key('start-session'),
                             tooltip: widget.sendLabel,
-                            onPressed: paused ? null : _submit,
+                            // The send that makes the mix.
+                            onPressed: paused
+                                ? null
+                                : Haptics.on(HapticKind.commit, _submit),
                             child: DecoratedBox(
                               key: const Key('send-surface'),
                               decoration: BoxDecoration(
@@ -848,7 +859,8 @@ class _MixPromptInputState extends State<MixPromptInput>
   Widget _stopKey(bool isDark, MixtapeTokens tokens) => _iconKey(
     key: MixPromptInput.stopKey,
     tooltip: 'Stop',
-    onPressed: widget.onStop,
+    // Backs out of the turn the DJ is working on.
+    onPressed: Haptics.on(HapticKind.dismiss, widget.onStop),
     child: DecoratedBox(
       decoration: BoxDecoration(
         color: isDark

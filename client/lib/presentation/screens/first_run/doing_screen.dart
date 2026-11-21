@@ -26,6 +26,7 @@ import '../spotify_request_screen.dart';
 import 'choose_method_screen.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
+import '../../widgets/foundation/haptics.dart';
 
 class DoingScreen extends ConsumerStatefulWidget {
   const DoingScreen({
@@ -380,7 +381,9 @@ class _DoingScreenState extends ConsumerState<DoingScreen> {
           child: FirstRunPill(
             key: DoingScreen.retryKey,
             label: 'Retry',
-            onPressed: failed ? () => unawaited(_startSync()) : null,
+            onPressed: failed
+                ? Haptics.on(HapticKind.primary, () => unawaited(_startSync()))
+                : null,
           ),
         ),
         if (failed)
@@ -388,14 +391,16 @@ class _DoingScreenState extends ConsumerState<DoingScreen> {
             key: DoingScreen.continueKey,
             label: "Continue with what's in",
             forward: true,
-            onPressed: () => _finish(_songs),
+            onPressed: Haptics.on(HapticKind.primary, () => _finish(_songs)),
           )
         else
           FirstRunPill(
             key: DoingScreen.doneKey,
             label: 'Done',
             forward: true,
-            onPressed: done ? () => _finish(_songs) : null,
+            onPressed: done
+                ? Haptics.on(HapticKind.primary, () => _finish(_songs))
+                : null,
           ),
       ],
     );
@@ -433,14 +438,20 @@ class _DoingScreenState extends ConsumerState<DoingScreen> {
           label: 'Open Exportify',
           semanticsHint: 'opens outside Mixtape',
           trailing: const Icon(Icons.open_in_new),
-          onPressed: () => unawaited(openLink(exportifyUrl)),
+          onPressed: Haptics.on(
+            HapticKind.primary,
+            () => unawaited(openLink(exportifyUrl)),
+          ),
         ),
         FirstRunPill(
           key: DoingScreen.chooseFilesKey,
           label: 'Choose files',
           emphasis: true,
           leading: const Icon(Icons.insert_drive_file_outlined),
-          onPressed: _busy ? null : () => unawaited(_chooseFiles()),
+          // Presents the file picker.
+          onPressed: _busy
+              ? null
+              : Haptics.on(HapticKind.open, () => unawaited(_chooseFiles())),
         ),
       ],
     );
@@ -472,7 +483,12 @@ class _DoingScreenState extends ConsumerState<DoingScreen> {
           key: DoingScreen.requestedKey,
           label: "I've requested it",
           forward: true,
-          onPressed: _busy ? null : () => unawaited(_markRequested()),
+          onPressed: _busy
+              ? null
+              : Haptics.on(
+                  HapticKind.primary,
+                  () => unawaited(_markRequested()),
+                ),
         ),
       ],
     );
@@ -505,7 +521,10 @@ class _DoingScreenState extends ConsumerState<DoingScreen> {
           label: 'Choose files',
           emphasis: true,
           leading: const Icon(Icons.insert_drive_file_outlined),
-          onPressed: _busy ? null : () => unawaited(_chooseFiles()),
+          // Presents the file picker.
+          onPressed: _busy
+              ? null
+              : Haptics.on(HapticKind.open, () => unawaited(_chooseFiles())),
         ),
       ],
     );
@@ -578,7 +597,7 @@ class _MarkupText extends StatelessWidget {
           addressText: address,
           address: (value) => InkWell(
             key: linkKey,
-            onTap: onOpenAddress,
+            onTap: Haptics.on(HapticKind.tap, onOpenAddress),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text(

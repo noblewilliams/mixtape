@@ -9,6 +9,7 @@ import '../../../data/listening/listening_models.dart';
 import 'doing_screen.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
+import '../../widgets/foundation/haptics.dart';
 
 enum MusicService { apple, spotify }
 
@@ -60,24 +61,36 @@ class ChooseMethodScreen extends StatelessWidget {
               FirstRunPill(
                 key: appleSyncKey,
                 label: 'Sync Apple Music',
-                onPressed: () => _choose(context, AddMethod.appleSync),
+                onPressed: Haptics.on(
+                  HapticKind.select,
+                  () => _choose(context, AddMethod.appleSync),
+                ),
               ),
               FirstRunPill(
                 key: appleExportKey,
                 label: 'Upload an Apple export',
-                onPressed: () => _choose(context, AddMethod.appleExport),
+                onPressed: Haptics.on(
+                  HapticKind.select,
+                  () => _choose(context, AddMethod.appleExport),
+                ),
               ),
             ]
           : [
               FirstRunPill(
                 key: exportifyKey,
                 label: 'Exportify, a few minutes',
-                onPressed: () => _choose(context, AddMethod.exportify),
+                onPressed: Haptics.on(
+                  HapticKind.select,
+                  () => _choose(context, AddMethod.exportify),
+                ),
               ),
               FirstRunPill(
                 key: spotifyExportKey,
                 label: 'Spotify data export, a few days',
-                onPressed: () => _choose(context, AddMethod.spotifyExport),
+                onPressed: Haptics.on(
+                  HapticKind.select,
+                  () => _choose(context, AddMethod.spotifyExport),
+                ),
               ),
             ],
       foot: const FootNote(foot),

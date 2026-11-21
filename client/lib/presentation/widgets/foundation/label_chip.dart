@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'haptics.dart';
 
 /// 36 pt of pale tape label, optionally marked with a reel hole.
 class LabelChip extends StatelessWidget {
@@ -14,6 +15,7 @@ class LabelChip extends StatelessWidget {
     super.key,
     required this.label,
     this.onPressed,
+    this.haptic = HapticKind.select,
     this.leading,
     this.hole = true,
     this.fill = false,
@@ -22,6 +24,9 @@ class LabelChip extends StatelessWidget {
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// What the press feels like: choosing, by default.
+  final HapticKind haptic;
 
   /// Replaces the reel hole when a different leading mark is wanted.
   final Widget? leading;
@@ -52,6 +57,7 @@ class LabelChip extends StatelessWidget {
     final tokens = context.tokens;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final enabled = onPressed != null;
+    final tap = Haptics.on(haptic, onPressed);
     final glyph =
         leading ??
         (hole
@@ -116,13 +122,13 @@ class LabelChip extends StatelessWidget {
       label: label,
       // `excludeSemantics` drops the detector's own tap action, and a node
       // with no action cannot be activated by VoiceOver. Declare it here.
-      onTap: onPressed,
+      onTap: tap,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         // Disabled, it still claims the tap rather than passing it to
         // whatever it sits on (the tape strip opens the tape).
-        onTap: onPressed ?? () {},
+        onTap: tap ?? () {},
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,

@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'mix_prompt_input.dart';
 
 class ComposerPlusButton extends StatelessWidget {
@@ -33,36 +34,47 @@ class ComposerPlusButton extends StatelessWidget {
     final tokens = context.tokens;
     final enabled = onPressed != null;
     return Builder(
-      builder: (anchor) => Semantics(
-        button: true,
-        enabled: enabled,
-        label: 'Add',
-        onTap: enabled ? () => onPressed!(anchor) : null,
-        excludeSemantics: true,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: enabled ? () => onPressed!(anchor) : null,
-          child: Opacity(
-            opacity: enabled ? 1 : 0.5,
-            child: SizedBox(
-              width: extent,
-              height: MixPromptInput.minHeight,
-              child: Center(
-                child: Container(
-                  width: size,
-                  height: size,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: tokens.field,
-                    border: Border.all(color: tokens.hairline),
+      builder: (anchor) {
+        // Presents the + menu, so it plays open; the menu's own open is
+        // debounced into this one.
+        final open = enabled
+            ? Haptics.on(HapticKind.open, () => onPressed!(anchor))
+            : null;
+        return Semantics(
+          button: true,
+          enabled: enabled,
+          label: 'Add',
+          onTap: open,
+          excludeSemantics: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: open,
+            child: Opacity(
+              opacity: enabled ? 1 : 0.5,
+              child: SizedBox(
+                width: extent,
+                height: MixPromptInput.minHeight,
+                child: Center(
+                  child: Container(
+                    width: size,
+                    height: size,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: tokens.field,
+                      border: Border.all(color: tokens.hairline),
+                    ),
+                    child: Icon(
+                      Icons.add_rounded,
+                      size: 18,
+                      color: tokens.plum,
+                    ),
                   ),
-                  child: Icon(Icons.add_rounded, size: 18, color: tokens.plum),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

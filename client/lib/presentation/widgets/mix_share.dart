@@ -18,6 +18,7 @@ import '../../data/dj/dj_models.dart';
 import '../providers/device_providers.dart';
 import '../providers/dj_providers.dart';
 import '../screens/first_run/name_screen.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_menu.dart';
 
 abstract final class MixShare {
@@ -157,7 +158,8 @@ abstract final class MixShare {
     WidgetRef ref,
     String sessionId, {
     required void Function(String message) onError,
-  }) => _once(sessionId, () => _stop(context, ref, sessionId, onError: onError));
+  }) =>
+      _once(sessionId, () => _stop(context, ref, sessionId, onError: onError));
 
   static Future<void> _stop(
     BuildContext context,
@@ -176,12 +178,18 @@ abstract final class MixShare {
         actions: [
           CupertinoDialogAction(
             isDefaultAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: Haptics.on(
+              HapticKind.dismiss,
+              () => Navigator.of(dialogContext).pop(false),
+            ),
             child: const Text('Cancel'),
           ),
           CupertinoDialogAction(
             isDestructiveAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: Haptics.on(
+              HapticKind.destructive,
+              () => Navigator.of(dialogContext).pop(true),
+            ),
             child: const Text(stopLabel),
           ),
         ],

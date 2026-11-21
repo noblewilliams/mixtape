@@ -6,6 +6,7 @@ import '../screens/shared_mix_screen.dart' show sharedMixByline;
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_menu.dart';
 import 'foundation/swipe_actions.dart';
 import 'mix_home_row.dart';
@@ -125,7 +126,9 @@ class SharedMixHomeRow extends StatelessWidget {
       ],
       child: Builder(
         builder: (context) => GestureDetector(
-          onLongPress: () => _openMenu(context),
+          // The row lifts before its menu shows; the menu's open is
+          // debounced into this one.
+          onLongPress: Haptics.on(HapticKind.lift, () => _openMenu(context)),
           child: _row(context, lifted: false),
         ),
       ),

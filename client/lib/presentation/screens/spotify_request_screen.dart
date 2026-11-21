@@ -55,6 +55,7 @@ import '../format/source_labels.dart';
 import '../widgets/library_sync_dialog.dart';
 import 'import_sheet.dart';
 import 'music_sources_screen.dart' show removeSourceFlow;
+import '../widgets/foundation/haptics.dart';
 
 /// The address in step 1, as it reads on screen and where it opens.
 const String spotifyPrivacyAddress = 'spotify.com/account/privacy';
@@ -371,6 +372,8 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
     key: const Key('choose-import-files'),
     label: 'Choose files',
     leading: const _FileGlyph(),
+    // Straight to the file picker.
+    haptic: HapticKind.open,
     onPressed: () => unawaited(openImportFlow(context, ref)),
   );
 
@@ -452,12 +455,15 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
           TextAction(
             key: const Key('choose-apple-files'),
             label: 'Replace',
+            haptic: HapticKind.open,
             onPressed: choose,
           ),
           TextAction(
             key: const Key('remove-apple_export'),
             label: 'Remove',
             quiet: true,
+            // Presents the confirmation, which plays the destructive tick.
+            haptic: HapticKind.open,
             onPressed: () =>
                 unawaited(removeSourceFlow(context, ref, history!)),
           ),
@@ -477,6 +483,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
           TextAction(
             key: const Key('choose-apple-files'),
             label: 'Choose file',
+            haptic: HapticKind.open,
             onPressed: choose,
           ),
         ],
@@ -519,12 +526,14 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
                               key: const Key('choose-apple-files'),
                               label: 'Choose your Apple file',
                               leading: const _TapeGlyph(CupertinoIcons.doc),
+                              haptic: HapticKind.open,
                               onPressed: choose,
                             )
                           : LabelChip(
                               key: const Key('choose-apple-files'),
                               label: 'Choose your Apple file',
                               leading: const _FileGlyph(),
+                              haptic: HapticKind.open,
                               onPressed: choose,
                             ),
                     ),
@@ -578,6 +587,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
       key: const Key('remove-spotify_export'),
       label: 'Remove',
       quiet: true,
+      haptic: HapticKind.open,
       onPressed: () => unawaited(removeSourceFlow(context, ref, source!)),
     );
 
@@ -592,6 +602,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
               TextAction(
                 key: SpotifyRequestScreen.spotifyImportAgainKey,
                 label: 'Import again',
+                haptic: HapticKind.open,
                 onPressed: importAgain,
               ),
               if (!historyIn) remove(),
@@ -635,6 +646,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
           TextAction(
             key: SpotifyRequestScreen.spotifyHistoryImportAgainKey,
             label: 'Import again',
+            haptic: HapticKind.open,
             onPressed: importAgain,
           ),
           remove(),
@@ -658,6 +670,8 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
             TextAction(
               key: SpotifyRequestScreen.goDeeperKey,
               label: 'How to request it',
+              // Unfolds the steps in place, as the disclosure row does.
+              haptic: HapticKind.select,
               onPressed: () => setState(() => _deeperOpen = true),
             ),
         ],
@@ -1148,7 +1162,8 @@ class _SyncIconButton extends StatelessWidget {
     excludeSemantics: true,
     child: InkResponse(
       key: SpotifyRequestScreen.appleSyncKey,
-      onTap: onPressed,
+      // The same call to action as the "Sync Apple Music" tape button.
+      onTap: Haptics.on(HapticKind.primary, onPressed),
       radius: 22,
       child: SizedBox.square(
         dimension: MixtapeMetrics.minTarget,
@@ -1266,7 +1281,9 @@ class _Disclosure extends StatelessWidget {
       expanded: open,
       child: InkWell(
         key: SpotifyRequestScreen.goDeeperKey,
-        onTap: onTap,
+        // Folding steps open or shut is a choice between two states, not a
+        // trip anywhere.
+        onTap: Haptics.on(HapticKind.select, onTap),
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,
@@ -1385,6 +1402,7 @@ class _DeeperSteps extends StatelessWidget {
               child: TextAction(
                 key: const Key('mark-requested'),
                 label: "I've requested it",
+                haptic: HapticKind.success,
                 onPressed: onMarkRequested,
               ),
             ),
@@ -1484,7 +1502,7 @@ class _StepText extends StatelessWidget {
           addressText: address,
           address: (address) => InkWell(
             key: linkKey,
-            onTap: onOpenAddress,
+            onTap: Haptics.on(HapticKind.tap, onOpenAddress),
             // The approval's 44 px link target: the padding grows the line
             // box, the baseline alignment keeps the word on the text baseline.
             child: Padding(

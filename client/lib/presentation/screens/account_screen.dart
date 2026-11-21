@@ -41,6 +41,7 @@ import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/text_action.dart';
 import 'sign_in_screen.dart' show AppleMark, GoogleMark, SignInScreen;
+import '../widgets/foundation/haptics.dart';
 
 class AccountScreen extends ConsumerStatefulWidget {
   const AccountScreen({super.key});
@@ -147,12 +148,18 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         content: const Text(AccountScreen.deleteBody),
         actions: [
           CupertinoDialogAction(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: Haptics.on(
+              HapticKind.dismiss,
+              () => Navigator.of(dialogContext).pop(false),
+            ),
             child: const Text('Cancel'),
           ),
           CupertinoDialogAction(
             isDestructiveAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: Haptics.on(
+              HapticKind.destructive,
+              () => Navigator.of(dialogContext).pop(true),
+            ),
             child: const Text(AccountScreen.deleteLabel),
           ),
         ],
@@ -338,6 +345,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                       child: TextAction(
                         key: const Key('account-sign-out'),
                         label: 'Sign in again',
+                        haptic: HapticKind.primary,
                         onPressed: _signingOut ? null : _signOut,
                       ),
                     ),
@@ -355,6 +363,9 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                             title: AccountScreen.deleteLabel,
                             destructive: true,
                             trailing: const SizedBox.shrink(),
+                            // Presents the confirmation; its Delete button
+                            // plays the destructive tick.
+                            haptic: HapticKind.open,
                             onTap: deleteEnabled ? _deleteAccount : null,
                           ),
                         ),
@@ -471,6 +482,9 @@ class _MethodRow extends ConsumerWidget {
             TextAction(
               key: Key('${linked ? 'remove' : 'link'}-${provider.name}'),
               label: linked ? 'Unlink' : 'Link',
+              // Unlink removes a way in on the spot; Link presents the
+              // provider's sign-in.
+              haptic: linked ? HapticKind.destructive : HapticKind.open,
               onPressed: busy || (linked ? !canRemove : !canLink)
                   ? null
                   : () {
@@ -715,7 +729,7 @@ class _IdentityState extends ConsumerState<_Identity> {
               type: MaterialType.transparency,
               child: InkWell(
                 key: AccountScreen.nameRowKey,
-                onTap: _edit,
+                onTap: Haptics.on(HapticKind.tap, _edit),
                 child: _row(
                   // A long name wraps; never an ellipsis.
                   Text(
@@ -814,7 +828,8 @@ class _IdentityState extends ConsumerState<_Identity> {
                       child: GestureDetector(
                         key: AccountScreen.nameClearKey,
                         behavior: HitTestBehavior.opaque,
-                        onTap: _field.clear,
+                        // Clearing backs the draft out, so it feels like one.
+                        onTap: Haptics.on(HapticKind.dismiss, _field.clear),
                         child: SizedBox.square(
                           dimension: MixtapeMetrics.minTarget,
                           child: Icon(
@@ -845,12 +860,14 @@ class _IdentityState extends ConsumerState<_Identity> {
                           : _failed
                           ? 'Retry'
                           : 'Save',
+                      haptic: HapticKind.primary,
                       onPressed: _saving || _expired ? null : _save,
                     ),
                     TextAction(
                       key: AccountScreen.nameCancelKey,
                       label: 'Cancel',
                       quiet: true,
+                      haptic: HapticKind.dismiss,
                       onPressed: _saving ? null : _cancel,
                     ),
                   ],

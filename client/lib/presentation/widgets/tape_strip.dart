@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
+import 'foundation/haptics.dart';
 
 class TapeStrip extends StatelessWidget {
   const TapeStrip({
@@ -72,6 +73,7 @@ class TapeStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onOpen = Haptics.on(HapticKind.tap, this.onOpen);
     final tokens = context.tokens;
     final stacked =
         MediaQuery.textScalerOf(context).scale(100) / 100 >= stackScale;

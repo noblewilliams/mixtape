@@ -3,9 +3,12 @@
 /// `.scrub` in `docs/mockups/2026-09-17-mobile-shell-r3.html`).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 
 /// A 7 pt bar with a prism fill, elapsed and remaining times underneath.
 ///
@@ -94,15 +97,22 @@ class _NowPlayingScrubberState extends State<NowPlayingScrubber> {
 
   void _drag(double dx, double width) {
     if (width <= 0) return;
-    setState(
-      () => _draft = (dx / width).clamp(0.0, 1.0) * widget.durationMs,
-    );
+    setState(() => _draft = (dx / width).clamp(0.0, 1.0) * widget.durationMs);
+  }
+
+  /// A drag picks the thumb up with a select and sets it down with another;
+  /// the frames between are silent. A plain tap is only the setting down.
+  void _pickUp(double dx, double width) {
+    unawaited(Haptics.play(HapticKind.select));
+    _drag(dx, width);
   }
 
   void _settle() {
     final draft = _draft;
     setState(() => _draft = null);
-    if (draft != null) widget.onSeek!(draft / 1000);
+    if (draft == null) return;
+    unawaited(Haptics.play(HapticKind.select));
+    widget.onSeek!(draft / 1000);
   }
 
   @override
@@ -132,7 +142,7 @@ class _NowPlayingScrubberState extends State<NowPlayingScrubber> {
                     ? () => setState(() => _draft = null)
                     : null,
                 onHorizontalDragStart: _interactive
-                    ? (details) => _drag(details.localPosition.dx, width)
+                    ? (details) => _pickUp(details.localPosition.dx, width)
                     : null,
                 onHorizontalDragUpdate: _interactive
                     ? (details) => _drag(details.localPosition.dx, width)
@@ -186,15 +196,11 @@ class _NowPlayingScrubberState extends State<NowPlayingScrubber> {
           children: [
             Text(
               NowPlayingScrubber.clock(shown),
-              style: NowPlayingScrubber.timeStyle.copyWith(
-                color: tokens.muted,
-              ),
+              style: NowPlayingScrubber.timeStyle.copyWith(color: tokens.muted),
             ),
             Text(
               '-${NowPlayingScrubber.clock(widget.durationMs - shown)}',
-              style: NowPlayingScrubber.timeStyle.copyWith(
-                color: tokens.muted,
-              ),
+              style: NowPlayingScrubber.timeStyle.copyWith(color: tokens.muted),
             ),
           ],
         ),

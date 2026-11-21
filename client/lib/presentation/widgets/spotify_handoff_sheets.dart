@@ -18,6 +18,7 @@ import '../../data/settings/music_platform_store.dart';
 import '../screens/first_run/step_scaffold.dart'
     show FirstRunColors, FirstRunPill;
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_sheet.dart';
 import 'foundation/service_marks.dart';
 
@@ -62,8 +63,11 @@ Future<MusicPlatform?> askWhereYouListen(BuildContext context) =>
                 size: WhereYouListenSheet.markSize,
                 color: FirstRunColors.ink,
               ),
-              onPressed: () =>
-                  Navigator.of(sheetContext).pop(MusicPlatform.apple),
+              // Picking one of two options in the sheet.
+              onPressed: Haptics.on(
+                HapticKind.select,
+                () => Navigator.of(sheetContext).pop(MusicPlatform.apple),
+              ),
             ),
             const SizedBox(height: 10),
             FirstRunPill(
@@ -73,8 +77,10 @@ Future<MusicPlatform?> askWhereYouListen(BuildContext context) =>
                 size: WhereYouListenSheet.markSize,
                 color: FirstRunColors.ink,
               ),
-              onPressed: () =>
-                  Navigator.of(sheetContext).pop(MusicPlatform.spotify),
+              onPressed: Haptics.on(
+                HapticKind.select,
+                () => Navigator.of(sheetContext).pop(MusicPlatform.spotify),
+              ),
             ),
           ],
         ),
@@ -120,13 +126,20 @@ Future<bool> confirmSpotifyHandoff(BuildContext context, int count) async {
             key: SpotifyHandoffSheet.goKey,
             label: SpotifyHandoffSheet.goLabel,
             emphasis: true,
-            onPressed: () => Navigator.of(sheetContext).pop(true),
+            // Copies the songs and hands the mix to Spotify.
+            onPressed: Haptics.on(
+              HapticKind.commit,
+              () => Navigator.of(sheetContext).pop(true),
+            ),
           ),
           const SizedBox(height: 8),
           Center(
             child: TextButton(
               key: SpotifyHandoffSheet.cancelKey,
-              onPressed: () => Navigator.of(sheetContext).pop(false),
+              onPressed: Haptics.on(
+                HapticKind.dismiss,
+                () => Navigator.of(sheetContext).pop(false),
+              ),
               style: TextButton.styleFrom(
                 foregroundColor: tokens.text,
                 minimumSize: const Size(

@@ -37,6 +37,7 @@ import '../widgets/foundation/text_action.dart';
 import '../widgets/playlist_artwork.dart';
 import 'playlist_edit_screen.dart';
 import '../widgets/foundation/mixtape_menu.dart';
+import '../widgets/foundation/haptics.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   const PlaylistDetailScreen({
@@ -164,12 +165,18 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           ),
           actions: [
             CupertinoDialogAction(
-              onPressed: () => Navigator.of(context).pop(false),
+              onPressed: Haptics.on(
+                HapticKind.dismiss,
+                () => Navigator.of(context).pop(false),
+              ),
               child: const Text('Cancel'),
             ),
             CupertinoDialogAction(
               isDefaultAction: true,
-              onPressed: () => Navigator.of(context).pop(true),
+              onPressed: Haptics.on(
+                HapticKind.primary,
+                () => Navigator.of(context).pop(true),
+              ),
               child: const Text('Confirm'),
             ),
           ],
@@ -234,6 +241,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   key: PlaylistDetailScreen.moreKey,
                   icon: Icons.more_horiz,
                   label: 'More',
+                  haptic: HapticKind.open,
                   // The menu closes the moment the draft starts, so the button
                   // itself carries the wait.
                   onPressed: _startingDraft ? null : () => _openMore(anchor),
@@ -454,6 +462,8 @@ class _TasteBlock extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: TextAction(
               label: 'Remove confirmation',
+              // Back to neutral: a reversible state change, not a removal.
+              haptic: HapticKind.select,
               onPressed: taste.canRemove ? onRemove : null,
             ),
           ),
@@ -473,6 +483,8 @@ class _TasteBlock extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: TextAction(
               label: 'I chose these songs',
+              // Presents the confirmation dialog.
+              haptic: HapticKind.open,
               onPressed: onConfirm,
             ),
           ),

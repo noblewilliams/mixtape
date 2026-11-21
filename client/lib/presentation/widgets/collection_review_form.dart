@@ -11,6 +11,7 @@
 /// import sheet around this form.
 library;
 
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ import '../../import/collection_review.dart';
 import '../../import/snapshot.dart';
 import '../format/import_format.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/inset_group.dart';
 import 'foundation/label_chip.dart';
 import 'foundation/mixtape_menu.dart';
@@ -175,6 +177,8 @@ class CollectionReviewForm extends StatelessWidget {
                 key: setAllKey,
                 label: 'Set all…',
                 hole: false,
+                // Presents the set-all menu rather than choosing anything.
+                haptic: HapticKind.open,
                 onPressed: () => _setAll(anchor),
               ),
             ),
@@ -484,6 +488,7 @@ class _StackedChoice extends StatelessWidget {
             trailing: entries[i].key == value
                 ? Icon(Icons.check, size: 18, color: tokens.plum)
                 : const SizedBox.shrink(),
+            haptic: HapticKind.select,
             onTap: () => onChanged(entries[i].key),
           ),
         ],
@@ -529,12 +534,14 @@ class _TargetField extends StatelessWidget {
             InsetRow(
               key: ValueKey('collection-target-$index-option-new'),
               title: CollectionReviewForm.newPlaylistLabel,
+              haptic: HapticKind.select,
               onTap: () => Navigator.of(sheetContext).pop(''),
             ),
             for (final p in selection.context.playlists)
               InsetRow(
                 key: ValueKey('collection-target-$index-option-${p.key}'),
                 title: 'Replace: ${p.name}',
+                haptic: HapticKind.select,
                 onTap: () => Navigator.of(sheetContext).pop(p.key),
               ),
           ],
@@ -549,6 +556,7 @@ class _TargetField extends StatelessWidget {
     key: ValueKey('collection-target-$index'),
     title: 'Playlist action',
     subtitle: _label,
+    haptic: HapticKind.open,
     onTap: () => _pick(context),
   );
 }
@@ -568,6 +576,12 @@ class _ConfirmRow extends StatelessWidget {
   final String label;
   final ValueChanged<bool> onChanged;
 
+  /// A checkbox ticking: choosing, not a switch.
+  void _flip() {
+    unawaited(Haptics.play(HapticKind.select));
+    onChanged(!value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
@@ -576,12 +590,12 @@ class _ConfirmRow extends StatelessWidget {
       label: label,
       // Without an action of its own the node reads as a checkbox VoiceOver
       // cannot flip; the gesture below is not in the semantics tree.
-      onTap: () => onChanged(!value),
+      onTap: _flip,
       excludeSemantics: true,
       child: GestureDetector(
         key: rowKey,
         behavior: HitTestBehavior.opaque,
-        onTap: () => onChanged(!value),
+        onTap: _flip,
         child: Container(
           margin: const EdgeInsets.only(top: 12),
           decoration: BoxDecoration(

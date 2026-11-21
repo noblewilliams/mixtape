@@ -22,6 +22,7 @@ import '../providers/library_sync_provider.dart';
 import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/service_marks.dart';
 import 'foundation/tape_button.dart';
@@ -244,6 +245,8 @@ class MusicDoor extends ConsumerWidget {
       wrap: true,
       fill: large,
       minHeight: large ? largeActionHeight : null,
+      // Pill-shaped, but the door's call to action, not a DJ suggestion.
+      haptic: HapticKind.primary,
       onPressed: () => route(target),
     );
 
@@ -290,6 +293,8 @@ class MusicDoor extends ConsumerWidget {
         wrap: true,
         fill: large,
         minHeight: large ? largeActionHeight : null,
+        // Remaking the mix is the big one.
+        haptic: HapticKind.commit,
         onPressed: onRemake,
       ),
       MusicDoorState.syncing || MusicDoorState.remade => null,

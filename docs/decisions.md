@@ -2230,3 +2230,42 @@ the November 21 section of
 **Reopens if:** the founder settles on a more editorial type direction (SF
 is a placeholder they accepted "for now"), or App Review objects to the
 close.
+
+## 2026-11-21 — Every touch plays a haptic, and the haptic says what the touch does (founder)
+
+The founder asked for a haptic on every touch, varied by the action rather
+than one fixed buzz. Call sites name the action (`HapticKind` in
+`client/lib/presentation/widgets/foundation/haptics.dart`), never a raw
+pattern, so the whole app's feel is one table:
+
+| Kind | When | Native (iOS) | Built-in fallback |
+|---|---|---|---|
+| select | tab, segment, option in a menu or sheet, chip | selection tick | selection |
+| dismiss | Cancel, Close, tap outside | soft 0.45 | selection |
+| tap | row, Back, link, icon button | light 0.6 | light |
+| open | sheet, menu, popover, picker presented | soft 0.8 | light |
+| toggle | a switch (drawn ones; UISwitch plays its own) | rigid 0.6 | light |
+| suggest | a DJ recommendation: idea pill, routine, inspiration | soft 1.0 | medium |
+| lift | long press, drag pickup | medium 0.7 | medium |
+| threshold | swipe arms, pull reveals | rigid 1.0 | medium |
+| primary | CTAs, tape buttons, Play/Pause | medium 0.9 | medium |
+| commit | the send that makes a mix, Play now, Create playlist | heavy 0.85 | heavy |
+| destructive | confirming Delete, Sign out | warning | warning |
+| success / error | a touch whose result is immediate | notification | notification |
+
+- **Two tiers.** The `mixtape/haptics` bridge in `AppDelegate.swift` plays
+  the native column. A binary without the bridge (one a Shorebird patch lands
+  on, and Android) falls back to Flutter's seven built-in patterns, so the
+  feature ships as a patch now and gets richer with the next binary.
+- **One touch, one haptic.** An 80 ms debounce lets the first haptic win when
+  a control and what it presents both ask.
+- **Foundation widgets carry a default** (`TapeButton` primary, `TextAction`
+  tap, `IdeaPill` suggest, `LabelChip` select, rows tap, segmented select,
+  menus and sheets open, confirm destructive) and take a `haptic:` override.
+- The native tab bar's light impact became a selection tick, so switching
+  tabs feels like every other toggler.
+- Scrolls, text-field focus and passive gestures play nothing.
+
+**Reopens if:** the founder finds a kind too strong or too samey on device
+(retune the table; the native column needs no binary to change), or a
+settings toggle to turn haptics off is wanted.

@@ -9,10 +9,13 @@
 /// an opaque panel and the board's lighter scrim.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
 import 'page_insets.dart';
+import 'haptics.dart';
 
 /// The shared sheet's own metrics, colours and keys.
 abstract final class MixtapeSheet {
@@ -99,23 +102,28 @@ Future<T?> showMixtapeSheet<T>(
   bool enableDrag = true,
   bool showHandle = true,
   bool useRootNavigator = false,
-}) => showModalBottomSheet<T>(
-  context: context,
-  useRootNavigator: useRootNavigator,
-  isScrollControlled: isScrollControlled,
-  isDismissible: isDismissible,
-  enableDrag: enableDrag,
-  // The sheet absorbs the bottom inset in its own padding instead, so the
-  // surface reaches the edge and only the content clears the home indicator.
-  useSafeArea: false,
-  backgroundColor: MixtapeSheet.surfaceColorOf(context),
-  barrierColor: MixtapeSheet.barrierColorOf(context),
-  elevation: 0,
-  shape: const RoundedRectangleBorder(borderRadius: MixtapeSheet.radius),
-  clipBehavior: Clip.antiAlias,
-  builder: (sheetContext) =>
-      MixtapeSheetChrome(showHandle: showHandle, child: builder(sheetContext)),
-);
+}) {
+  unawaited(Haptics.play(HapticKind.open));
+  return showModalBottomSheet<T>(
+    context: context,
+    useRootNavigator: useRootNavigator,
+    isScrollControlled: isScrollControlled,
+    isDismissible: isDismissible,
+    enableDrag: enableDrag,
+    // The sheet absorbs the bottom inset in its own padding instead, so the
+    // surface reaches the edge and only the content clears the home indicator.
+    useSafeArea: false,
+    backgroundColor: MixtapeSheet.surfaceColorOf(context),
+    barrierColor: MixtapeSheet.barrierColorOf(context),
+    elevation: 0,
+    shape: const RoundedRectangleBorder(borderRadius: MixtapeSheet.radius),
+    clipBehavior: Clip.antiAlias,
+    builder: (sheetContext) => MixtapeSheetChrome(
+      showHandle: showHandle,
+      child: builder(sheetContext),
+    ),
+  );
+}
 
 /// The grab handle and the bottom inset every sheet shares.
 class MixtapeSheetChrome extends StatelessWidget {

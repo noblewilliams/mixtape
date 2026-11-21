@@ -14,6 +14,8 @@
 /// `CupertinoAlertDialog`.
 library;
 
+import 'dart:async';
+
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
@@ -21,6 +23,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
 import 'frosted_surface.dart';
+import 'haptics.dart';
 
 /// One entry in a [showMixtapeMenu] popover.
 @immutable
@@ -125,6 +128,7 @@ Future<T?> showMixtapeMenu<T>(
   String? message,
   WidgetBuilder? lifted,
 }) {
+  unawaited(Haptics.play(HapticKind.open));
   final navigator = Navigator.of(context, rootNavigator: true);
   final overlayBox = navigator.context.findRenderObject() as RenderBox?;
   final box = context.findRenderObject();
@@ -201,7 +205,13 @@ class _MixtapeMenuRoute<T> extends PopupRoute<T> {
   /// Pops this menu once: a second tap while it animates out would otherwise
   /// pop the screen beneath it.
   void _close(BuildContext context, [T? value]) {
-    if (isCurrent) Navigator.of(context).pop(value);
+    if (!isCurrent) return;
+    // Picking an entry is choosing among peers; a destructive entry still
+    // asks its own confirm, which carries the warning.
+    unawaited(
+      Haptics.play(value == null ? HapticKind.dismiss : HapticKind.select),
+    );
+    Navigator.of(context).pop(value);
   }
 
   @override
@@ -689,6 +699,7 @@ Future<T?> showMixtapeConfirm<T>(
   List<String> lines = const [],
   required List<MixtapeConfirmAction<T>> actions,
 }) {
+  unawaited(Haptics.play(HapticKind.open));
   final navigator = Navigator.of(context, rootNavigator: true);
   final overlayBox = navigator.context.findRenderObject() as RenderBox?;
   final box = context.findRenderObject();
@@ -755,7 +766,18 @@ class _MixtapeConfirmRoute<T> extends PopupRoute<T> {
   Duration get reverseTransitionDuration => const Duration(milliseconds: 120);
 
   void _close(BuildContext context, [T? value]) {
-    if (isCurrent) Navigator.of(context).pop(value);
+    if (!isCurrent) return;
+    final destructive = actions.any((a) => a.isDestructive && a.value == value);
+    unawaited(
+      Haptics.play(
+        value == null
+            ? HapticKind.dismiss
+            : destructive
+            ? HapticKind.destructive
+            : HapticKind.select,
+      ),
+    );
+    Navigator.of(context).pop(value);
   }
 
   @override

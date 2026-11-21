@@ -14,7 +14,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter/rendering.dart' show RenderCustomSingleChildLayoutBox;
 
 import '../../../data/api/failure_kind.dart';
@@ -23,6 +22,7 @@ import '../../theme/mixtape_theme.dart';
 import 'cassette_tile.dart';
 import 'large_title_scaffold.dart';
 import 'tape_button.dart';
+import 'haptics.dart';
 
 enum EmptyStateArtwork { cassette, memory, connection }
 
@@ -148,7 +148,7 @@ class _LoadErrorStateState extends State<LoadErrorState> {
 
   Future<void> _retry() async {
     if (_busy) return;
-    HapticFeedback.selectionClick();
+    unawaited(Haptics.play(HapticKind.primary));
     setState(() => _busy = true);
     final floor = Completer<void>();
     _floor = Timer(LoadErrorState.minBusy, floor.complete);

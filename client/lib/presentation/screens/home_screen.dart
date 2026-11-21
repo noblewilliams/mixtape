@@ -52,6 +52,7 @@ import 'shell/shell_route_observer.dart';
 import 'interview_screen.dart';
 import 'spotify_request_screen.dart';
 import '../format/network_copy.dart';
+import '../widgets/foundation/haptics.dart';
 
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
 
@@ -1088,6 +1089,8 @@ class _SpotifyWaitingRows extends StatelessWidget {
               child: LabelChip(
                 key: const Key('waiting-choose-zip'),
                 label: chooseFilesLabel,
+                // Presents the file picker.
+                haptic: HapticKind.open,
                 onPressed: onChooseZip,
               ),
             ),

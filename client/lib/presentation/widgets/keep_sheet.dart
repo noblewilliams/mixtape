@@ -20,6 +20,7 @@ import '../providers/keep_mixes_provider.dart';
 import '../screens/first_run/step_scaffold.dart' show FirstRunPill;
 import '../screens/sign_in_screen.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_sheet.dart';
 
 /// What the listener chose in the sheet. The handle, the scrim and Go to my
@@ -132,14 +133,20 @@ class _KeepSheetBody extends StatelessWidget {
                 key: KeepSheet.goToMixKey,
                 label: KeepSheet.goToMixLabel,
                 emphasis: true,
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: Haptics.on(
+                  HapticKind.primary,
+                  () => Navigator.of(context).pop(),
+                ),
               ),
             ),
             const SizedBox(height: 8),
             Center(
               child: TextButton(
                 key: KeepSheet.createAccountKey,
-                onPressed: () => Navigator.of(context).pop(_KeepChoice.keep),
+                onPressed: Haptics.on(
+                  HapticKind.tap,
+                  () => Navigator.of(context).pop(_KeepChoice.keep),
+                ),
                 style: TextButton.styleFrom(
                   foregroundColor: tokens.text,
                   minimumSize: const Size(

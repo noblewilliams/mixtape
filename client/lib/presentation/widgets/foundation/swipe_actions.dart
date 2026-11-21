@@ -13,7 +13,7 @@ import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'haptics.dart';
 
 /// One action behind a row.
 @immutable
@@ -174,7 +174,7 @@ class SwipeActionsState extends State<SwipeActions>
   void _setArmed(bool armed, {bool haptic = true}) {
     if (armed == _armed) return;
     _armed = armed;
-    if (haptic) HapticFeedback.mediumImpact();
+    if (haptic) unawaited(Haptics.play(HapticKind.threshold));
     if (MediaQuery.disableAnimationsOf(context)) {
       _takeover.value = armed ? 1 : 0;
     } else if (armed) {
@@ -230,6 +230,9 @@ class SwipeActionsState extends State<SwipeActions>
   Future<void> _run(int index) async {
     if (_committing || index >= widget.actions.length) return;
     final action = widget.actions[index];
+    unawaited(
+      Haptics.play(action.commits ? HapticKind.primary : HapticKind.tap),
+    );
     if (!action.commits) {
       unawaited(close());
       await action.onPressed();

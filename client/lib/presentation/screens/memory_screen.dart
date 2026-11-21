@@ -37,6 +37,7 @@ import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/text_action.dart';
 import 'interview_screen.dart';
+import '../widgets/foundation/haptics.dart';
 
 class MemoryScreen extends ConsumerStatefulWidget {
   const MemoryScreen({super.key});
@@ -234,12 +235,18 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
         content: const Text(MemoryScreen.clearBody),
         actions: [
           CupertinoDialogAction(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: Haptics.on(
+              HapticKind.dismiss,
+              () => Navigator.of(dialogContext).pop(false),
+            ),
             child: const Text('Cancel'),
           ),
           CupertinoDialogAction(
             isDestructiveAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: Haptics.on(
+              HapticKind.destructive,
+              () => Navigator.of(dialogContext).pop(true),
+            ),
             child: const Text(MemoryScreen.clearLearned),
           ),
         ],
@@ -313,6 +320,7 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
                   key: MemoryScreen.moreKey,
                   icon: Icons.more_horiz,
                   label: 'More',
+                  haptic: HapticKind.open,
                   onPressed: () => unawaited(_openMore(anchor)),
                 ),
               ),
@@ -513,6 +521,9 @@ class _MemoryRowState extends State<_MemoryRow> {
                 child: TextAction(
                   key: ValueKey('forget-memory-${widget.memory.id}'),
                   label: 'Forget',
+                  // Presents the confirmation; the destructive tick waits for
+                  // "Forget note".
+                  haptic: HapticKind.open,
                   onPressed: widget.busy ? null : () => widget.onForget(_focus),
                 ),
               ),
@@ -573,12 +584,15 @@ class _ForgetDialogState extends State<_ForgetDialog> {
     ),
     actions: [
       CupertinoDialogAction(
-        onPressed: () => Navigator.of(context).pop(),
+        onPressed: Haptics.on(
+          HapticKind.dismiss,
+          () => Navigator.of(context).pop(),
+        ),
         child: Text(_busy ? 'Close' : 'Keep note'),
       ),
       CupertinoDialogAction(
         isDestructiveAction: true,
-        onPressed: _busy ? null : _confirm,
+        onPressed: _busy ? null : Haptics.on(HapticKind.destructive, _confirm),
         child: Text(_busy ? 'Forgetting…' : 'Forget note'),
       ),
     ],

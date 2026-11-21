@@ -24,6 +24,7 @@ import 'artists_screen.dart';
 import 'choose_service_screen.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
+import '../../widgets/foundation/haptics.dart';
 
 /// "What do you want to hear?": the wordmark, the cassette with its hubs
 /// turning (still under reduced motion), the composer with the three
@@ -252,7 +253,9 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
             key: WelcomeScreen.addMusicKey,
             compact: true,
             label: WelcomeScreen.addMusicLabel,
-            onPressed: _starting ? null : _addMusic,
+            onPressed: _starting
+                ? null
+                : Haptics.on(HapticKind.primary, _addMusic),
           ),
       ],
       foot: FootLink(

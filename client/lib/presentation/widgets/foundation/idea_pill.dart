@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'haptics.dart';
 
 /// 34 pt of starter prompt or routine suggestion, as wide as its own label.
 ///
@@ -16,6 +17,7 @@ class IdeaPill extends StatelessWidget {
     super.key,
     required this.label,
     this.onPressed,
+    this.haptic = HapticKind.suggest,
     this.dimmed = false,
     this.skeleton = false,
     this.leading,
@@ -27,6 +29,9 @@ class IdeaPill extends StatelessWidget {
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// What the press feels like: taking one of the DJ's suggestions.
+  final HapticKind haptic;
   final bool dimmed;
   final bool skeleton;
 
@@ -65,6 +70,7 @@ class IdeaPill extends StatelessWidget {
     final tokens = context.tokens;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final enabled = onPressed != null && !skeleton;
+    final tap = Haptics.on(haptic, onPressed);
 
     final pill = Container(
       // A floor, not a fixed height: the label must grow at 200% text.
@@ -100,11 +106,11 @@ class IdeaPill extends StatelessWidget {
       label: skeleton ? skeletonLabel : label,
       // `excludeSemantics` drops the detector's own tap action, and a node
       // with no action cannot be activated by VoiceOver. Declare it here.
-      onTap: enabled ? onPressed : null,
+      onTap: enabled ? tap : null,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: enabled ? onPressed : null,
+        onTap: enabled ? tap : null,
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,

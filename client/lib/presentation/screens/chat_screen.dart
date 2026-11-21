@@ -65,6 +65,7 @@ import 'queue_screen.dart';
 import 'shell/shell_route_observer.dart';
 import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/mix_share.dart';
+import '../widgets/foundation/haptics.dart';
 
 /// The toast a selection changed somewhere else earns: the canonical seed is
 /// adopted, the arrangement and the unsent draft are left alone, and the
@@ -1602,6 +1603,7 @@ class _TopBar extends StatelessWidget {
                   key: const Key('chat-actions'),
                   icon: Icons.more_horiz,
                   label: 'More',
+                  haptic: HapticKind.open,
                   onPressed: onMore == null ? null : () => onMore!(anchor),
                 ),
               ),
@@ -1755,13 +1757,19 @@ class _RenameDialogState extends State<_RenameDialog> {
     ),
     actions: [
       CupertinoDialogAction(
-        onPressed: () => Navigator.of(context).pop(),
+        onPressed: Haptics.on(
+          HapticKind.dismiss,
+          () => Navigator.of(context).pop(),
+        ),
         child: const Text('Cancel'),
       ),
       CupertinoDialogAction(
         key: const Key('chat-rename-confirm'),
         isDefaultAction: true,
-        onPressed: () => Navigator.of(context).pop(_controller.text),
+        onPressed: Haptics.on(
+          HapticKind.primary,
+          () => Navigator.of(context).pop(_controller.text),
+        ),
         child: const Text('Save'),
       ),
     ],

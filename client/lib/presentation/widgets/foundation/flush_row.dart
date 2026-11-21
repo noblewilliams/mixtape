@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'haptics.dart';
 
 /// Stacks [FlushRow]s and tells each whether it is the first, so the hairline
 /// falls between rows and never above the list.
@@ -53,6 +54,7 @@ class FlushRow extends StatelessWidget {
     this.subtitleMaxLines = 1,
     this.trailing,
     this.onTap,
+    this.haptic = HapticKind.tap,
     this.leadingSize = 60,
     this.inset = true,
     this.isFirst,
@@ -84,6 +86,10 @@ class FlushRow extends StatelessWidget {
   final bool showChevron;
 
   final VoidCallback? onTap;
+
+  /// What the tap feels like: an ordinary tap unless the row does more
+  /// (a row that opens a sheet passes [HapticKind.open]).
+  final HapticKind haptic;
 
   /// The leading column's width; also the hairline's inset.
   final double leadingSize;
@@ -199,7 +205,7 @@ class FlushRow extends StatelessWidget {
     if (onTap == null) return row;
     return Material(
       type: MaterialType.transparency,
-      child: InkWell(onTap: onTap, child: row),
+      child: InkWell(onTap: Haptics.on(haptic, onTap), child: row),
     );
   }
 }

@@ -15,6 +15,7 @@ import '../providers/ai_consent_provider.dart';
 import '../providers/onboarding_provider.dart' show linkOpenerProvider;
 import '../screens/first_run/step_scaffold.dart' show FirstRunPill;
 import '../theme/mixtape_theme.dart';
+import 'foundation/haptics.dart';
 import 'foundation/mixtape_sheet.dart';
 
 /// The plan's exact copy, and the sheet's keys.
@@ -180,7 +181,10 @@ class _AiConsentPanelState extends ConsumerState<AiConsentPanel> {
               alignment: Alignment.centerLeft,
               child: TextButton(
                 key: AiConsentCopy.privacyKey,
-                onPressed: () => openPrivacyPolicy(ref),
+                onPressed: Haptics.on(
+                  HapticKind.tap,
+                  () => openPrivacyPolicy(ref),
+                ),
                 style: TextButton.styleFrom(
                   foregroundColor: tokens.plum,
                   padding: EdgeInsets.zero,
@@ -211,7 +215,9 @@ class _AiConsentPanelState extends ConsumerState<AiConsentPanel> {
                 key: AiConsentCopy.agreeKey,
                 label: AiConsentCopy.agreeLabel,
                 emphasis: true,
-                onPressed: _saving ? null : () => _agree(),
+                onPressed: _saving
+                    ? null
+                    : Haptics.on(HapticKind.primary, _agree),
               ),
             ),
             if (_failed) ...[
@@ -235,7 +241,10 @@ class _AiConsentPanelState extends ConsumerState<AiConsentPanel> {
                 key: AiConsentCopy.notNowKey,
                 onPressed: _saving
                     ? null
-                    : () => Navigator.of(context).pop(false),
+                    : Haptics.on(
+                        HapticKind.dismiss,
+                        () => Navigator.of(context).pop(false),
+                      ),
                 style: TextButton.styleFrom(
                   foregroundColor: tokens.text,
                   minimumSize: const Size(
