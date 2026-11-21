@@ -282,7 +282,7 @@ void main() {
     );
     // The line sits beside the cassette from the start, as the mix's does.
     expect(
-      find.text('Finding your album · checking Apple Music'),
+      find.text('Finding your album'),
       findsOneWidget,
     );
 

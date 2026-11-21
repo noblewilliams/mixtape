@@ -37,6 +37,12 @@ import UIKit
   /// `Haptics` plays on every touch — stays alive for the life of the app.
   private var hapticsBridge: HapticsBridge?
 
+  /// `mixtape/background`: Dart holds a background task while a mix turn is
+  /// out, so a listener who leaves the app keeps the turn's stream open for
+  /// the extra time iOS grants (about 30 s), and the result can still land.
+  private var backgroundChannel: FlutterMethodChannel?
+  private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+
   /// The scene's window, once it connects: where the idiom is read from, so
   /// the answer describes the scene the app renders in, not the hardware.
   fileprivate weak var sceneWindow: UIWindow? {
@@ -78,6 +84,7 @@ import UIKit
     registerVoiceChannels(with: messenger)
     registerDeviceChannel(with: messenger)
     hapticsBridge = HapticsBridge(binaryMessenger: messenger)
+    registerBackgroundChannel(with: messenger)
     // Liquid Glass for surfaces that live inside Flutter (the collapsing
     // title bar, the Home panel). Flutter only inserts it when the dock is
     // available, and falls back to `FrostedSurface` otherwise.
@@ -172,6 +179,40 @@ import UIKit
       }
     }
     deviceChannel = channel
+  }
+
+  /// `begin` starts the one background task (a second begin is a no-op);
+  /// `end` ends it. iOS also ends it when the time runs out: the turn's
+  /// request then goes with the suspended app, as it did before.
+  private func registerBackgroundChannel(with messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "mixtape/background", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(nil) }
+      switch call.method {
+      case "begin":
+        self.beginBackgroundTask()
+        result(nil)
+      case "end":
+        self.endBackgroundTask()
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    backgroundChannel = channel
+  }
+
+  private func beginBackgroundTask() {
+    guard backgroundTask == .invalid else { return }
+    backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "mix-turn") { [weak self] in
+      self?.endBackgroundTask()
+    }
+  }
+
+  private func endBackgroundTask() {
+    guard backgroundTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(backgroundTask)
+    backgroundTask = .invalid
   }
 
   private func answerPendingIdiomQueries() {

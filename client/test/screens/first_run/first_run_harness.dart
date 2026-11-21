@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/background/mix_background.dart';
+import 'package:mixtape/presentation/providers/mix_background_provider.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/config/config_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
@@ -208,6 +210,7 @@ class FirstRunHarness {
     onboarding: onboardingState(userId: 'anon-1'),
   );
   final FakeReminderScheduler reminders = FakeReminderScheduler();
+  final FakeMixReadyAlerts pings = FakeMixReadyAlerts();
   final FakeLinkOpener links = FakeLinkOpener();
   final FakeArchivePicker picker = FakeArchivePicker();
   final ControlledSync sync = ControlledSync();
@@ -225,6 +228,7 @@ class FirstRunHarness {
     configApiProvider.overrideWithValue(config),
     listeningApiProvider.overrideWithValue(listening),
     reminderSchedulerProvider.overrideWithValue(reminders),
+    mixReadyAlertsProvider.overrideWithValue(pings),
     servicePreferenceStoreProvider.overrideWithValue(prefs),
     funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
     linkOpenerProvider.overrideWithValue(links.call),
@@ -300,3 +304,15 @@ bool enabled(WidgetTester tester, Key key) =>
         )
         .onPressed !=
     null;
+
+/// Notification permission as [granted] says; counts the pings.
+class FakeMixReadyAlerts implements MixReadyAlerts {
+  bool granted = false;
+  int shown = 0;
+
+  @override
+  Future<bool> requestPermission() async => granted;
+
+  @override
+  Future<void> showMixReady() async => shown++;
+}

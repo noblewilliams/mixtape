@@ -101,14 +101,14 @@ describe('a streamed mix turn', () => {
     renderApp({}, { turnProgress: turn.turnProgress })
     await openMix()
     await send('Slower in the middle')
-    expect(await screen.findByText('Pressing 15 songs to tape…', {}, { timeout: 4_000 })).toBeInTheDocument()
+    expect(await screen.findByText('Pressing 15 songs…', {}, { timeout: 4_000 })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Home' }))
     await screen.findByRole('heading', { name: 'Home' })
-    expect(screen.queryByText('Pressing 15 songs to tape…')).toBeNull()
+    expect(screen.queryByText('Pressing 15 songs…')).toBeNull()
     await openMix()
     // At once: the step came long enough ago, so no dwell holds the listening line.
-    expect(line()).toHaveTextContent('Pressing 15 songs to tape…')
+    expect(line()).toHaveTextContent('Pressing 15 songs…')
 
     turn.release()
     expect(await screen.findByText(REPLY)).toBeInTheDocument()
@@ -327,7 +327,7 @@ describe('an album turn', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Find an album' }))
     await send('Older')
 
-    expect(await screen.findByText('Finding your album · checking Apple Music')).toBeInTheDocument()
+    expect(await screen.findByText('Finding your album')).toBeInTheDocument()
     expect(line()).toBeNull()
     expect(calls(api, 'sendMessage')[0].args).toEqual([expect.any(String), 'Older', undefined])
     release()

@@ -227,8 +227,8 @@ function deferred<T>() {
 }
 
 const MAKING = 'Making your mix.'
-const MAKING_LINE = 'This takes about a minute.'
-const MAKING_ANNOUNCEMENT = 'The DJ is listening. This takes about a minute.'
+const MAKING_LINE = 'About a minute.'
+const MAKING_ANNOUNCEMENT = 'The DJ is listening. About a minute.'
 const stepLine = () => document.querySelector('.fr-making .fr-step')
 /** The progress listener the flow handed the first mix's createSession. */
 const progressOf = (api: ReturnType<typeof fakeServices>['api']) => {
@@ -408,13 +408,13 @@ describe('making your mix', () => {
     const report = progressOf(api)
     act(() => report({ type: 'opened' }))
     act(() => report({ type: 'step', step: 'pressing', count: 12 }))
-    await waitFor(() => expect(stepLine()).toHaveTextContent('Pressing 12 songs to tape…'), { timeout: 4_000 })
+    await waitFor(() => expect(stepLine()).toHaveTextContent('Pressing 12 songs…'), { timeout: 4_000 })
 
     act(() => window.history.back())
     await heading('Who do you love?')
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     await heading(MAKING)
-    expect(stepLine()).toHaveTextContent('Pressing 12 songs to tape…')
+    expect(stepLine()).toHaveTextContent('Pressing 12 songs…')
     await act(async () => pending.resolve(createdSession('session-new')))
   })
 

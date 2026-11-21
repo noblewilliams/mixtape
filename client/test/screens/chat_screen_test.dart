@@ -1161,7 +1161,7 @@ void main() {
       // The opening line holds its 1.5 s, then the step's.
       await tester.pump(const Duration(milliseconds: 1600));
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.text('Pressing 12 songs to tape'), findsOneWidget);
+      expect(find.text('Pressing 12 songs'), findsOneWidget);
 
       reply.complete(
         TurnResult(

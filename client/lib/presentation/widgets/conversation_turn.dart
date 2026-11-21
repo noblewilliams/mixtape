@@ -205,8 +205,7 @@ class WorkingIndicator extends StatefulWidget {
   static const String caption = 'the DJ is listening…';
 
   /// An album session's line (board A1): says the catalogue check too.
-  static const String albumCaption =
-      'Finding your album · checking Apple Music';
+  static const String albumCaption = 'Finding your album';
   static const String albumAnnouncement = 'Finding your album';
 
   @override

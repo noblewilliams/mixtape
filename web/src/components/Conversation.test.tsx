@@ -159,7 +159,7 @@ describe('Conversation for an album session', () => {
 
   it('names the album search while the DJ works', () => {
     render(<Conversation kind="album" session={albumSession} messages={messages.slice(0, 1)} thinking onSend={vi.fn()} />)
-    expect(screen.getByText('Finding your album · checking Apple Music')).toBeInTheDocument()
+    expect(screen.getByText('Finding your album')).toBeInTheDocument()
   })
 
   it('places a passed-over album above the turn that replaced it, with Go back', () => {
@@ -268,7 +268,7 @@ describe('Conversation while the DJ works on a mix', () => {
   it('keeps an album turn on its own static line', () => {
     const album = { ...session, kind: 'album' as const }
     render(<Conversation kind="album" session={album} messages={asked} thinking working={{ startedAt: Date.now(), step: { step: { type: 'step', step: 'picking' }, at: Date.now() } }} onSend={vi.fn()} />)
-    expect(screen.getByText('Finding your album · checking Apple Music')).toBeInTheDocument()
+    expect(screen.getByText('Finding your album')).toBeInTheDocument()
     expect(visible()).toBeNull()
   })
 })

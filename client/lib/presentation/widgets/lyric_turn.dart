@@ -263,7 +263,7 @@ class DjWorkingPhrases {
       'Spooling it up',
     ]),
     DjWorkingPhase(Duration(seconds: 50), [
-      'Still at the decks. Worth the wait',
+      'Still at the decks',
     ]),
   ]);
 
@@ -313,7 +313,7 @@ class DjWorkingPhrases {
 
   /// A step this long says [stillLine], whatever it is.
   static const Duration stillAfter = Duration(seconds: 30);
-  static const String stillLine = 'Still at the decks. Worth the wait';
+  static const String stillLine = 'Still at the decks';
 
   /// The least time a line shows before another takes over, so a 50 ms
   /// step never flashes.
@@ -428,10 +428,7 @@ class DjWorkingPhrases {
       case 'picking':
         final artists = _list(step.artists, most: 3);
         if (artists == null) return null;
-        return one([
-          'Pulling records that sit with $artists',
-          'Finding company for $artists',
-        ]);
+        return 'Finding company for $artists';
       case 'checking':
         final genres = _list(step.genres, most: 2);
         return genres == null ? null : 'Running the $genres sound check';
@@ -445,8 +442,8 @@ class DjWorkingPhrases {
         final count = step.count;
         if (count == null || count < 1) return null;
         return count == 1
-            ? 'Pressing one song to tape'
-            : 'Pressing $count songs to tape';
+            ? 'Pressing one song'
+            : 'Pressing $count songs';
     }
     return null;
   }

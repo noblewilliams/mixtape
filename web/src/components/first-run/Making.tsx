@@ -6,9 +6,9 @@ import type { TurnWork } from '../djWorkingLines'
 import { FirstRunPage } from './FirstRunPage'
 
 export const MAKING_HEADLINE = 'Making your mix.'
-export const MAKING_LINE = 'This takes about a minute.'
+export const MAKING_LINE = 'About a minute.'
 /** What assistive tech hears, once: the step line under MAKING_LINE moves too often to be read. */
-export const MAKING_ANNOUNCEMENT = 'The DJ is listening. This takes about a minute.'
+export const MAKING_ANNOUNCEMENT = 'The DJ is listening. About a minute.'
 
 /**
  * The wait while the DJ makes the first mix (a 20 to 60 second turn). The

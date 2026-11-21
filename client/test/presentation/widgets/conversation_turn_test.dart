@@ -248,7 +248,7 @@ void main() {
       reducedMotion: true,
     );
 
-    expect(find.text('Finding your album · checking Apple Music'), findsOneWidget);
+    expect(find.text('Finding your album'), findsOneWidget);
     expect(
       tester.getSemantics(find.byKey(WorkingIndicator.indicatorKey)).label,
       'Finding your album',
