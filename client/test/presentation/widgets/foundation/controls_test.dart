@@ -353,10 +353,7 @@ void main() {
   testWidgets('the tape button wears the prism along its bottom edge', (
     tester,
   ) async {
-    await _pump(
-      tester,
-      TapeButton(label: 'Play now', onPressed: () {}),
-    );
+    await _pump(tester, TapeButton(label: 'Play now', onPressed: () {}));
 
     final stripe = find.descendant(
       of: find.byType(TapeButton),
@@ -480,31 +477,32 @@ void main() {
     handle.dispose();
   });
 
-  testWidgets('a tape button centres its label in the shell at 1x and 2x text', (
-    tester,
-  ) async {
-    for (final scale in [1.0, 2.0]) {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: MixtapeTheme.light(),
-          home: MediaQuery(
-            data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-            child: const Scaffold(
-              body: Center(child: TapeButton(label: 'Start a mix')),
+  testWidgets(
+    'a tape button centres its label in the shell at 1x and 2x text',
+    (tester) async {
+      for (final scale in [1.0, 2.0]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: MixtapeTheme.light(),
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: const Scaffold(
+                body: Center(child: TapeButton(label: 'Start a mix')),
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final button = tester.getRect(find.byType(TapeButton));
-      final label = tester.getRect(find.text('Start a mix'));
-      expect(
-        (label.center.dy - button.center.dy).abs(),
-        lessThan(0.5),
-        reason: 'the label rides the middle of the shell at ${scale}x text',
-      );
-    }
-  });
+        );
+        await tester.pumpAndSettle();
+        final button = tester.getRect(find.byType(TapeButton));
+        final label = tester.getRect(find.text('Start a mix'));
+        expect(
+          (label.center.dy - button.center.dy).abs(),
+          lessThan(0.5),
+          reason: 'the label rides the middle of the shell at ${scale}x text',
+        );
+      }
+    },
+  );
 
   testWidgets('a tape button draws no glyph unless one is handed to it', (
     tester,
@@ -588,28 +586,36 @@ void main() {
         matching: find.byType(Icon),
       ),
     );
-    // Filled glyphs in their own colours (add your music board r3/r4):
+    FilledStatusGlyph filledOf(String label) =>
+        tester.widget<FilledStatusGlyph>(
+          find.descendant(
+            of: find.ancestor(
+              of: find.text(label),
+              matching: find.byType(StatusWord),
+            ),
+            matching: find.byType(FilledStatusGlyph),
+          ),
+        );
+    // Filled glyphs in their own colours (add your music board r3/r4), drawn
+    // rather than from the icon font, so they survive an over-the-air patch:
     // the word keeps its ink, the glyph is the green or amber.
-    expect(glyphOf('Connected').icon, CupertinoIcons.checkmark_circle_fill);
-    expect(glyphOf('Connected').color, const Color(0xFF34A853));
-    expect(
-      glyphOf('Waiting').icon,
-      CupertinoIcons.exclamationmark_triangle_fill,
-    );
-    expect(glyphOf('Waiting').color, const Color(0xFFE0A020));
+    expect(filledOf('Connected').warn, isFalse);
+    expect(filledOf('Connected').color, const Color(0xFF34A853));
+    expect(filledOf('Waiting').warn, isTrue);
+    expect(filledOf('Waiting').color, const Color(0xFFE0A020));
     expect(glyphOf('Disconnected').icon, CupertinoIcons.exclamationmark_circle);
   });
 
   testWidgets('the filled status glyphs brighten in dark', (tester) async {
     await _pump(tester, _gallery(), dark: true);
     Color? glyphColor(String label) => tester
-        .widget<Icon>(
+        .widget<FilledStatusGlyph>(
           find.descendant(
             of: find.ancestor(
               of: find.text(label),
               matching: find.byType(StatusWord),
             ),
-            matching: find.byType(Icon),
+            matching: find.byType(FilledStatusGlyph),
           ),
         )
         .color;
@@ -636,7 +642,10 @@ void main() {
       expect(style.fontSize, 12.5);
       expect(style.fontWeight, FontWeight.w600);
       expect(
-        find.descendant(of: find.byType(StatusWord), matching: find.byType(Icon)),
+        find.descendant(
+          of: find.byType(StatusWord),
+          matching: find.byType(Icon),
+        ),
         findsNothing,
       );
     }

@@ -518,9 +518,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
                           ? TapeButton(
                               key: const Key('choose-apple-files'),
                               label: 'Choose your Apple file',
-                              leading: const _TapeGlyph(
-                                CupertinoIcons.arrow_up_doc,
-                              ),
+                              leading: const _TapeGlyph(CupertinoIcons.doc),
                               onPressed: choose,
                             )
                           : LabelChip(
@@ -1085,7 +1083,7 @@ class _StepDisc extends StatelessWidget {
           shape: BoxShape.circle,
         ),
         child: const Icon(
-          CupertinoIcons.checkmark_alt,
+          CupertinoIcons.checkmark,
           size: 13,
           color: Colors.white,
         ),
@@ -1231,7 +1229,7 @@ class _FileGlyph extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      Icon(CupertinoIcons.arrow_up_doc, size: 15, color: context.tokens.plum);
+      Icon(CupertinoIcons.doc, size: 15, color: context.tokens.plum);
 }
 
 /// A glyph on a tape button, in the tape's ink.

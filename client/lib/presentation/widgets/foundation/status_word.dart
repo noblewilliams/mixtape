@@ -49,10 +49,14 @@ class StatusWord extends StatelessWidget {
     StatusKind.accent => tokens.plum,
   };
 
-  IconData? get _glyph => switch (kind) {
-    StatusKind.ok => CupertinoIcons.checkmark_circle_fill,
-    StatusKind.err => CupertinoIcons.exclamationmark_circle,
-    StatusKind.warn => CupertinoIcons.exclamationmark_triangle_fill,
+  Widget? _glyph(Color ink, Color glyphInk) => switch (kind) {
+    StatusKind.ok => FilledStatusGlyph.ok(size: 14, color: glyphInk),
+    StatusKind.warn => FilledStatusGlyph.warn(size: 14, color: glyphInk),
+    StatusKind.err => Icon(
+      CupertinoIcons.exclamationmark_circle,
+      size: 14,
+      color: ink,
+    ),
     StatusKind.muted => null,
     StatusKind.accent => null,
   };
@@ -60,12 +64,12 @@ class StatusWord extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ink = _ink(context.tokens);
-    final glyph = icon ? _glyph : null;
     final glyphInk = switch (kind) {
       StatusKind.ok => statusOkGlyph(context),
       StatusKind.warn => statusWarnGlyph(context),
       _ => ink,
     };
+    final glyph = icon ? _glyph(ink, glyphInk) : null;
 
     return Semantics(
       label: label,
@@ -73,10 +77,7 @@ class StatusWord extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (glyph != null) ...[
-            Icon(glyph, size: 14, color: glyphInk),
-            const SizedBox(width: 5),
-          ],
+          if (glyph != null) ...[glyph, const SizedBox(width: 5)],
           Flexible(
             child: Text(
               label,
@@ -91,4 +92,88 @@ class StatusWord extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The filled check circle and filled warning triangle, drawn rather than
+/// taken from an icon font. Flutter subsets the icon fonts to the glyphs a
+/// build uses, and an over-the-air patch cannot replace the release's fonts,
+/// so a glyph the release never used would draw as an empty box. Shapes after
+/// SF Symbols `checkmark.circle.fill` and `exclamationmark.triangle.fill`.
+class FilledStatusGlyph extends StatelessWidget {
+  const FilledStatusGlyph.ok({
+    super.key,
+    required this.size,
+    required this.color,
+  }) : warn = false;
+  const FilledStatusGlyph.warn({
+    super.key,
+    required this.size,
+    required this.color,
+  }) : warn = true;
+
+  final double size;
+  final Color color;
+  final bool warn;
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: SizedBox.square(
+      dimension: size,
+      child: CustomPaint(painter: _FilledGlyphPainter(color, warn: warn)),
+    ),
+  );
+}
+
+class _FilledGlyphPainter extends CustomPainter {
+  _FilledGlyphPainter(this.color, {required this.warn});
+
+  final Color color;
+  final bool warn;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide / 24;
+    canvas.scale(s);
+    final fill = Paint()
+      ..color = color
+      ..isAntiAlias = true;
+    final mark = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+    if (!warn) {
+      canvas.drawCircle(const Offset(12, 12), 10.5, fill);
+      mark.strokeWidth = 2.4;
+      canvas.drawPath(
+        Path()
+          ..moveTo(7.6, 12.4)
+          ..lineTo(10.6, 15.4)
+          ..lineTo(16.4, 9.2),
+        mark,
+      );
+      return;
+    }
+    final triangle = Path()
+      ..moveTo(10.3, 3.6)
+      ..quadraticBezierTo(12, 0.9, 13.7, 3.6)
+      ..lineTo(21.8, 17.7)
+      ..quadraticBezierTo(23.3, 20.7, 20.1, 20.7)
+      ..lineTo(3.9, 20.7)
+      ..quadraticBezierTo(0.7, 20.7, 2.2, 17.7)
+      ..close();
+    canvas.drawPath(triangle, fill);
+    mark.strokeWidth = 2.2;
+    canvas.drawLine(const Offset(12, 8.8), const Offset(12, 13.6), mark);
+    canvas.drawCircle(
+      const Offset(12, 17.1),
+      1.3,
+      Paint()..color = Colors.white,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FilledGlyphPainter old) =>
+      old.color != color || old.warn != warn;
 }
