@@ -3,10 +3,16 @@
 Approved September 25, 2026 in `docs/mockups/approved/2026-09-25-ui-polish.md`.
 
 - `app-icon.svg`: full-bleed right-reel crop, viewBox `108 22 78 78`.
+- `app-icon-tinted.svg`: mono variant of the same crop for the iOS tinted and clear
+  home-screen styles. Grayscale on black, label kept dark (#262626) so the glass
+  rendering doesn't turn it white; stripes and reel hub carry the highlights.
 - `favicon.svg`: simplified complete cassette for browser tabs and web shortcuts.
 
 Both derive from `web/public/tape.svg`; that full illustration remains unchanged.
 Do not add rounded corners to exported iOS images: the system applies its mask.
+
+The iOS catalog is single-size (one 1024 image per appearance); Xcode derives the
+smaller sizes at build time.
 
 Regenerate the existing iOS asset catalog and web outputs using
 `node scripts/generate-brand-icons.cjs` with the `sharp` package available.

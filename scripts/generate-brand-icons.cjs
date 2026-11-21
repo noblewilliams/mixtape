@@ -7,15 +7,18 @@ const sharp = require(process.env.SHARP_MODULE_PATH || 'sharp');
 
 const root = path.resolve(__dirname, '..');
 const appSource = path.join(root, 'assets/brand/app-icon.svg');
+// Mono artwork for the iOS tinted and clear home-screen appearances: grayscale on
+// black, kept dim so the system's glass rendering doesn't wash the label to white.
+const tintedSource = path.join(root, 'assets/brand/app-icon-tinted.svg');
 const faviconSource = path.join(root, 'assets/brand/favicon.svg');
 const catalog = path.join(root, 'client/ios/Runner/Assets.xcassets/AppIcon.appiconset');
 const web = path.join(root, 'web/public');
 
-async function raster(source, target, size, transparent = false) {
+async function raster(source, target, size, transparent = false, background = '#f2ede2') {
   let image = sharp(source, { density: 1200 }).resize(size, size, {
-    fit: 'contain', background: transparent ? '#00000000' : '#f2ede2',
+    fit: 'contain', background: transparent ? '#00000000' : background,
   });
-  if (!transparent) image = image.flatten({ background: '#f2ede2' }).removeAlpha();
+  if (!transparent) image = image.flatten({ background }).removeAlpha();
   await image.png().toFile(target);
   const metadata = await sharp(target).metadata();
   if (metadata.width !== size || metadata.height !== size || metadata.hasAlpha !== transparent) {
@@ -28,8 +31,12 @@ async function main() {
   const written = new Set();
   for (const icon of contents.images) {
     if (!icon.filename || written.has(icon.filename)) continue;
-    const size = Number(icon.size.split('x')[0]) * Number(icon.scale.replace('x', ''));
-    await raster(appSource, path.join(catalog, icon.filename), size);
+    const size = Number(icon.size.split('x')[0]) * Number((icon.scale || '1x').replace('x', ''));
+    const tinted = (icon.appearances || []).some((a) => a.value === 'tinted');
+    await raster(
+      tinted ? tintedSource : appSource, path.join(catalog, icon.filename), size,
+      false, tinted ? '#000000' : '#f2ede2',
+    );
     written.add(icon.filename);
   }
   await fs.copyFile(faviconSource, path.join(web, 'favicon.svg'));
