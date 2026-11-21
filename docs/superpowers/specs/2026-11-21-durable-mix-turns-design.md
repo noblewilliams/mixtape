@@ -1,7 +1,8 @@
 # Durable mix turns: the mix always lands, and the listener is told
 
-Date: 2026-11-21. Status: **draft, awaiting the founder** (open decisions at
-the end). Spec only; no plan yet.
+Date: 2026-11-21. Status: **decisions answered 2026-11-21** (see "Founder
+answers" at the end). Gate 0 spikes and the permission-modal mockup come
+before the plan.
 
 ## Why
 
@@ -439,13 +440,25 @@ simply there on reopen, as today.
 }
 ```
 
-- A failed or lost turn sends title "The DJ couldn't finish that one" and
-  body "Tap to try again", with `"kind": "failed"`.
-- The body is the mix's title (the listener named it, or the DJ named it
-  from their songs), cleaned with `sanitizeTitleText(·, 40)`. There are
-  never lyrics, songs, the listener's prompt or the DJ's reply. Whether
-  even the title should show on a lock screen is an open decision (1); the
-  alternative is fixed copy only.
+- **The body is the mix's title** (decided: shown, since it costs nothing).
+  The finish already holds it: a create's closing UPDATE writes the title
+  (`createMixTurn`), and a message turn reads `dj_sessions.title` in the
+  same query that finishes the turn. No extra model call or read is needed.
+  It is cleaned with `sanitizeTitleText(·, 40)`. If it cleans to nothing,
+  the body is "Tap to play it." There are never lyrics, songs, the
+  listener's prompt or the DJ's reply.
+- **A failed or lost turn pushes too** (decided), with `"kind": "failed"`
+  and short, playful copy. Each turn's seed picks one line:
+
+  | Title | Body |
+  |---|---|
+  | The tape got tangled | The DJ couldn't finish that mix. Tap to try again. |
+  | The needle skipped | That mix didn't make it. Tap to give it another spin. |
+  | Wobbly cassette | The DJ fumbled that one. Tap to try again. |
+
+  Tapping opens the mix with the listener's words back in the composer,
+  ready to resend. The listener's words are still in the transcript, since
+  the message is persisted first.
 - Nothing about the payload is logged beyond `{ event: 'turn_push',
   outcome, status, reason }`.
 
@@ -458,7 +471,8 @@ push_devices
   provider     text  'apns' | 'fcm' | 'webpush'
   platform     text  'ios' | 'android' | 'web'
   token        text                 -- APNs hex token / FCM token / web-push endpoint
-  environment  text  'production' | 'sandbox'
+  keys         jsonb null           -- web push only: { p256dh, auth }
+  environment  text  'production' | 'sandbox'   -- APNs only; null otherwise
   app_version  text null
   created_at, last_seen_at timestamptz, disabled_at timestamptz null
   unique (provider, token)
@@ -494,15 +508,39 @@ push_devices
   quick fix). The channel **must chain to it rather than replace it**, or
   one of the two loses taps. This is the biggest iOS implementation risk,
   and gets its own test on device.
-- **Asking for permission, at the moment of value.** Never at launch. The
-  first time a mix turn is out for more than about 8 s, a quiet line under
-  the working caption offers "Get a ping when it's ready". Tapping it shows
-  the system prompt. If the quick fix has already asked for notification
-  permission (the same permission covers local and remote), registration
-  just happens with no new prompt. A declined prompt is never offered
-  again. You → Settings gets a "Mix ready notifications" switch, which
-  unregisters (`DELETE`) without touching the OS setting. The exact copy
-  and placement go through a mockup first, per house rules (decision 3).
+- **Asking for permission: one modal, asked once** (decided). The system
+  prompt is shown only from a tap on the modal's CTA, never cold.
+  - **The modal** is a sheet with a tape illustration: a cassette with a
+    little bell or a notification bubble popping out of the reel window. It
+    says why, in one breath. Draft copy: headline "Want a ping when it's
+    pressed?", body "Mixes take up to a minute. Lock your phone, go about
+    your day, and we'll tell you the moment it's ready." The CTA is "Turn on
+    notifications", which calls `requestAuthorization`, then registers. A
+    quiet secondary button reads "Not now". Plain, flush, no boxes, per the
+    mobile design preferences. **It needs an approved mockup before build**
+    (`ui-state-board`, in `docs/mockups/approved/`).
+  - **When it shows:**
+    - **A new listener** (first-run, or a fresh sign-up) sees it **while
+      their first prompt is processing**, over the Making screen or the
+      chat's working state, about 3 s in, so the request has visibly
+      started.
+    - **A listener who has just signed up** without sending a prompt yet
+      sees it **on Home** instead.
+    - **An existing listener** who has never been asked sees it **once, on
+      Home**, on the first launch of the build that ships this.
+  - **"Once" means once per install.** A device flag (`push_ask_shown`) is
+    set the moment the modal appears, whichever button is tapped or if it
+    is swiped away. It never shows if the OS status is already decided:
+    - Authorized (say the quick fix already asked): skip the modal and
+      just register.
+    - Denied: never show it, and never send the listener to Settings
+      unprompted.
+  - **The quick fix's own ask** (if it asks for local-notification
+    permission) is replaced by this modal once both are in one build. The
+    same OS permission covers local and remote.
+  - You → Settings gets a "Mix ready notifications" switch, which
+    unregisters (`DELETE`) without touching the OS setting. If the OS
+    permission is denied, it reads "Off in iOS Settings" and links there.
 - **Tapping the notification** opens that mix: cold start or warm, through
   the same route the Mixes list uses. A failed-turn notification opens the
   mix with the composer holding the listener's words for a retry.
@@ -521,8 +559,50 @@ push_devices
 - It sends `Idempotency-Key` too. On load, a mix whose `turn` is running
   attaches to its stream, so a reload mid-turn resumes the caption instead
   of losing it. The Mixes list shows the same running state.
-- There is no web push in this change. The schema allows `webpush` later,
-  and a closed tab simply finds the mix there.
+- **Web push is in this change** (decided). See "Web push" below.
+
+### Web push
+
+The web app already ships a manifest and a service worker scoped to `/app/`
+(`web/public/sw.js`, decision on installability). Web push builds on both.
+
+- **Keys.** A VAPID key pair (P-256). `VAPID_PUBLIC_KEY` is a var, and it is
+  also served from `/health` so the bundle never hard-codes it.
+  `VAPID_PRIVATE_KEY` is a secret. `VAPID_SUBJECT` is a `mailto:` or
+  `https:` contact URL, and is a var.
+- **Subscribe.** The modal's CTA (the web version of the iOS modal, with the
+  same art and copy, and the same once rule in `localStorage`, wrapped in
+  try/catch) calls `Notification.requestPermission()` from the click, which
+  browsers require. It then calls
+  `registration.pushManager.subscribe({ userVisibleOnly: true,
+  applicationServerKey })` and sends `PUT /push/devices` with `provider:
+  'webpush'`, `platform: 'web'`, `token: <endpoint>`, and `keys: { p256dh,
+  auth }`. The modal is only offered where `PushManager` exists. On iPhone
+  and iPad that means **the Home Screen web app only** (iOS 16.4 and
+  later), so in Safari tabs it never shows.
+- **Send.** This follows RFC 8291 (`aes128gcm` payload encryption) with a
+  VAPID JWT (ES256, `aud` = the endpoint's origin, `exp` ≤ 24 h). All of it
+  runs on WebCrypto (ECDH, HKDF, AES-GCM), so it works on Workers with no
+  Node. It is hand-rolled in about 150 lines with RFC test vectors, or comes
+  from a small WebCrypto library chosen in the plan. Web push services
+  speak HTTP/1.1, so gate 0's HTTP/2 question does not apply. The VAPID JWT
+  is cached per push-service origin for about 12 h, with no rate rule like
+  Apple's.
+- **Payload.** The same JSON as APNs, minus `aps`: `{ kind, title, body,
+  sessionId, turnId }`, encrypted, and well under the 4 KB limit.
+- **Service worker.** `push` calls `showNotification(title, { body, tag:
+  turnId, data: { sessionId } })`. The `tag` collapses repeats.
+  `notificationclick` focuses an open `/app/` window and navigates it to the
+  mix, or opens one. If a focused client already shows that mix, the
+  worker skips `showNotification`. Browsers allow this for
+  `userVisibleOnly`, provided a notification is usually shown.
+- **Responses.** On `404`/`410` from the push service, disable the device.
+  On `413`, `429` or a 5xx, give up for this turn, as with APNs.
+
+**Fan-out across devices.** A turn notifies every live device of the user:
+iOS and web alike. `seen` from **any** device suppresses the push to all of
+them, so a listener watching on the laptop does not get buzzed on the
+phone. `notify_outcome` records the best outcome across devices.
 
 ### Session reads
 
@@ -553,7 +633,11 @@ turn reads as omitted and gets marked failed on the way.
    and a deploy mid-turn. Watch turn logs for `attempt > 1` and `lost` for a
    week. **Rollback:** flip it off. In-flight object turns still finish,
    since the class stays deployed.
-3. **Web**, on push: idempotency key, attach on load, list state.
+3. **Web**, on push: idempotency key, attach on load, list state, then the
+   permission modal, the service worker's `push`/`notificationclick`, and
+   subscription. Web push sends only once `TURN_PUSH=on`, the same switch
+   as iOS. A desktop browser and the installed iOS web app each get a
+   device pass.
 4. **iOS build** (TestFlight): push capability, registration, permission
    line, tap routing, the revised quick-fix rule, attach on relaunch. Then
    `TURN_PUSH=on`, after the device pass: kill the app mid-turn, get the
@@ -568,11 +652,12 @@ turn reads as omitted and gets marked failed on the way.
 "durable_objects": { "bindings": [{ "name": "TURN_RUNNER", "class_name": "TurnRunner" }] },
 "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TurnRunner"] }],
 "vars": { "DURABLE_TURNS": "off", "TURN_PUSH": "off" }
-// secrets: APNS_KEY_ID, APNS_PRIVATE_KEY (.p8). Team = APPLE_TEAM_ID, topic = APPLE_BUNDLE_ID.
+// vars: VAPID_PUBLIC_KEY, VAPID_SUBJECT
+// secrets: APNS_KEY_ID, APNS_PRIVATE_KEY (.p8), VAPID_PRIVATE_KEY. Team = APPLE_TEAM_ID, topic = APPLE_BUNDLE_ID.
 ```
 
-The DO class is exported from `src/index.ts`. `TURN_PUSH=on` without both
-APNs secrets throws at wiring, so every request fails until it is fixed (the
+The DO class is exported from `src/index.ts`. `TURN_PUSH=on` without the APNs
+secrets or the VAPID keys throws at wiring, so every request fails until it is fixed (the
 `buildShares` pattern). `DURABLE_TURNS=on` without the binding throws the
 same way. The founder creates the APNs key (a new key with APNs enabled is
 cleaner than adding APNs to the Sign in with Apple key) and sets the
@@ -623,6 +708,20 @@ secrets.
   - Tap routing to the mix.
   - The permission line shown once and never again after a decline.
 - **Web:** attach on load, idempotency key, list running state.
+- **Web push:**
+  - Encryption matches the RFC 8291 test vectors.
+  - The VAPID JWT has the right `aud` and `exp`.
+  - A 410 disables the device.
+  - Fan-out: `seen` on one device suppresses all of them.
+  - Service worker tests: `push` shows a notification with `tag = turnId`
+    and skips it when the mix is focused, and `notificationclick` routes
+    to the mix.
+  - The modal is offered once, only where `PushManager` exists.
+- **Copy:** the failure copy is picked by seed, and an empty title falls
+  back to "Tap to play it."
+- **iOS modal:** it shows at the three trigger points and at most once per
+  install, is skipped when the OS has already decided, and "Not now"
+  counts as the one ask.
 - **Optional:** one `@cloudflare/vitest-pool-workers` test of the real
   object class (open decision 5).
 
@@ -659,26 +758,43 @@ our volume.
   notifications from the quick fix. The `push` flag on the stream and the
   `seen` ack avoid that.
 
-## Open decisions for the founder
+## Founder answers (2026-11-21)
 
-1. **Lock-screen text.** Should the push body be the mix's title ("Your mix
-   is ready" / "Lagos Nights") or fixed copy only? Recommended: the title.
-   The listener named it or saw it named, and fixed copy reads generic.
-2. **Failed turns.** Push "The DJ couldn't finish that one" too, or only
-   successes? Recommended: push failures. Silence is the bug being fixed.
-3. **Permission ask.** Is the inline "Get a ping when it's ready" line,
-   offered once on the first turn out past about 8 s, the right moment?
-   Needs a mockup either way.
-4. **One automatic re-run** after a turn dies mid-way (a deploy, an
-   eviction), at the cost of a second model turn? Or fail at once and let
-   the listener retry? Recommended: one re-run.
-5. **Test harness.** Add `@cloudflare/vitest-pool-workers` for one test of
-   the real Durable Object class, or keep all tests in Node over the thin
-   class? Recommended: keep Node, and add the pool only if the spike shows
-   behaviour our fakes miss.
-6. **Durable Object vs Workflow.** Accept the project's first Durable Object
-   (A)? Or take (B), which gives up the stream for polling?
-7. **Where the object runs.** Leave it where the first request lands, or pin
-   it with a `locationHint` near Neon's region (possibly faster turns,
-   measured separately)?
-8. **Web push.** Out of scope now. Should it be on the backlog?
+1. **Lock-screen text:** show the mix's title, as it comes at no cost. It
+   does: the finish already holds it (see "Payload").
+2. **Failed turns:** yes, push them, with simple, cute, fun copy (the table
+   under "Payload").
+3. **Permission ask:** a modal with a tape illustration that says why, and
+   a CTA that makes the request. A new listener sees it while their first
+   prompt is processing, or on Home right after sign-up. An existing
+   listener who has not been asked sees it once, on Home. Detail under "iOS
+   client". It needs a mockup before build.
+4. **Automatic re-run:** yes, exactly one (`MAX_ATTEMPTS = 2`).
+5. **Test harness (asked for a recommendation):** keep every test in Node
+   (vitest + pglite) over a thin `TurnRunner` class, and add no second test
+   runner. The Durable Object's own surface is a few lines (an alarm, a
+   storage map, a watcher set), and the risky behaviour lives in
+   `runTurnJob`, which Node tests cover fully. The facts fakes cannot show
+   (the deploy-mid-alarm retry, a stream cancelling through the proxy) are
+   exactly what gate 0's spike checks on a real deploy, and the stage-2
+   smoke checks again. Add `@cloudflare/vitest-pool-workers` only if the
+   spike shows behaviour the fakes miss.
+6. **Durable Object or Workflow (asked):** the Durable Object, (A). It is
+   the only option that keeps today's live stream byte for byte and lets a
+   relaunched app reconnect to a running turn. A Workflow would add a poll
+   the turn-steps spec already rejected, and its real strength,
+   step-by-step replay, goes unused while the turn is one opaque unit. The
+   cost is one new class and a `migrations` entry, which is small and
+   reversible behind `DURABLE_TURNS`.
+7. **Where the object runs (asked):** leave the default for now, and decide
+   from data. An object lives where its first request lands. That is near
+   the listener, which is where today's turn runs too, so this change makes
+   nothing slower. A turn makes dozens of sequential Neon round trips, so
+   pinning the object near Neon's region with `locationHint` may make turns
+   faster. That is a one-line change, best measured on its own: the turn
+   log's `timing` field, before and after, over a few days. It goes on the
+   backlog as a follow-up rather than into this change, so a speed-up or
+   slow-down can't be confused with the move off the request.
+8. **Web push:** in this spec (see "Web push"). It covers desktop browsers
+   and the installed iOS web app, and shares the iOS modal's design and
+   once rule.
