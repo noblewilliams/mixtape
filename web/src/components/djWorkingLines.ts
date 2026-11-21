@@ -16,7 +16,7 @@ import type { TurnProgress, TurnStepProgress } from '../api/client'
  */
 
 export const LISTENING_LINE = 'The DJ is listening…'
-export const STILL_LINE = 'Still at the decks. Worth the wait…'
+export const STILL_LINE = 'Still at the decks…'
 /** How long each of a step's later lines holds. */
 export const STEP_CLOCK_MS = 12_000
 /** A step (listening included) this long says the still line, whatever it is. */
@@ -135,7 +135,7 @@ function namedLine(step: TurnStepProgress, pick: number): string | null {
     }
     case 'picking': {
       const artists = nameList(step.artists, 3)
-      return artists ? one([`Pulling records that sit with ${artists}…`, `Finding company for ${artists}…`]) : null
+      return artists ? `Finding company for ${artists}…` : null
     }
     case 'checking': {
       const genres = nameList(step.genres, 2)
@@ -148,7 +148,7 @@ function namedLine(step: TurnStepProgress, pick: number): string | null {
     case 'pressing': {
       const count = step.count
       if (count === undefined || count < 1) return null
-      return count === 1 ? 'Pressing one song to tape…' : `Pressing ${count} songs to tape…`
+      return count === 1 ? 'Pressing one song…' : `Pressing ${count} songs…`
     }
     default:
       return null

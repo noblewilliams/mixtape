@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
 import 'auth_provider.dart';
+import 'mix_background_provider.dart';
 import 'working_step.dart';
 
 /// A new mix being made, before its create request has returned an id.
@@ -72,12 +73,14 @@ class PendingMix {
 class TurnActivity {
   TurnActivity._(this._end, this._step);
 
-  final void Function(bool ready) _end;
+  final void Function(bool ready, bool succeeded) _end;
   final void Function(WorkingStep step) _step;
 
   /// Ends the turn; `ready` is whether it left anything to look at (a
-  /// reply, or a line saying it failed) rather than being taken back.
-  void call({required bool ready}) => _end(ready);
+  /// reply, or a line saying it failed) rather than being taken back, and
+  /// `succeeded` whether the DJ's reply landed (a ping, if the app is away).
+  void call({required bool ready, bool succeeded = false}) =>
+      _end(ready, succeeded);
 
   /// The turn's stream reported [step]. Nothing once the turn has ended.
   void step(WorkingStep step) => _step(step);
@@ -88,13 +91,15 @@ class TurnActivity {
 class NewMixActivity {
   NewMixActivity._(this._end, this._step, this._named);
 
-  final void Function(String? sessionId) _end;
+  final void Function(String? sessionId, bool succeeded) _end;
   final void Function(WorkingStep step) _step;
   final void Function(String sessionId) _named;
 
   /// Ends it with the id the server gave it (also on a failure that still
-  /// wrote the row), or none when nothing was made.
-  void call({String? sessionId}) => _end(sessionId);
+  /// wrote the row), or none when nothing was made; `succeeded` when the
+  /// mix landed (a ping, if the app is away).
+  void call({String? sessionId, bool succeeded = false}) =>
+      _end(sessionId, succeeded);
 
   /// The first turn's stream reported [step].
   void step(WorkingStep step) => _step(step);
@@ -161,6 +166,13 @@ class MixActivityNotifier extends Notifier<MixActivity> {
     // one writes nothing.
     ref.watch(authProvider);
     _generation++;
+    // While any turn is out the app holds a background task, so leaving it
+    // does not cut the turn off (mix_background_provider.dart).
+    listenSelf((_, next) {
+      ref
+          .read(mixBackgroundProvider.notifier)
+          .turnsOut(next.working.isNotEmpty || next.pending != null);
+    });
     return const MixActivity();
   }
 
@@ -180,11 +192,12 @@ class MixActivityNotifier extends Notifier<MixActivity> {
         generation == _generation &&
         state.working[sessionId] == since;
     return TurnActivity._(
-      (ready) {
+      (ready, succeeded) {
         if (ended) return;
         final current = mine();
         ended = true;
         if (!ref.mounted || generation != _generation) return;
+        if (ready && succeeded) ref.read(mixBackgroundProvider.notifier).landed();
         state = state._copy(
           working: current
               ? ({...state.working}..remove(sessionId))
@@ -217,11 +230,14 @@ class MixActivityNotifier extends Notifier<MixActivity> {
         generation == _generation &&
         identical(state.pending, pending);
     return NewMixActivity._(
-      (sessionId) {
+      (sessionId, succeeded) {
         if (ended) return;
         final current = mine();
         ended = true;
         if (!ref.mounted || generation != _generation) return;
+        if (sessionId != null && succeeded) {
+          ref.read(mixBackgroundProvider.notifier).landed();
+        }
         state = state._copy(
           ready: sessionId == null ? state.ready : {...state.ready, sessionId},
           clearPending: current,

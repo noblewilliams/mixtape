@@ -341,7 +341,7 @@ conflict retry re-runs the attempt, and a replacement round goes back to
   - Once a stream has opened, the clock stops. "The DJ is listening…"
     holds until the first step, then each step shows its line.
   - Within a step, later lines take over on a short clock (12 s each), and
-    a step past 30 s shows "Still at the decks. Worth the wait…".
+    a step past 30 s shows "Still at the decks…".
   - Each line holds at least 1.5 s. A step that arrives sooner waits, and
     one superseded while waiting is skipped, so a 50 ms `noting` never
     flashes.
@@ -377,11 +377,11 @@ curly quotes.
 |---|---|
 | `digging` `library` + artists | Flipping through your {artists} records… / Pulling your {artists} records… |
 | `digging` `catalogue` + artists | Digging for {artists}… / Crate-digging for {artists}… |
-| `picking` + artists | Pulling records that sit with {artists}… / Finding company for {artists}… |
+| `picking` + artists | Finding company for {artists}… |
 | `checking` + genres | Running the {genres} sound check… |
 | `playlists` + playlist | Pulling “{playlist}” off the shelf… |
 | `labelling` + title | Labelling it “{title}”… |
-| `pressing` + count | Pressing {count} songs to tape… (1: Pressing one song to tape…) |
+| `pressing` + count | Pressing {count} songs… (1: Pressing one song…) |
 
 Without names, or when the line would run past 44 characters:
 
@@ -398,7 +398,7 @@ Without names, or when the line would run past 44 characters:
 | `labelling` | Labelling the cassette… | |
 | `noting` | Jotting that on the sleeve… | |
 | `writing` | Writing the liner notes… | |
-| any step past 30 s | Still at the decks. Worth the wait… | |
+| any step past 30 s | Still at the decks… | |
 
 A step with two later lines shows them in order, 12 s each (picking:
 "Sequencing…" at 12 s, "Lining up…" at 24 s, then the 30 s line). The 30 s

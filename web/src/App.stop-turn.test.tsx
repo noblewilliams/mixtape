@@ -196,7 +196,7 @@ describe('stopping a mix message turn', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'Rainy evening' } })
     fireEvent.click(screen.getByRole('button', { name: 'Find an album' }))
     await send('Older')
-    expect(await screen.findByText('Finding your album · checking Apple Music')).toBeInTheDocument()
+    expect(await screen.findByText('Finding your album')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
     expect(screen.getByRole('textbox', { name: 'Message your DJ' })).toBeEnabled()
     hold.resolve()

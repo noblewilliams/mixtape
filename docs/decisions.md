@@ -2230,3 +2230,33 @@ the November 21 section of
 **Reopens if:** the founder settles on a more editorial type direction (SF
 is a placeholder they accepted "for now"), or App Review objects to the
 close.
+
+## 2026-11-21 — A mix keeps going when the listener leaves the app, and pings when it lands
+
+Today a turn whose client drops gets only about 30 s more on the server
+(`waitUntil`), and iOS suspends the app a few seconds after it leaves the
+screen, so a mix started then backgrounded could be lost and the listener
+was never told. The quick fix, iOS only:
+
+- **Background task:** while any mix turn is out (`mixActivityProvider`
+  working or pending), the app holds one `beginBackgroundTask`
+  (`mixtape/background` in `AppDelegate.swift`). iOS grants about 30 s more,
+  the stream stays open, and the server keeps its own 30 s grace after that.
+  A typical 20–50 s turn lands.
+- **Ping:** a mix turn that lands while the app is not on screen posts a
+  local notification, "Your mix is ready / Tap to listen." Fixed copy, no
+  mix title or listener words (it shows on a lock screen). Album turns and
+  failures don't ping. Tapping it opens the app where it was.
+- **Permission:** asked at the first mix turn of a launch (iOS shows its
+  prompt once). The first-run Making line says "About a minute. We'll ping
+  you." only once notifications are allowed, "About a minute." otherwise.
+- **Shorter loading copy (iOS and web):** "Still at the decks", "Pressing
+  {count} songs", one picking line ("Finding company for {artists}"),
+  "Finding your album", and "About a minute." on the Making screens.
+
+A turn longer than both graces is still lost to a closed app. Running turns
+off the request (a durable job plus server push) is being specced
+separately.
+
+**Reopens if:** turns routinely outlast the grace (logs or listener
+reports), or the first-mix permission prompt hurts first-run completion.

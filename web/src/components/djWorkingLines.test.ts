@@ -29,7 +29,7 @@ describe('the timed walk (no stream)', () => {
       { from: 11 * S, lines: ['Pulling records that fit…', 'Checking the tempos…', 'Cueing up contenders…'] },
       { from: 20 * S, lines: ['Sequencing the tracklist…', 'Working the crossfader…', 'Lining up the transitions…'] },
       { from: 32 * S, lines: ['Pressing the tape…', 'Labelling the cassette…', 'Spooling it up…'] },
-      { from: 50 * S, lines: ['Still at the decks. Worth the wait…'] },
+      { from: 50 * S, lines: ['Still at the decks…'] },
     ])
   })
 
@@ -129,7 +129,7 @@ describe('named lines', () => {
     expect(both({ scope: 'catalogue', artists: ['Tems', 'Asake'] }, 'digging')).toEqual(['Crate-digging for Tems and Asake…', 'Digging for Tems and Asake…'])
     expect(both({ scope: 'catalogue', artists: ['Tems', 'Asake', 'Rema', 'Wizkid'] }, 'digging')).toEqual(['Crate-digging for Tems, Asake and more…', 'Digging for Tems, Asake and more…'])
     expect(both({ scope: 'library', artists: ['Sade'] }, 'digging')).toEqual(['Flipping through your Sade records…', 'Pulling your Sade records…'])
-    expect(both({ artists: ['Sade'] }, 'picking')).toEqual(['Finding company for Sade…', 'Pulling records that sit with Sade…'])
+    expect(both({ artists: ['Sade'] }, 'picking')).toEqual(['Finding company for Sade…', 'Finding company for Sade…'])
   })
 
   it('names at most two genres on the sound check', () => {
@@ -143,8 +143,8 @@ describe('named lines', () => {
   })
 
   it('counts the songs pressed, "one song" for one, and drops a count below one', () => {
-    expect(stepLineAt(step('pressing', { count: 15 }), 0, 0)).toBe('Pressing 15 songs to tape…')
-    expect(stepLineAt(step('pressing', { count: 1 }), 0, 0)).toBe('Pressing one song to tape…')
+    expect(stepLineAt(step('pressing', { count: 15 }), 0, 0)).toBe('Pressing 15 songs…')
+    expect(stepLineAt(step('pressing', { count: 1 }), 0, 0)).toBe('Pressing one song…')
     expect(both({ count: 0 }, 'pressing')).toEqual(['Pressing the tape…', 'Spooling it up…'])
     expect(both({ count: -3 }, 'pressing')).toEqual(['Pressing the tape…', 'Spooling it up…'])
   })
@@ -159,9 +159,6 @@ describe('named lines', () => {
     expect(fits).toHaveLength(44)
     expect(stepLineAt(step('labelling', { title: 'x'.repeat(28) }), 0, 0)).toBe(fits)
     expect(stepLineAt(step('labelling', { title: 'x'.repeat(29) }), 0, 0)).toBe('Labelling the cassette…')
-    // "Pulling records that sit with Tems and Asake…" is 45: its nameless line, while the other pick fits.
-    const lines = [0, 1].map((seed) => stepLineAt(step('picking', { artists: ['Tems', 'Asake'] }), 0, seed)).sort()
-    expect(lines).toEqual(['Finding company for Tems and Asake…', 'Pulling records that fit…'])
   })
 
   it('holds its later lines and the still line whatever the names', () => {
@@ -260,6 +257,6 @@ describe('the dwell', () => {
     expect(state.wakeAt).toBe(DWELL_MS)
     state = settleLine(state.shown, at(DWELL_MS, current), DWELL_MS)
     seen.push(state.shown.line)
-    expect(seen).toEqual(['Pressing 12 songs to tape…', 'Writing the liner notes…'])
+    expect(seen).toEqual(['Pressing 12 songs…', 'Writing the liner notes…'])
   })
 })
