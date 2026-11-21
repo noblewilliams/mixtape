@@ -518,7 +518,7 @@ push_devices
     2026-11-21: not a bottom sheet), with a tape illustration: a cassette with a
     little bell or a notification bubble popping out of the reel window. It
     says why, in one breath. Art, copy and states are on the
-    board `docs/mockups/2026-11-21-push-permission-modal-r2.html`, which is
+    board `docs/mockups/2026-11-21-push-permission-modal-r3.html`, which is
     awaiting approval; the board, not this paragraph, is the source. Plain, flush, no boxes, per the
     mobile design preferences. **It needs an approved mockup before build**
     (`ui-state-board`, in `docs/mockups/approved/`).
