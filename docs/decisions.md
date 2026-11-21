@@ -2211,3 +2211,22 @@ status glyphs become filled symbols app-wide.
 **Reopens if:** either brand objects to the use, or the founder wants the
 official icons on the other screens (first-run choose service, the music
 door).
+
+## 2026-11-21 — The update note says "Update (restart required)" and its dot becomes the loader
+
+This amends the 2026-11-20 entry. The tap still closes the app, because iOS
+can't relaunch it, and the founder kept that after seeing it on a device. The
+note now explains why the app goes away, and the motion says it in shape:
+
+- **Label:** "Update", with "(restart required)" in 7 pt italic under it.
+- **Glyph:** a flat green dot that becomes the level bars on tap, with no
+  words left on screen.
+- **Next start:** the bars fold into a drawn check beside "Updated".
+
+VoiceOver announces the restart, because nothing on screen does. Approval:
+the November 21 section of
+`docs/mockups/approved/2026-11-20-ota-update-states.md`.
+
+**Reopens if:** the founder settles on a more editorial type direction (SF
+is a placeholder they accepted "for now"), or App Review objects to the
+close.
