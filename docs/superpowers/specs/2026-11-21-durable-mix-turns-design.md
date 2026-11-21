@@ -1,8 +1,8 @@
 # Durable mix turns: the mix always lands, and the listener is told
 
 Date: 2026-11-21. Status: **decisions answered 2026-11-21** (see "Founder
-answers" at the end). Gate 0 spikes and the permission-modal mockup come
-before the plan.
+answers" at the end), and the permission pop-up board was approved the same
+day. Gate 0 spikes come before the plan.
 
 ## Why
 
@@ -518,8 +518,10 @@ push_devices
     2026-11-21: not a bottom sheet), with a tape illustration: a cassette with a
     little bell or a notification bubble popping out of the reel window. It
     says why, in one breath. Art, copy and states are on the
-    board `docs/mockups/2026-11-21-push-permission-modal-r3.html`, which is
-    awaiting approval; the board, not this paragraph, is the source. Plain, flush, no boxes, per the
+    board `docs/mockups/2026-11-21-push-permission-modal-r3.html`,
+    **approved 2026-11-21** (record:
+    `docs/mockups/approved/2026-11-21-push-permission-modal.md`); the
+    board, not this paragraph, is the source. Plain, flush, no boxes, per the
     mobile design preferences. **It needs an approved mockup before build**
     (`ui-state-board`, in `docs/mockups/approved/`).
   - **When it shows:**
