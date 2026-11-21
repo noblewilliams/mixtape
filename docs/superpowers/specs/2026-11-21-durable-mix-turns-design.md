@@ -2,7 +2,8 @@
 
 Date: 2026-11-21. Status: **decisions answered 2026-11-21** (see "Founder
 answers" at the end), and the permission pop-up board was approved the same
-day. Gate 0 spikes passed 2026-11-22. Next: the implementation plan.
+day. Gate 0 spikes passed 2026-11-22. Plan:
+`../plans/2026-11-22-durable-mix-turns.md`.
 
 ## Why
 
