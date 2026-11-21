@@ -452,12 +452,13 @@ simply there on reopen, as today.
 
   | Title | Body |
   |---|---|
-  | Oops, the tape got tangled | The DJ couldn't finish that mix. Tap to try again, it usually works second time. |
-  | Oops, the needle skipped | That mix didn't make it. Tap and send it again. |
-  | Oops, wobbly cassette | The DJ fumbled that one. Give it another go? Tap to try again. |
+  | Oops, the tape got tangled | Tap to try again. |
+  | Oops, the needle skipped | Give it another spin? |
+  | Oops, wobbly cassette | Tap to have another go. |
 
-  Every title opens with "Oops", and every body asks the listener to try
-  again (founder, 2026-11-21).
+  Every title opens with "Oops", and every body is one short line asking
+  the listener to try again (founder, 2026-11-21: shorter than the first
+  draft).
 
   Tapping opens the mix with the listener's words back in the composer,
   ready to resend. The listener's words are still in the transcript, since
@@ -513,10 +514,11 @@ push_devices
   and gets its own test on device.
 - **Asking for permission: one modal, asked once** (decided). The system
   prompt is shown only from a tap on the modal's CTA, never cold.
-  - **The modal** is a sheet with a tape illustration: a cassette with a
+  - **The modal** is a centred pop-up over a blurred overlay (founder,
+    2026-11-21: not a bottom sheet), with a tape illustration: a cassette with a
     little bell or a notification bubble popping out of the reel window. It
     says why, in one breath. Art, copy and states are on the
-    board `docs/mockups/2026-11-21-push-permission-modal.html`, which is
+    board `docs/mockups/2026-11-21-push-permission-modal-r2.html`, which is
     awaiting approval; the board, not this paragraph, is the source. Plain, flush, no boxes, per the
     mobile design preferences. **It needs an approved mockup before build**
     (`ui-state-board`, in `docs/mockups/approved/`).

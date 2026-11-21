@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mix ready notifications r2</title>
+<style>
+/* ---------- Review page (house board style, from the 2026-11-21 Add your music board) ---------- */
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1280px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:60px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+p{max-width:840px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:840px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:840px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.rec{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;color:#a7d8b4;border:1px solid rgba(112,151,120,.6);margin-left:6px;vertical-align:1px}
+.frames{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+.frame{width:390px;max-width:100%}
+.frame.wide{width:760px}
+.frame figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45}
+.frame figcaption b{color:#fff;font-weight:600;display:block}
+figure{margin:0}
+
+/* ---------- Native language ---------- */
+.phone{width:390px;height:844px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism-v:linear-gradient(180deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue));
+  --sheet:#fbfaf8;--scrim:rgba(28,22,34,.16);--paper:#e8dfcf;--ink:#1c1a1e;
+  --glass:rgba(255,255,255,.62);--glass-hi:rgba(255,255,255,.9);
+  --field:rgba(255,255,255,.75);--panel:rgba(255,255,255,.55);
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 80%,rgba(104,143,168,.32),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.phone.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);
+  --sheet:#1c1a22;--scrim:rgba(0,0,0,.32);
+  --glass:rgba(60,56,66,.5);--glass-hi:rgba(255,255,255,.2);--field:rgba(255,255,255,.1);--panel:rgba(40,36,54,.55);
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 78%,rgba(80,120,170,.4),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+/* First run is always its own dark page (FirstRunColors.base). */
+.screen.firstrun{--text:#efe6da;--muted:#b9aea4;background:radial-gradient(ellipse 90% 50% at 50% 110%,rgba(110,92,143,.6),transparent 70%),radial-gradient(ellipse 70% 40% at 0% 0%,rgba(201,104,127,.22),transparent 70%),#140c12}
+.screen.lock{background:radial-gradient(ellipse 120% 60% at 30% 20%,#6e5c8f,transparent 70%),radial-gradient(ellipse 100% 60% at 80% 90%,#c9687f,transparent 70%),linear-gradient(180deg,#2b2440,#4a3550);color:#fff}
+.phone.strip{height:120px;border-radius:22px}.phone.strip .screen{border-radius:14px;justify-content:center}.phone.strip .group{margin:0 10px}
+.phone.large .screen{font-size:30px;line-height:1.25}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif;position:relative;z-index:5}
+.statusbar .right{display:flex;gap:6px;align-items:center}
+.statusbar .cell{width:18px;height:11px;background:currentColor;clip-path:polygon(0 70%,22% 70%,22% 45%,49% 45%,49% 25%,76% 25%,76% 0,100% 0,100% 100%,0 100%)}
+.statusbar .batt{width:26px;height:12px;border:1.5px solid currentColor;border-radius:4px;position:relative;opacity:.9}.statusbar .batt::after{content:"";position:absolute;inset:2px 6px 2px 2px;background:currentColor;border-radius:1.5px}
+.homebar{position:absolute;left:0;right:0;bottom:0;height:34px;display:grid;place-items:center;z-index:30}.homebar i{width:134px;height:5px;border-radius:3px;background:var(--text);opacity:.8}
+.large-title{flex:none;padding:30px 20px 8px}
+.large-title h1{margin:0;font:800 1.75em/1.05 -apple-system,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.hint{padding:0 20px;color:var(--muted);font-size:.8em;max-width:300px}
+.bpanel{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:10px 14px 140px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px)}
+.composer{position:relative;display:flex;align-items:center;min-height:48px;padding:0 14px 0 22px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;color:var(--muted);font-size:.95em}
+.composer .stripe{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:4px;height:1.6em;border-radius:2px;background:var(--prism-v)}
+.pills{display:flex;gap:8px;margin-top:12px}
+.pill{display:inline-flex;align-items:center;min-height:34px;padding:0 13px;border-radius:999px;font:500 .82em -apple-system,sans-serif;background:rgba(255,255,255,.55);border:1px solid var(--hair);white-space:nowrap}
+.phone.dark .pill{background:rgba(255,255,255,.1)}
+.dock{position:absolute;left:22px;right:22px;bottom:32px;z-index:6;display:grid;grid-template-columns:repeat(4,1fr);border-radius:999px;padding:4px;background:var(--glass);-webkit-backdrop-filter:blur(26px);backdrop-filter:blur(26px);box-shadow:0 8px 24px rgba(30,24,30,.16),inset 0 1px 0 var(--glass-hi)}
+.dock span{min-height:48px;display:grid;place-items:center;font:600 .6em -apple-system,sans-serif;color:var(--muted);border-radius:999px}
+.dock span.on{color:var(--plum);background:rgba(255,255,255,.6)}
+.phone.dark .dock span.on{background:rgba(255,255,255,.14)}
+
+/* Making your mix (first run) */
+.making{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:0 28px 120px;text-align:center}
+.making h1{margin:0;font:800 1.75em/1.1 -apple-system,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.making p{margin:0;color:var(--muted);font-size:.95em}
+.making .step{color:var(--text);font-size:.9em;opacity:.9}
+.making .ping{font-size:.82em;color:var(--muted);display:flex;gap:6px;align-items:center}
+.making .ping svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8}
+
+/* The pop-up (founder r2: centred modal over a blurred overlay, not a bottom sheet) */
+.scrim{position:absolute;inset:0;background:var(--scrim);-webkit-backdrop-filter:blur(16px) saturate(120%);backdrop-filter:blur(16px) saturate(120%);z-index:20}
+.sheet{position:absolute;left:22px;right:22px;top:50%;transform:translateY(-50%);z-index:21;background:var(--sheet);border-radius:30px;padding:0 22px 14px;box-shadow:0 24px 60px rgba(30,20,40,.28),inset 0 0 0 .5px rgba(255,255,255,.6);overflow:hidden}
+.phone.dark .sheet{box-shadow:0 24px 60px rgba(0,0,0,.6),inset 0 0 0 .5px rgba(255,255,255,.1)}
+.screen.firstrun .sheet{--text:#1c1a1e;--muted:#696269;color:var(--text)}
+.phone.dark .sheet{--text:#f2eef1;--muted:#b0a9b1}
+.sheet h2{all:unset;display:block;font:800 1.45em/1.12 -apple-system,"SF Pro Display",sans-serif;letter-spacing:-.03em;margin:2px 0 8px;text-align:center}
+.sheet p{margin:0 0 16px;font-size:.95em;line-height:1.4;text-align:center;color:var(--smoke)}
+.phone.dark .sheet p{color:var(--muted)}
+.screen.firstrun .sheet p{color:#696269}
+.sheet h2{all:unset;display:block;font:800 1.75em/1.1 -apple-system,"SF Pro Display",sans-serif;letter-spacing:-.035em;margin:4px 0 8px}
+.sheet p{margin:0 0 18px;font-size:1em;line-height:1.4}
+.fp{display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:10px 20px;min-height:56px;border-radius:999px;background:var(--paper);color:var(--ink);font:700 1.05em -apple-system,sans-serif;width:100%}
+.notnow{display:flex;align-items:center;justify-content:center;min-height:44px;margin-top:4px;color:var(--muted);font:600 .95em -apple-system,sans-serif}
+.target{outline:1.5px dashed rgba(201,104,127,.9);outline-offset:2px}
+
+/* The art */
+.art{position:relative;height:178px;margin:0 -22px 4px;display:grid;place-items:center;overflow:hidden}
+.art .tape{width:184px;transform:rotate(-4deg) translateY(20px);filter:drop-shadow(0 10px 18px rgba(23,22,26,.28))}
+.art .tape svg{display:block;width:100%;height:auto}
+.toast{position:absolute;left:50%;top:14px;transform:translateX(-50%) rotate(2deg);width:262px;display:grid;grid-template-columns:30px 1fr auto;gap:9px;align-items:center;padding:9px 12px;border-radius:18px;background:rgba(255,255,255,.78);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:0 8px 22px rgba(30,24,40,.18),inset 0 0 0 .5px rgba(255,255,255,.7);color:#1c1a1e;text-align:left;animation:pop 3.2s ease-in-out infinite}
+.phone.dark .toast{background:rgba(60,56,66,.82);color:#f2eef1;box-shadow:0 8px 22px rgba(0,0,0,.45),inset 0 0 0 .5px rgba(255,255,255,.14)}
+.toast .icon{width:30px;height:30px;border-radius:7px;overflow:hidden}
+.toast .icon svg{width:100%;height:100%;display:block}
+.toast b{display:block;font:600 12.5px/1.2 -apple-system,sans-serif}
+.toast small{display:block;font:400 12px/1.25 -apple-system,sans-serif;opacity:.75}
+.toast time{font:400 11px -apple-system,sans-serif;opacity:.6;align-self:start}
+@keyframes pop{0%,8%{opacity:0;transform:translate(-50%,26px) rotate(2deg) scale(.92)}18%,82%{opacity:1;transform:translate(-50%,0) rotate(2deg) scale(1)}92%,100%{opacity:0;transform:translate(-50%,-6px) rotate(2deg) scale(.98)}}
+/* I2: the tape rings */
+.art.ring .tape{animation:buzz 2.4s ease-in-out infinite}
+@keyframes buzz{0%,60%,100%{transform:rotate(-4deg) translateY(10px)}64%{transform:rotate(-7deg) translateY(10px)}68%{transform:rotate(-1deg) translateY(10px)}72%{transform:rotate(-6deg) translateY(10px)}76%{transform:rotate(-2deg) translateY(10px)}80%{transform:rotate(-4deg) translateY(10px)}}
+.art .arcs{position:absolute;inset:0;pointer-events:none}
+.art .arcs path{fill:none;stroke:var(--muted);stroke-width:3;stroke-linecap:round;opacity:.55}
+.still .toast,.still .tape{animation:none!important}
+.still .toast{opacity:1}
+.still .hubL,.still .hubR{animation:none!important}
+.hubL{transform-origin:61px 61px;animation:hub 1.05s linear infinite}.hubR{transform-origin:139px 61px;animation:hub 1.05s linear infinite reverse}
+@keyframes hub{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.hubL,.hubR,.toast,.tape{animation:none!important}.toast{opacity:1}}
+
+/* iOS system alert (drawn as iOS 26 shows it) */
+.alert{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:25;width:290px;border-radius:24px;background:rgba(242,242,247,.92);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);color:#000;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden}
+.alert .t{padding:20px 18px 0;font:600 17px/1.3 -apple-system,sans-serif}
+.alert .m{padding:6px 18px 18px;font:400 13px/1.35 -apple-system,sans-serif}
+.alert .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 14px 14px}
+.alert .btns span{min-height:44px;display:grid;place-items:center;border-radius:999px;background:rgba(120,120,128,.16);font:500 16px -apple-system,sans-serif;color:#000}
+.alert .btns span.p{background:#0a84ff;color:#fff;font-weight:600}
+
+/* You rows */
+.group{background:rgba(255,255,255,.62);border-radius:22px;overflow:hidden;margin:0 20px 16px}
+.phone.dark .group{background:rgba(255,255,255,.08)}
+.grow{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:52px;padding:8px 16px;position:relative}
+.grow+.grow::before{content:"";position:absolute;left:50px;right:0;top:0;height:1px;background:var(--hair)}
+.grow svg{width:22px;height:22px;stroke:var(--plum);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.grow strong{display:block;font-weight:500}.grow small{display:block;color:var(--muted);font-size:.78em}
+.toggle{width:51px;height:31px;border-radius:16px;background:#34c759;position:relative;flex:none}.toggle::after{content:"";position:absolute;top:2px;right:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+.toggle.off{background:rgba(120,120,128,.32)}.toggle.off::after{right:auto;left:2px}
+.link{color:var(--plum);font-size:.85em;font-weight:600;text-decoration:underline}
+.gnote{color:var(--muted);font-size:.78em;margin:-8px 36px 16px}
+
+/* Lock screen */
+.lockclock{text-align:center;padding-top:20px}
+.lockclock .d{font:600 18px -apple-system,sans-serif;opacity:.9}
+.lockclock .c{font:700 92px/1 -apple-system,"SF Pro Rounded",sans-serif;letter-spacing:-.02em}
+.nstack{position:absolute;left:12px;right:12px;bottom:120px;display:flex;flex-direction:column;gap:8px}
+.notif{display:grid;grid-template-columns:38px 1fr auto;gap:10px;padding:12px 14px;border-radius:24px;background:rgba(255,255,255,.28);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);color:#fff}
+.notif .icon{width:38px;height:38px;border-radius:9px;overflow:hidden}
+.notif .icon svg{width:100%;height:100%;display:block}
+.notif b{display:block;font:600 15px/1.25 -apple-system,sans-serif}
+.notif span{display:block;font:400 15px/1.3 -apple-system,sans-serif}
+.notif time{font:400 13px -apple-system,sans-serif;opacity:.75}
+
+/* Web */
+.browser{width:760px;max-width:100%;height:500px;border-radius:12px;overflow:hidden;border:1px solid #4b4950;background:#f4f1ee;position:relative;box-shadow:0 22px 60px rgba(0,0,0,.45)}
+.browser .bar{height:38px;background:#e7e3e6;display:flex;align-items:center;gap:7px;padding:0 14px}
+.browser .bar i{width:11px;height:11px;border-radius:50%;background:#cfc8cd}
+.browser .bar .url{margin-left:18px;flex:1;height:24px;border-radius:7px;background:#fff;font:12px -apple-system,sans-serif;color:#696269;display:flex;align-items:center;padding:0 10px}
+.browser .page{position:absolute;inset:38px 0 0;background:radial-gradient(ellipse 80% 50% at 50% 110%,rgba(110,92,143,.45),transparent 70%),linear-gradient(180deg,#f9f7f4,#e9e4ec);padding:28px 40px;color:#1c1a1e;font:14px -apple-system,sans-serif}
+.browser.dark{background:#111;border-color:#333}.browser.dark .bar{background:#26232b}.browser.dark .bar .url{background:#1b1920;color:#b0a9b1}
+.browser.dark .page{background:radial-gradient(ellipse 80% 50% at 50% 110%,rgba(96,78,170,.7),transparent 70%),linear-gradient(180deg,#050507,#1a1530);color:#f2eef1}
+.wscrim{position:absolute;inset:38px 0 0;background:rgba(28,22,34,.14);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.browser.dark .wscrim{background:rgba(0,0,0,.32)}
+.wdialog{position:absolute;left:50%;top:54%;transform:translate(-50%,-50%);width:360px;border-radius:20px;background:#fbfaf8;color:#1c1a1e;padding:0 20px 14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px/1.45 -apple-system,sans-serif;overflow:hidden}
+.browser.dark .wdialog{background:#1c1a22;color:#f2eef1}
+.wdialog .art{height:172px;margin:0 -20px}
+.wdialog .art .tape{width:150px;transform:rotate(-4deg) translateY(30px)}
+.wdialog .toast{width:220px;top:10px}
+.wdialog h3{margin:2px 0 6px;font:700 17px/1.25 -apple-system,sans-serif}
+.wdialog p{margin:0 0 12px;color:inherit;opacity:.85}
+.wactions{display:flex;justify-content:flex-end;gap:16px}
+.wactions span{font:600 13px -apple-system,sans-serif;padding:6px 2px;color:#857e86}
+.wactions span.go{color:#544451}
+.browser.dark .wactions span.go{color:#f0ebef}
+</style>
+
+<main>
+<p class="kicker">Board r2 · 2026-11-21 · Durable mix turns spec, founder answer 3</p>
+<h1>Mix ready notifications: the ask</h1>
+<p class="note"><b>Changed from <a href="2026-11-21-push-permission-modal.html" style="color:#c0daed">r1</a></b> (founder: "i want a pop up modal with blur on the overlay not bottom sheet and the copy for the failed notification is too long"): it is now a centred pop-up over a blurred overlay, on iOS and the web, and the failure notification body is one short line.</p>
+<p class="note">Founder ask (2026-11-21): "a modal for the request with cool tape illustration showing why we need it and a cta that makes the request". Shown <b>once</b>: to a new listener while their first prompt is processing (or on Home if they just signed up), and to an existing listener on Home if they have never been asked. Spec: <code>docs/superpowers/specs/2026-11-21-durable-mix-turns-design.md</code>.</p>
+
+<div class="callout">
+<strong>What you are approving</strong>
+<ul class="tight">
+<li><b>The container:</b> a centred pop-up, 22 pt in from each side, with 30 pt corners on the sheet surface. Behind it, the screen is blurred (16 pt) with a light tint, so the room behind stays recognisable but can't be read. Tapping the blurred overlay closes it, like "Not now". It is new: the app has no centred modal yet, so it becomes a small shared widget (<code>MixtapePopup</code>). On the web, the same pop-up with the same blur.</li>
+<li><b>The art:</b> I1, a "Your mix is ready" notification popping up out of the cassette while its hubs turn <span class="rec">recommended</span>, or I2, the cassette buzzing like a phone.</li>
+<li><b>The copy:</b> headline "Want a ping when it's ready?", one sentence of why, the paper pill "Turn on notifications" (the only thing that brings up iOS's own prompt), and "Not now".</li>
+<li><b>The states:</b> where it shows, what happens after Allow, Don't Allow and Not now, the You row, what actually arrives (including the "Oops" failure), 200 % text, reduced motion, dark, and web.</li>
+</ul>
+<strong>Recommendation:</strong> I1. The art shows exactly what they're agreeing to, which is the "why", so the words can stay to one sentence. I2 is cuter but explains less.<br>
+<strong>Not on this board:</strong> Android (no Android app yet). The quick fix's local notification needs no art of its own, since it uses the same "Your mix is ready" wording as the push.
+</div>
+
+<h2>1 · Where it shows</h2>
+<p class="note">Never at launch, and never as iOS's own prompt cold. A flag is set the moment it appears, so it never shows twice on one install, whichever way it is closed. If iOS already knows the answer, it's skipped: already allowed means it quietly registers, already denied means it never shows.</p>
+<div class="frames">
+  <figure class="frame"><div class="phone" id="f-first"></div><figcaption><b>New listener: over "Making your mix", about 3 s in</b>The first prompt is processing. "Making your mix." and its turning cassette carry on, blurred, behind the pop-up, so the ask lands during the wait it is about. If the turn ends before the listener answers, the pop-up stays up and the mix is there behind it once they've decided.</figcaption></figure>
+  <figure class="frame"><div class="phone" id="f-home"></div><figcaption><b>Just signed up, or an existing listener who was never asked: on Home</b>It shows on arrival at Home, once Home has settled (after the AI-consent sheet, if that is showing; never stacked on it). It never covers a turn the listener just started from Home: if a mix is already being made, it waits for that turn's working state instead, like the first frame.</figcaption></figure>
+  <figure class="frame"><div class="phone dark" id="f-home-dark"></div><figcaption><b>Dark</b>The pop-up uses the dark sheet surface and a stronger tint, and the cassette keeps its own colours, as it does everywhere. The notification in the art follows the system's dark style.</figcaption></figure>
+</div>
+
+<h2>2 · The art</h2>
+<div class="frames">
+  <figure class="frame"><div class="phone" id="f-i1"></div><figcaption><b>I1 · The tape sends a ping <span class="rec">recommended</span></b>The full cassette (the app's <code>CassettePainter</code>, tilted −4° like the chat working line) with its hubs turning, and a small "Your mix is ready" notification rising out of it every 3.2 s. The notification uses the reel crop of the app icon and a made-up mix title. It shows exactly what they're agreeing to.</figcaption></figure>
+  <figure class="frame"><div class="phone" id="f-i2"></div><figcaption><b>I2 · The tape buzzes</b>The same cassette gives a short phone-style buzz every 2.4 s, with three sound arcs. It's friendly, but says "notification" without showing what one looks like, so the words have to do more work. <b>Why it loses:</b> it explains less, and the shake competes with the turning hubs.</figcaption></figure>
+</div>
+
+<h2>3 · After the tap</h2>
+<div class="frames">
+  <figure class="frame"><div class="phone" id="f-alert"></div><figcaption><b>"Turn on notifications" → iOS's own prompt</b>The pop-up stays underneath while iOS asks, and its pill shows nothing extra. iOS's wording is its own. The app asks for alert, sound and badge (badge is never used).</figcaption></figure>
+  <figure class="frame"><div class="phone" id="f-after"></div><figcaption><b>Allowed</b>The pop-up closes and the phone registers with the server. On "Making your mix", one quiet line joins the screen under the step line: "We'll ping you when it's ready." On Home nothing is added. The You row turns on.</figcaption></figure>
+  <figure class="frame"><div class="phone" id="f-you"></div><figcaption><b>Don't Allow, Not now, a tap outside</b>All three just close the pop-up, and there is never a second ask. You → Settings carries the one way back: a "Mix ready notifications" row under the existing settings. Its three states are below.</figcaption></figure>
+</div>
+<div class="frames">
+  <figure class="frame"><div class="phone strip" id="s-on"></div><figcaption><b>On</b>Registered. Turning it off unregisters this phone; iOS's own setting is untouched.</figcaption></figure>
+  <figure class="frame"><div class="phone strip" id="s-off"></div><figcaption><b>Off, after Not now</b>The switch is the way back in. Turning it on brings up iOS's prompt then.</figcaption></figure>
+  <figure class="frame"><div class="phone strip" id="s-denied"></div><figcaption><b>Off in iOS Settings, after Don't Allow</b>There's no switch, since only iOS can undo a denial, just a link to Mixtape's page in iOS Settings.</figcaption></figure>
+</div>
+
+<h2>4 · What arrives</h2>
+<p class="note">For reference, so you can approve the art against the real thing. The copy was decided in the spec: the mix's title for a ready mix, and an "Oops" title plus an invitation to try again when a turn fails. One line per turn, picked by its seed.</p>
+<div class="frames">
+  <figure class="frame"><div class="phone" id="f-lock"></div><figcaption><b>Lock screen</b>Top: a ready mix, with its title as the body. Bottom: a failed turn. Tapping either opens that mix; the failed one opens with the listener's words back in the composer. Failure lines are one short title plus one short line, so they never wrap past two lines. There are no lyrics, no songs and no prompt text, ever.</figcaption></figure>
+</div>
+
+<h2>5 · Large text and reduced motion</h2>
+<div class="frames">
+  <figure class="frame"><div class="phone large" id="f-large"></div><figcaption><b>200 % text</b>The art drops to the cassette alone, about 80 pt wide, without the little notification (its text can't grow with the rest), and the pop-up grows to the screen's height and scrolls inside itself. The pill and "Not now" stay at the bottom, reachable without scrolling past the copy. Targets are 56 pt and 44 pt.</figcaption></figure>
+  <figure class="frame"><div class="phone still" id="f-still"></div><figcaption><b>Reduced motion</b>The hubs stand still and the notification simply sits above the tape. The art is decorative and hidden from VoiceOver.<br>VoiceOver reads it as: "Want a ping when it's ready?, heading. Mixes take up to a minute… Turn on notifications, button. Not now, button."</figcaption></figure>
+</div>
+
+<h2>6 · Web</h2>
+<p class="note">The same art and words in the same pop-up over a blurred page, using the web's quiet text buttons. It is offered only where the browser can actually receive push. On iPhone that means the app added to the Home Screen; in a Safari tab it never shows. The click on "Turn on notifications" is what lets the browser ask. "Once" is remembered in this browser.</p>
+<div class="frames">
+  <figure class="frame wide"><div class="browser" id="w-light"></div><figcaption><b>Web, light</b>Over the conversation while the first turn works, or on Home, with the same rules as iOS.</figcaption></figure>
+  <figure class="frame wide"><div class="browser dark" id="w-dark"></div><figcaption><b>Web, dark</b></figcaption></figure>
+</div>
+
+<h2>To decide</h2>
+<ul class="tight note">
+<li><b>Art:</b> I1 (recommended) or I2.</li>
+<li><b>Headline:</b> "Want a ping when it's ready?" (drawn), or "Want a ping when it's pressed?", which is more on-theme but slightly less plain.</li>
+<li><b>The "We'll ping you when it's ready." line</b> on Making your mix after Allow: keep it, or keep the screen as is.</li>
+</ul>
+</main>
+
+<script>
+const PRISM=['#c9687f','#d18a65','#d2c76f','#709778','#688fa8'];
+function hub(cls,x){let t='';for(let i=0;i<8;i++)t+=`<rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(${i*45})"/>`;return `<g class="${cls}"><g transform="translate(${x} 61)"><circle r="16" fill="#dedbd6" stroke="#28262a" stroke-width="4"/><g fill="#28262a">${t}</g><circle r="5" fill="#f4f1ec"/></g></g>`}
+function tape(c,vb){const s=PRISM.map((p,i)=>`<rect x="14" y="${39+i*5}" width="172" height="5" fill="${p}"/>`).join('');return `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="1" y="1" width="198" height="126" rx="9" fill="${c}" stroke="#252328" stroke-width="2"/><rect x="3" y="3" width="194" height="122" rx="7" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="2"/><rect x="14" y="12" width="172" height="73" rx="5" fill="#f2ede2"/><line x1="22" y1="31" x2="178" y2="31" stroke="rgba(75,66,71,.34)"/>${s}<rect x="42" y="42" width="116" height="39" rx="7" fill="#17161a" stroke="#28262a" stroke-width="2"/><rect x="72" y="55" width="56" height="12" rx="2" fill="#493638"/>${hub('hubL',61)}${hub('hubR',139)}<path d="M48 89h104l12 30H36z" fill="#17161a" stroke="#28262a" stroke-width="2"/><circle cx="58" cy="105" r="6" fill="#f2f0eb" stroke="#544e52" stroke-width="2"/><circle cx="142" cy="105" r="6" fill="#f2f0eb" stroke="#544e52" stroke-width="2"/><rect x="75" y="100" width="8" height="13" rx="2" fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5"/><rect x="117" y="100" width="8" height="13" rx="2" fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5"/><circle cx="100" cy="108" r="4" fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5"/></svg>`}
+const icon=()=>tape('#544451','108 22 78 78');
+const status=(dark)=>`<div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>`;
+const toast=(title='Sunday kitchen soul')=>`<div class="toast" aria-hidden="true"><span class="icon">${icon()}</span><span><b>Your mix is ready</b><small>${title}</small></span><time>now</time></div>`;
+const art=(v='i1',size)=>v==='i1'
+  ?`<div class="art" aria-hidden="true"${size?` style="height:${size}px"`:''}>${size?'':toast()}<span class="tape"${size?` style="width:${Math.round(size*0.75)}px;transform:rotate(-4deg) translateY(0)"`:''}>${tape('#3f4851','0 0 200 128')}</span></div>`
+  :`<div class="art ring" aria-hidden="true"><svg class="arcs" viewBox="0 0 390 196"><path d="M70 70q-14 28 0 56"/><path d="M52 58q-22 40 0 80"/><path d="M320 70q14 28 0 56"/><path d="M338 58q22 40 0 80"/></svg><span class="tape" style="transform:rotate(-4deg) translateY(10px)">${tape('#3f4851','0 0 200 128')}</span></div>`;
+const COPY={h:'Want a ping when it’s ready?',b:'Mixes take up to a minute. Lock your phone, get on with your day, and we’ll tell you the moment yours is ready.'};
+const sheet=(v='i1',opts={})=>`<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="${COPY.h}">${art(v,opts.artSize)}<h2>${COPY.h}</h2><p>${COPY.b}</p><div class="fp${opts.targets?' target':''}">Turn on notifications</div><div class="notnow${opts.targets?' target':''}">Not now</div></div>`;
+const homebar='<div class="homebar"><i></i></div>';
+const home=()=>`${status()}<div class="large-title"><h1>Home</h1></div><div class="hint">Say what the moment needs, tap an idea, or start from one of your playlists.</div><div class="bpanel"><div class="composer"><span class="stripe"></span>What’s the moment?</div><div class="pills"><span class="pill">Sunday reset</span><span class="pill">Late drive</span><span class="pill">Deep focus</span></div></div><div class="dock"><span class="on">Home</span><span>Mixes</span><span>Library</span><span>You</span></div>`;
+const making=(extra='',top=false)=>`${status()}<div class="making"${top?' style="justify-content:flex-start;padding-top:18px;gap:10px"':''}><span class="tape" style="width:${top?96:176}px;display:block;transform:rotate(-4deg)">${tape('#3f4851','0 0 200 128')}</span><h1>Making your mix.</h1><p>This takes about a minute.</p><p class="step">Digging through the crates…</p>${extra}</div>`;
+const put=(id,html,cls='')=>{document.getElementById(id).innerHTML=`<div class="screen ${cls}">${html}${homebar}</div>`};
+
+put('f-first',making()+sheet(),'firstrun');
+put('f-home',home()+sheet());
+put('f-home-dark',home()+sheet());
+put('f-i1',home()+sheet('i1',{targets:true}));
+put('f-i2',home()+sheet('i2'));
+put('f-alert',making()+sheet()+`<div class="scrim" style="z-index:24;background:rgba(0,0,0,.2);-webkit-backdrop-filter:none;backdrop-filter:none"></div><div class="alert" role="alertdialog"><div class="t">“Mixtape” Would Like to Send You Notifications</div><div class="m">Notifications may include alerts, sounds, and icon badges. These can be configured in Settings.</div><div class="btns"><span>Don’t Allow</span><span class="p">Allow</span></div></div>`,'firstrun');
+put('f-after',making(`<p class="ping"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>We’ll ping you when it’s ready.</p>`),'firstrun');
+const bell='<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>';
+put('f-you',`${status()}<div class="large-title"><h1>You</h1></div><div class="group"><div class="grow">${bell}<span><strong>Mix ready notifications</strong><small>A ping when a mix lands</small></span><i class="toggle off"></i></div></div><div class="dock"><span>Home</span><span>Mixes</span><span>Library</span><span class="on">You</span></div>`);
+const strip=(id,h)=>{document.getElementById(id).innerHTML=`<div class="screen">${h}</div>`};
+strip('s-on',`<div class="group"><div class="grow">${bell}<span><strong>Mix ready notifications</strong><small>A ping when a mix lands</small></span><i class="toggle"></i></div></div>`);
+strip('s-off',`<div class="group"><div class="grow">${bell}<span><strong>Mix ready notifications</strong><small>A ping when a mix lands</small></span><i class="toggle off"></i></div></div>`);
+strip('s-denied',`<div class="group"><div class="grow">${bell}<span><strong>Mix ready notifications</strong><small>Off in iOS Settings</small></span><span class="link">Settings</span></div></div>`);
+put('f-lock',`<div class="statusbar" style="color:#fff"><span></span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="lockclock"><div class="d">Saturday 21 November</div><div class="c">9:41</div></div><div class="nstack"><div class="notif"><span class="icon">${icon()}</span><span><b>Your mix is ready</b><span>Sunday kitchen soul</span></span><time>now</time></div><div class="notif"><span class="icon">${icon()}</span><span><b>Oops, the tape got tangled</b><span>Tap to try again.</span></span><time>2m ago</time></div></div>`,'lock');
+put('f-large',home()+`<div class="scrim"></div><div class="sheet" style="top:70px;bottom:52px;transform:none;display:flex;flex-direction:column"><div style="flex:1;overflow:hidden;position:relative">${art('i1',110)}<h2>${COPY.h}</h2><p>${COPY.b}</p><div style="position:absolute;left:0;right:0;bottom:0;height:40px;background:linear-gradient(transparent,var(--sheet))"></div></div><div class="fp target" style="margin-top:8px">Turn on notifications</div><div class="notnow target">Not now</div></div>`);
+put('f-still',home()+sheet());
+const web=(id)=>{document.getElementById(id).innerHTML=`<div class="bar"><i></i><i></i><i></i><span class="url">miixtape.netlify.app/app/</span></div><div class="page"><div style="font:700 15px -apple-system,sans-serif;margin-bottom:22px">mixtape</div><div style="max-width:420px;font-weight:600">a slow Sunday kitchen, soul and a bit of highlife</div><div style="margin-top:14px;opacity:.6">Digging through the crates…</div></div><div class="wscrim"></div><div class="wdialog" role="dialog" aria-label="${COPY.h}">${art()}<h3>${COPY.h}</h3><p>${COPY.b.replace('Lock your phone','Close the tab')}</p><div class="wactions"><span>Not now</span><span class="go">Turn on notifications</span></div></div>`};
+web('w-light');web('w-dark');
+</script>
+</html>
