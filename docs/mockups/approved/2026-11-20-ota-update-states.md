@@ -78,3 +78,40 @@ reel.
   through `LargeTitleScaffold`
 - `client/ios/Runner/ShellDock.swift` (the hidden mini-player's tap fix, no
   visual)
+
+## Revised November 21, 2026: "Update (restart required)" and one morphing glyph
+
+Revision 3 of a new [board](../2026-11-21-ota-restart-orb-r3.html), after
+[revision 1](../2026-11-21-ota-restart-orb.html),
+[revision 2](../2026-11-21-ota-restart-orb-r2.html) and a
+[copy board](../2026-11-21-ota-restart-copy.html). On the device the founder
+found the bare close on tap abrupt, and chose to keep closing but word it as a
+restart. Then they asked for an editorial label, a flat dot, and the dot
+itself becoming the loader. They chose SF and the italic small line ("Italic").
+
+These states replace the ones in the table above:
+
+| State | Line | Glyph |
+|---|---|---|
+| Patch ready | "Update" (13 pt semibold, text ink), with "(restart required)" (7 pt italic, smoke) under it | a flat 8 pt green dot that breathes (2.4 s, down to 82%) |
+| After the tap | no words: they slide 10 pt left and blur out | the dot stretches into the middle bar and turns plum, and the side bars slide out of it; it closes after 1.8 s |
+| The start that boots the patch | none for 1.4 s, then "Updated" (ok ink) blurs in from the right | the bars, then they gather into one point and the check draws out of it |
+
+- The small line is positioned on its own, so it never pushes the title row.
+- Words slide 10 pt with a 6 px blur over 280 ms. The dot-to-bars morph
+  takes 320 ms, and the gather-and-draw takes 480 ms.
+- VoiceOver:
+  - On the note: "Update, restart required. Double-tap to restart mixtape."
+  - After the tap: "Restarting mixtape. Open it again to finish." (Nothing
+    on screen says it, so VoiceOver must.)
+  - On the next start: "mixtape updated."
+- Reduced motion: nothing breathes, bounces, slides or blurs. Shapes and
+  words swap at once.
+- Rejected:
+  - Words after the tap ("Back in a blink…").
+  - A 3D glowing orb (r1 and r2), because the loader is flat.
+  - New York serif (E2), which kept the 17 September no-serif rule.
+  - Tracked-capitals small line.
+- Open: the founder would like something more editorial than SF. Revisit if a
+  type direction lands.
+- Everything is drawn in code, because a patch can't add icon-font glyphs.

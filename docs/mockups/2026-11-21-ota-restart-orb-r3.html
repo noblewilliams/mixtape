@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Update orb r3</title>
+<style>
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1320px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:56px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+p{max-width:860px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:860px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:860px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.rec,.was,.gone{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;margin-left:6px;vertical-align:1px}
+.rec{color:#a7d8b4;border:1px solid rgba(112,151,120,.6)}
+.was{color:#cfc5d1;border:1px solid #5a5560}
+.gone{color:#e7a3b2;border:1px solid rgba(201,104,127,.6)}
+.frames{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+figure{margin:0}
+figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+figcaption b{color:#fff;font-weight:600;display:block}
+.meas{font:12px ui-monospace,Menlo,monospace;color:#a79fab;margin-top:4px;display:block}
+
+/* ---------- Product language (shell r3, reel loader) ---------- */
+.phone{width:390px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+.phone.tall{height:844px}
+.slice{width:390px;max-width:100%;border-radius:26px;padding:8px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.slice.narrow{width:336px}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --ok:#4f7a5a;
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet));
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);--group:rgba(255,255,255,.62);
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.slice .screen{border-radius:20px;padding-bottom:14px}
+.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);--ok:#9fcba9;
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);--group:rgba(255,255,255,.07);
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.large .screen{--scale:1.5}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif}
+.titlerow{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:30px 20px 8px;min-height:72px}
+.titlerow h1{margin:0;font:800 28px/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.large .titlerow h1{font-size:42px}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px;padding:0 54px 260px}
+
+/* ---------- The indicator ---------- */
+.upd{position:relative;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 2px;color:var(--plum);font:600 12px/1 -apple-system,sans-serif;white-space:nowrap;transition:opacity .32s ease-out}
+.upd .lbl{display:inline-block}
+.large .upd{font-size:18px;height:30px}
+.upd .g{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none}
+.large .upd .g{width:20px;height:20px}
+.upd.done .lbl,.upd.done .g{color:var(--ok)}
+/* ready: the record dot (transport glyph), same plum as the Mixes ready dot */
+.rec-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.large .rec-dot{width:10px;height:10px}
+/* loader A: three level bars, the voice meter's shape in plain ink */
+.bars{display:flex;align-items:center;gap:2px;height:12px}
+.bars i{width:2.5px;border-radius:1.25px;background:currentColor;height:6px}
+.bars i:nth-child(1){height:7px}.bars i:nth-child(2){height:12px}.bars i:nth-child(3){height:9px}
+.large .bars{height:17px;gap:3px}.large .bars i{width:3.5px}
+.large .bars i:nth-child(1){height:10px}.large .bars i:nth-child(2){height:17px}.large .bars i:nth-child(3){height:13px}
+.moving .bars i{animation:lvl .9s ease-in-out infinite}
+.moving .bars i:nth-child(2){animation-delay:-.3s}.moving .bars i:nth-child(3){animation-delay:-.6s}
+@keyframes lvl{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+.still .bars i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.bars i,.ring{animation:none!important}}
+/* loader B: thin ring filling over the timed step */
+.ring{width:12px;height:12px;border-radius:50%;background:conic-gradient(currentColor var(--p,35%),rgba(127,120,130,.25) 0);-webkit-mask:radial-gradient(circle,transparent 3.6px,#000 4px);mask:radial-gradient(circle,transparent 3.6px,#000 4px)}
+.check{width:12px;height:12px}
+.upd.fade{opacity:.35}
+/* 44 pt target, drawn as a dashed band for the board only */
+.upd.target::before{content:"";position:absolute;left:-8px;right:-8px;top:-9px;bottom:-9px;border:1px dashed rgba(201,104,127,.75);border-radius:8px}
+.capsule{height:28px;padding:0 10px 0 6px;border-radius:14px;background:rgba(255,255,255,.55);box-shadow:0 0 0 .5px rgba(50,44,50,.18),0 4px 12px rgba(23,22,26,.12)}
+.dark .capsule{background:rgba(255,255,255,.12)}
+
+/* ---------- Dock and Home panel (as shipped) ---------- */
+.bpanel{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 120px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px)}
+.seg{display:inline-flex;border-radius:16px;background:rgba(127,120,130,.15);padding:2px;font:500 13px -apple-system,sans-serif}
+.seg span{padding:5px 14px;border-radius:14px}.seg span:first-child{background:var(--plum);color:#fff}
+.dark .seg span:first-child{color:#1c1a1e}
+.composer{position:relative;margin-top:10px;min-height:48px;padding:12px 16px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;font-size:15px}
+.composer::after{content:"";position:absolute;left:18px;right:18px;bottom:-1px;height:2px;border-radius:2px;background:var(--prism)}
+.composer .ph{color:var(--muted)}
+.dock{position:absolute;left:24px;right:24px;bottom:26px;height:62px;border-radius:31px;background:rgba(255,255,255,.72);box-shadow:0 6px 20px rgba(23,22,26,.12);display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font:600 11px -apple-system,sans-serif;color:#1c1a1e}
+.dark .dock{background:rgba(80,70,120,.55);color:#f2eef1}
+.dock span.on{background:rgba(127,120,130,.16);margin:5px;border-radius:26px;padding:16px 0}
+
+/* ---------- You tab rows ---------- */
+.group{margin:8px 20px 0;border-radius:22px;background:var(--group)}
+.urow{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:56px;padding:8px 16px;position:relative}
+.urow+.urow::before{content:"";position:absolute;left:58px;right:0;top:0;height:1px;background:var(--hair)}
+.ico{width:30px;height:30px;border-radius:8px}
+.urow strong{font-weight:500;font-size:16px;display:block}
+.urow small{display:block;color:var(--muted);font-size:12.5px}
+.avatar{width:46px;height:46px;border-radius:50%;background:conic-gradient(var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet),var(--pink));display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}
+.chev{color:var(--muted);font-size:18px}
+
+/* ---------- Full-screen takeover (being removed) ---------- */
+.takeover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 40px 120px}
+.takeover .t{font:600 16px -apple-system,sans-serif;margin-top:30px}
+.takeover .h{color:var(--smoke);font-size:12.5px;margin-top:4px}
+
+/* ---------- Reel artwork (CassettePainter, icon crop) ---------- */
+.reel{display:block;flex:none;overflow:hidden;border-radius:23%;box-shadow:0 1px 3px rgba(23,22,26,.3)}
+.reel svg,.tile svg{display:block;width:100%;height:100%}
+.spin .hubL{animation:hub 1.05s linear infinite}
+.spin .hubR{animation:hub 1.05s linear infinite reverse}
+.hubL{transform-origin:61px 61px}.hubR{transform-origin:139px 61px}
+@keyframes hub{to{transform:rotate(360deg)}}
+.still .hubL,.still .hubR{animation:none!important}
+@media (prefers-reduced-motion:reduce){.hubL,.hubR{animation:none!important}}
+.tilt{transform:rotate(-4deg)}
+
+/* timeline */
+.timeline{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;max-width:1000px;margin-top:14px}
+.step{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:14px}
+.step b{color:#fff;font-size:13px}
+.step .swatch,.cell .swatch{margin:12px 0 8px;padding:14px 12px;border-radius:12px;display:flex;justify-content:space-between;align-items:center}
+.swatch.l{background:linear-gradient(180deg,#f9f7f4,#f1eeee)}
+.swatch.d{background:linear-gradient(180deg,#050507,#0c0b12)}
+.swatch h1{margin:0;font:800 22px -apple-system,sans-serif;letter-spacing:-.02em}
+.swatch.l h1{color:#1c1a1e}.swatch.d h1{color:#f2eef1}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;max-width:1000px;margin-top:14px}
+.cell{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:16px}
+.fix{max-width:860px;display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+/* ---------- r3: flat dot that becomes the loader, then the tick ---------- */
+.slice .screen{min-height:150px}
+.demo{cursor:pointer}
+.n3{position:relative;display:inline-flex;align-items:center;gap:7px;height:26px;color:var(--text)}
+.n3 .w{font:600 13px/1 -apple-system,"SF Pro Text",sans-serif;letter-spacing:-.01em;transition:transform .28s cubic-bezier(.4,0,.2,1),opacity .28s,filter .28s;white-space:nowrap}
+.n3 .sub{position:absolute;left:0;top:23px;white-space:nowrap;color:var(--smoke);transition:transform .28s cubic-bezier(.4,0,.2,1),opacity .28s,filter .28s}
+.n3 .sub.it{font:italic 400 7px/1 -apple-system,sans-serif}
+.n3 .sub.caps{font:600 6.5px/1 -apple-system,sans-serif;letter-spacing:.14em;text-transform:uppercase}
+.n3.left .w,.n3.left .sub{transform:translateX(-10px);opacity:0;filter:blur(6px)}
+.n3 .w.ok{color:var(--ok)}
+.n3 .w.pre{transform:translateX(10px);opacity:0;filter:blur(6px);transition:none}
+/* glyph: three bars that start as one dot */
+.mg{position:relative;width:14px;height:14px;flex:none;color:#34c759}
+.dark .mg{color:#4cd07a}
+.mg i{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:4px;background:currentColor;
+  transition:width .32s cubic-bezier(.4,0,.2,1),height .32s cubic-bezier(.4,0,.2,1),margin .32s cubic-bezier(.4,0,.2,1),border-radius .32s,transform .32s cubic-bezier(.4,0,.2,1),opacity .2s,background-color .32s}
+.mg i.a,.mg i.c{opacity:0}
+.mg.breath i.b{animation:dotb 2.4s ease-in-out infinite}
+@keyframes dotb{0%,100%{transform:scale(1)}50%{transform:scale(.82)}}
+/* bars state: middle dot stretches into the tall bar, side bars slide out of it */
+.mg.bars i{width:2.5px;margin-left:-1.25px;border-radius:1.25px;opacity:1;background:var(--plum)}
+.mg.bars i.b{height:12px;margin-top:-6px}
+.mg.bars i.a{height:7px;margin-top:-3.5px;transform:translateX(-4.5px)}
+.mg.bars i.c{height:9px;margin-top:-4.5px;transform:translateX(4.5px)}
+.mg.bars.move i{animation:lv .9s ease-in-out infinite;animation-delay:.32s}
+.mg.bars.move i.b{animation-delay:.02s}.mg.bars.move i.c{animation-delay:-.28s}
+@keyframes lv{0%,100%{scale:1 .4}50%{scale:1 1}}
+/* tick state: bars gather to the centre and the check draws out of them */
+.mg.gather i{animation:none;height:2.5px!important;margin-top:-1.25px!important;transform:translateX(0)!important;background:var(--ok)}
+.mg svg{position:absolute;inset:0;width:14px;height:14px;color:var(--ok);fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.mg svg path{stroke-dasharray:20;stroke-dashoffset:20;transition:stroke-dashoffset .34s cubic-bezier(.4,0,.2,1) .14s}
+.mg.tick svg path{stroke-dashoffset:0}
+.mg.tick i{opacity:0}
+.still .mg i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.mg i{animation:none!important}}
+.ctl{display:flex;gap:8px;margin:10px 0 0}
+.ctl button{font:600 12px -apple-system,sans-serif;color:#eee9ed;background:#2b2830;border:1px solid #47434c;border-radius:8px;padding:6px 10px;cursor:pointer}
+.slow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.slow .cz{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:10px;font-size:12px;color:#cfc5d1;width:150px}
+.slow .sw{background:linear-gradient(180deg,#f9f7f4,#f1eeee);border-radius:10px;height:70px;display:grid;place-items:center;margin-bottom:8px;--plum:#544451;--ok:#4f7a5a}
+.slow .mg{transform:scale(3.2)}
+.slow .mg i{transition:none}
+.slow .mg svg path{transition:none}
+</style>
+<main>
+<p class="kicker">Mixtape · iOS · state board · revision 3 · 21 November 2026</p>
+<h1>The update note: a flat dot that becomes the loader, then the tick</h1>
+<p class="note">From your notes on revision 2:</p>
+<ul class="tight note">
+<li><b>The small line</b> is 7 pt and floats under "Update". It's positioned on its own, so it never pushes the title row.</li>
+<li><b>The orb is flat:</b> a plain green dot that breathes gently, with no highlight or glow, matching the flat bars.</li>
+<li><b>On tap,</b> the dot itself stretches into the middle bar, and the two side bars slide out of it.</li>
+<li><b>On the next start,</b> the bars gather into one point and the check draws out of it.</li>
+</ul>
+<p class="note">Type is SF (E1). <b>Tap a note to play it.</b></p>
+
+<h2>1 · Live</h2>
+<div class="frames">
+ <figure><div class="slice demo" id="d1"></div><div class="ctl"><button data-r="d1">Replay</button></div><figcaption><b>Small line in italic <span class="rec dflt">as you asked</span></b>"Update" at 13 pt semibold, and "(restart required)" at 7 pt italic underneath.</figcaption></figure>
+ <figure><div class="slice demo" id="d2"></div><div class="ctl"><button data-r="d2">Replay</button></div><figcaption><b>Small line in tracked capitals <span class="rec">editorial, no serif</span></b>"RESTART REQUIRED" at 6.5 pt semibold, letter-spaced. Magazines label things this way, so it reads editorial while staying SF.</figcaption></figure>
+ <figure><div class="slice dark demo" id="d3"></div><div class="ctl"><button data-r="d3">Replay</button></div><figcaption><b>Dark</b>The dot uses the brighter dark-mode green.</figcaption></figure>
+</div>
+
+<h2>2 · The morph, slowed down</h2>
+<p class="note">The same three shapes the whole way through. A dot becomes three bars, and the bars become a tick. Shown at 3× size.</p>
+<div class="slow" id="slow"></div>
+<p class="note">Timing:</p>
+<ul class="tight note">
+<li><b>Dot to bars (320 ms):</b> the dot narrows and grows tall into the middle bar while it turns from green to plum. The side bars grow out of its centre and slide 4.5 pt each way, then the bars start their rise and fall.</li>
+<li><b>At the same time,</b> "Update" and the small line slide 10 pt left and blur out, and no new words come in.</li>
+<li><b>After 1.8 s</b> the app closes.</li>
+<li><b>Next start, bars to tick:</b> the bars shrink to short green stubs and gather at the centre, then the check draws itself out from there (340 ms). "Updated" blurs in from the right, holds 2.5 s, and fades.</li>
+</ul>
+
+<h2>3 · Accessibility</h2>
+<ul class="tight note">
+<li><b>7 pt is below Apple's 11 pt guidance</b> for legible text, so it only works as a tag. It grows with text size (up to 10.5 pt at the largest setting), and VoiceOver reads it: "Update, restart required. Double-tap to restart mixtape."</li>
+<li>The small line sits inside the note's 44 pt tap area, so it's tappable too.</li>
+<li><b>After the tap</b> nothing is said on screen, so VoiceOver announces "Restarting mixtape. Open it again to finish."</li>
+<li><b>Reduced motion:</b> the dot and bars hold still, and each change is a plain cross-fade with no morph, slide or blur.</li>
+<li><b>Ships as a patch:</b> it's all drawn in code (rounded rectangles and one stroked path), with no images and no new icons.</li>
+</ul>
+</main>
+<script>
+const status=`<div class="statusbar"><span>9:41</span><span></span></div>`;
+const glyph=`<span class="mg breath"><i class="a"></i><i class="b"></i><i class="c"></i><svg viewBox="0 0 14 14"><path d="M3 7.4 5.9 10.2 11 4.2"/></svg></span>`;
+function build(id,caps){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="screen">${status}<div class="titlerow"><h1>Home</h1><span class="n3"><span class="w">Update</span><span class="sub ${caps?'caps':'it'}">${caps?'Restart required':'(restart required)'}</span>${glyph}</span></div></div>`;
+  el.dataset.s='0';
+}
+function tap(id){
+  const el=document.getElementById(id); if(el.dataset.s!=='0')return; el.dataset.s='1';
+  const n=el.querySelector('.n3'), g=el.querySelector('.mg'), w=el.querySelector('.w');
+  g.classList.remove('breath'); g.classList.add('bars');
+  n.classList.add('left');
+  setTimeout(()=>{g.classList.add('move'); w.style.display='none'; el.querySelector('.sub').style.display='none';},320);
+  setTimeout(()=>{const sc=el.querySelector('.screen'); sc.style.transition='opacity .25s'; sc.style.opacity='0';
+    setTimeout(()=>{sc.style.opacity='1';
+      setTimeout(()=>{g.classList.remove('move'); g.classList.add('gather');
+        setTimeout(()=>{g.classList.add('tick'); n.classList.remove('left'); w.style.display=''; w.textContent='Updated'; w.className='w ok pre'; void w.offsetWidth; w.className='w ok';},260);
+        setTimeout(()=>{n.style.transition='opacity .32s ease-out'; n.style.opacity='0';},3000);
+      },350);
+    },700);
+  },1800);
+}
+[['d1',0],['d2',1],['d3',0]].forEach(([id,c])=>{build(id,c);document.getElementById(id).addEventListener('click',()=>tap(id));});
+document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>build(b.dataset.r,b.dataset.r==='d2'));
+// slow strip, inline styles per stage
+const st=(a,b,c,tick=0,cap='')=>`<div class="cz"><div class="sw"><span class="mg"><i class="a" style="${a}"></i><i class="b" style="${b}"></i><i class="c" style="${c}"></i><svg viewBox="0 0 14 14"><path d="M3 7.4 5.9 10.2 11 4.2" style="stroke-dashoffset:${tick}"></path></svg></span></div>${cap}</div>`;
+const P='background:#544451;opacity:1;', G='background:#4f7a5a;opacity:1;';
+document.getElementById('slow').innerHTML=[
+ st('','','',20,'0 · the dot (ready)'),
+ st('opacity:.6;width:4px;height:6px;margin:-3px 0 0 -2px;transform:translateX(-2px);background:#3f8f5e','width:4.5px;height:10px;margin:-5px 0 0 -2.25px;border-radius:2.25px;background:#3f8f5e','opacity:.6;width:4px;height:7px;margin:-3.5px 0 0 -2px;transform:translateX(2px);background:#3f8f5e',20,'160 ms · stretching, splitting'),
+ st(P+'width:2.5px;height:7px;margin:-3.5px 0 0 -1.25px;border-radius:1.25px;transform:translateX(-4.5px)',P+'width:2.5px;height:12px;margin:-6px 0 0 -1.25px;border-radius:1.25px',P+'width:2.5px;height:9px;margin:-4.5px 0 0 -1.25px;border-radius:1.25px;transform:translateX(4.5px)',20,'320 ms · the loader'),
+ st(G+'width:2.5px;height:2.5px;margin:-1.25px 0 0 -1.25px;border-radius:1.25px;transform:translateX(-1.5px)',G+'width:2.5px;height:2.5px;margin:-1.25px 0 0 -1.25px;border-radius:1.25px',G+'width:2.5px;height:2.5px;margin:-1.25px 0 0 -1.25px;border-radius:1.25px;transform:translateX(1.5px)',20,'next start · gathering'),
+ st('opacity:0','opacity:.4;width:2.5px;height:2.5px;margin:-1.25px 0 0 -1.25px;background:#4f7a5a','opacity:0',9,'+ 260 ms · check drawing'),
+ st('opacity:0','opacity:0','opacity:0',0,'+ 480 ms · the tick'),
+].join('');
+</script>
+</html>

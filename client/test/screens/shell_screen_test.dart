@@ -537,7 +537,9 @@ void main() {
       );
       await pumpShell(tester, container);
       await container.read(appUpdateProvider.notifier).check();
-      await tester.pumpAndSettle();
+      // The ready dot breathes forever, so this can't pumpAndSettle.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       calls.clear();
 
       unawaited(container.read(appUpdateProvider.notifier).restart());

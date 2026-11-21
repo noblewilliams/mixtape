@@ -1,7 +1,8 @@
-// The update note (board docs/mockups/approved/2026-11-20-ota-update-states.md):
-// a tiny line at the end of the Home and You title rows. "Update available"
-// once a patch is downloaded; the tap shows "Updating" and closes the app;
-// the start that boots the patch plays "Updating", then "Updated", then goes.
+// The update note (approval docs/mockups/approved/2026-11-20-ota-update-states.md,
+// revised 2026-11-21 by board 2026-11-21-ota-restart-orb-r3.html): "Update" with
+// "(restart required)" under it and a flat green dot once a patch is downloaded;
+// the tap leaves only the loader (the dot becomes the bars) and closes the app;
+// the start that boots the patch plays the bars, then the tick with "Updated".
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -67,13 +68,13 @@ void main() {
   testWidgets('nothing shows while the app is current', (tester) async {
     await _pump(tester, updater: FakeAppUpdater());
     expect(find.text(UpdateStatusNote.availableLabel), findsNothing);
-    expect(find.text(UpdateStatusNote.updatingLabel), findsNothing);
+    expect(find.text(UpdateStatusNote.restartLabel), findsNothing);
     expect(find.byKey(UpdateStatusNote.noteKey), findsNothing);
   });
 
   testWidgets(
-    'a downloaded patch shows Update available beside the title, with its '
-    'dot and a named 44 pt target',
+    'a downloaded patch shows Update beside the title, (restart required) '
+    'under it, its dot and a named 44 pt target',
     (tester) async {
       final handle = tester.ensureSemantics();
       final container = await _pump(
@@ -83,7 +84,17 @@ void main() {
       await _ready(tester, container);
 
       expect(find.text(UpdateStatusNote.availableLabel), findsOneWidget);
+      expect(find.text(UpdateStatusNote.restartLabel), findsOneWidget);
       expect(find.byKey(UpdateStatusNote.dotKey), findsOneWidget);
+      // The small line hangs under the word and is 7 pt italic.
+      final word = tester.getRect(find.text(UpdateStatusNote.availableLabel));
+      final small = tester.getRect(find.text(UpdateStatusNote.restartLabel));
+      expect(small.top, greaterThanOrEqualTo(word.bottom - 1));
+      final smallStyle = tester
+          .widget<Text>(find.text(UpdateStatusNote.restartLabel))
+          .style!;
+      expect(smallStyle.fontSize, UpdateStatusNote.restartFontSize);
+      expect(smallStyle.fontStyle, FontStyle.italic);
       final title = tester.getRect(find.text('Home'));
       final note = tester.getRect(find.byKey(UpdateStatusNote.noteKey));
       // Same line as the title, at the right margin.
@@ -104,26 +115,38 @@ void main() {
     },
   );
 
-  testWidgets('the tap shows Updating with the bars, then closes the app', (
+  testWidgets('the tap leaves only the loader, then closes the app', (
     tester,
   ) async {
     final updater = FakeAppUpdater(waiting: 7);
     final container = await _pump(tester, updater: updater);
     await _ready(tester, container);
 
+    final handle = tester.ensureSemantics();
     await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    // The words' slide-out runs a frame behind the tap, so wait it out.
     await tester.pump(UpdateStatusNote.swapFor);
+    await tester.pump(UpdateStatusNote.swapFor * 2);
     expect(container.read(appUpdateProvider).phase, AppUpdatePhase.closing);
-    expect(find.text(UpdateStatusNote.updatingLabel), findsOneWidget);
+    // No words on screen: only the bars the dot became.
+    expect(find.text(UpdateStatusNote.availableLabel), findsNothing);
+    expect(find.text(UpdateStatusNote.restartLabel), findsNothing);
     expect(find.byKey(UpdateStatusNote.barsKey), findsOneWidget);
+    expect(
+      tester.getSemantics(find.byKey(UpdateStatusNote.noteKey)),
+      matchesSemantics(
+        label: UpdateStatusNote.closingSemantics,
+        isLiveRegion: true,
+      ),
+    );
+    handle.dispose();
     expect(updater.closes, 0);
     await tester.pump(updateCloseDelay);
     expect(updater.closes, 1);
   });
 
-  testWidgets('the start after an update plays Updating, Updated, then goes', (
-    tester,
-  ) async {
+  testWidgets('the start after an update plays the bars, the tick with '
+      'Updated, then goes', (tester) async {
     final store = InMemoryPendingPatchStore()..value = 4;
     final container = await _pump(
       tester,
@@ -131,8 +154,8 @@ void main() {
       store: store,
     );
     await tester.pump(UpdateStatusNote.swapFor);
-    expect(find.text(UpdateStatusNote.updatingLabel), findsOneWidget);
     expect(find.byKey(UpdateStatusNote.barsKey), findsOneWidget);
+    expect(find.text(UpdateStatusNote.updatedLabel), findsNothing);
 
     await tester.pump(updateAppliedFor);
     await tester.pump(UpdateStatusNote.swapFor);

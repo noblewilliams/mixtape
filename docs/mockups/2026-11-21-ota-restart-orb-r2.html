@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Update orb r2</title>
+<style>
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1320px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:56px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+p{max-width:860px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:860px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:860px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.rec,.was,.gone{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;margin-left:6px;vertical-align:1px}
+.rec{color:#a7d8b4;border:1px solid rgba(112,151,120,.6)}
+.was{color:#cfc5d1;border:1px solid #5a5560}
+.gone{color:#e7a3b2;border:1px solid rgba(201,104,127,.6)}
+.frames{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+figure{margin:0}
+figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+figcaption b{color:#fff;font-weight:600;display:block}
+.meas{font:12px ui-monospace,Menlo,monospace;color:#a79fab;margin-top:4px;display:block}
+
+/* ---------- Product language (shell r3, reel loader) ---------- */
+.phone{width:390px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+.phone.tall{height:844px}
+.slice{width:390px;max-width:100%;border-radius:26px;padding:8px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.slice.narrow{width:336px}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --ok:#4f7a5a;
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet));
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);--group:rgba(255,255,255,.62);
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.slice .screen{border-radius:20px;padding-bottom:14px}
+.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);--ok:#9fcba9;
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);--group:rgba(255,255,255,.07);
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.large .screen{--scale:1.5}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif}
+.titlerow{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:30px 20px 8px;min-height:72px}
+.titlerow h1{margin:0;font:800 28px/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.large .titlerow h1{font-size:42px}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px;padding:0 54px 260px}
+
+/* ---------- The indicator ---------- */
+.upd{position:relative;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 2px;color:var(--plum);font:600 12px/1 -apple-system,sans-serif;white-space:nowrap;transition:opacity .32s ease-out}
+.upd .lbl{display:inline-block}
+.large .upd{font-size:18px;height:30px}
+.upd .g{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none}
+.large .upd .g{width:20px;height:20px}
+.upd.done .lbl,.upd.done .g{color:var(--ok)}
+/* ready: the record dot (transport glyph), same plum as the Mixes ready dot */
+.rec-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.large .rec-dot{width:10px;height:10px}
+/* loader A: three level bars, the voice meter's shape in plain ink */
+.bars{display:flex;align-items:center;gap:2px;height:12px}
+.bars i{width:2.5px;border-radius:1.25px;background:currentColor;height:6px}
+.bars i:nth-child(1){height:7px}.bars i:nth-child(2){height:12px}.bars i:nth-child(3){height:9px}
+.large .bars{height:17px;gap:3px}.large .bars i{width:3.5px}
+.large .bars i:nth-child(1){height:10px}.large .bars i:nth-child(2){height:17px}.large .bars i:nth-child(3){height:13px}
+.moving .bars i{animation:lvl .9s ease-in-out infinite}
+.moving .bars i:nth-child(2){animation-delay:-.3s}.moving .bars i:nth-child(3){animation-delay:-.6s}
+@keyframes lvl{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+.still .bars i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.bars i,.ring{animation:none!important}}
+/* loader B: thin ring filling over the timed step */
+.ring{width:12px;height:12px;border-radius:50%;background:conic-gradient(currentColor var(--p,35%),rgba(127,120,130,.25) 0);-webkit-mask:radial-gradient(circle,transparent 3.6px,#000 4px);mask:radial-gradient(circle,transparent 3.6px,#000 4px)}
+.check{width:12px;height:12px}
+.upd.fade{opacity:.35}
+/* 44 pt target, drawn as a dashed band for the board only */
+.upd.target::before{content:"";position:absolute;left:-8px;right:-8px;top:-9px;bottom:-9px;border:1px dashed rgba(201,104,127,.75);border-radius:8px}
+.capsule{height:28px;padding:0 10px 0 6px;border-radius:14px;background:rgba(255,255,255,.55);box-shadow:0 0 0 .5px rgba(50,44,50,.18),0 4px 12px rgba(23,22,26,.12)}
+.dark .capsule{background:rgba(255,255,255,.12)}
+
+/* ---------- Dock and Home panel (as shipped) ---------- */
+.bpanel{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 120px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px)}
+.seg{display:inline-flex;border-radius:16px;background:rgba(127,120,130,.15);padding:2px;font:500 13px -apple-system,sans-serif}
+.seg span{padding:5px 14px;border-radius:14px}.seg span:first-child{background:var(--plum);color:#fff}
+.dark .seg span:first-child{color:#1c1a1e}
+.composer{position:relative;margin-top:10px;min-height:48px;padding:12px 16px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;font-size:15px}
+.composer::after{content:"";position:absolute;left:18px;right:18px;bottom:-1px;height:2px;border-radius:2px;background:var(--prism)}
+.composer .ph{color:var(--muted)}
+.dock{position:absolute;left:24px;right:24px;bottom:26px;height:62px;border-radius:31px;background:rgba(255,255,255,.72);box-shadow:0 6px 20px rgba(23,22,26,.12);display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font:600 11px -apple-system,sans-serif;color:#1c1a1e}
+.dark .dock{background:rgba(80,70,120,.55);color:#f2eef1}
+.dock span.on{background:rgba(127,120,130,.16);margin:5px;border-radius:26px;padding:16px 0}
+
+/* ---------- You tab rows ---------- */
+.group{margin:8px 20px 0;border-radius:22px;background:var(--group)}
+.urow{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:56px;padding:8px 16px;position:relative}
+.urow+.urow::before{content:"";position:absolute;left:58px;right:0;top:0;height:1px;background:var(--hair)}
+.ico{width:30px;height:30px;border-radius:8px}
+.urow strong{font-weight:500;font-size:16px;display:block}
+.urow small{display:block;color:var(--muted);font-size:12.5px}
+.avatar{width:46px;height:46px;border-radius:50%;background:conic-gradient(var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet),var(--pink));display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}
+.chev{color:var(--muted);font-size:18px}
+
+/* ---------- Full-screen takeover (being removed) ---------- */
+.takeover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 40px 120px}
+.takeover .t{font:600 16px -apple-system,sans-serif;margin-top:30px}
+.takeover .h{color:var(--smoke);font-size:12.5px;margin-top:4px}
+
+/* ---------- Reel artwork (CassettePainter, icon crop) ---------- */
+.reel{display:block;flex:none;overflow:hidden;border-radius:23%;box-shadow:0 1px 3px rgba(23,22,26,.3)}
+.reel svg,.tile svg{display:block;width:100%;height:100%}
+.spin .hubL{animation:hub 1.05s linear infinite}
+.spin .hubR{animation:hub 1.05s linear infinite reverse}
+.hubL{transform-origin:61px 61px}.hubR{transform-origin:139px 61px}
+@keyframes hub{to{transform:rotate(360deg)}}
+.still .hubL,.still .hubR{animation:none!important}
+@media (prefers-reduced-motion:reduce){.hubL,.hubR{animation:none!important}}
+.tilt{transform:rotate(-4deg)}
+
+/* timeline */
+.timeline{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;max-width:1000px;margin-top:14px}
+.step{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:14px}
+.step b{color:#fff;font-size:13px}
+.step .swatch,.cell .swatch{margin:12px 0 8px;padding:14px 12px;border-radius:12px;display:flex;justify-content:space-between;align-items:center}
+.swatch.l{background:linear-gradient(180deg,#f9f7f4,#f1eeee)}
+.swatch.d{background:linear-gradient(180deg,#050507,#0c0b12)}
+.swatch h1{margin:0;font:800 22px -apple-system,sans-serif;letter-spacing:-.02em}
+.swatch.l h1{color:#1c1a1e}.swatch.d h1{color:#f2eef1}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;max-width:1000px;margin-top:14px}
+.cell{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:16px}
+.fix{max-width:860px;display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+/* ---------- 21 Nov: orb + editorial note ---------- */
+.slice .screen{min-height:150px}
+.demo{cursor:pointer}
+.note2{display:inline-flex;align-items:center;gap:8px;height:26px;color:var(--text);white-space:nowrap;position:relative}
+.note2 .word{display:inline-block;font:600 13px/1 -apple-system,"SF Pro Text",sans-serif;letter-spacing:-.01em;transition:transform .28s cubic-bezier(.4,0,.2,1),opacity .28s,filter .28s}
+.note2 .word i{font-style:italic;font-weight:400;color:var(--smoke);letter-spacing:0;font-size:9.5px;margin-left:2px;vertical-align:1px}
+.note2 .word.serif{font-family:"New York","Iowan Old Style",Georgia,serif;font-weight:600;font-size:14px}
+.note2 .word.serif i{font-weight:400}
+.note2 .word.out{transform:translateX(-10px);opacity:0;filter:blur(6px)}
+.note2 .word.gone{display:none}
+.note2 .word.pre{transform:translateX(10px);opacity:0;filter:blur(6px);transition:none}
+.note2 .word.ok{color:var(--ok)}
+/* the orb */
+.gbox{position:relative;width:14px;height:14px;flex:none;display:grid;place-items:center}
+.orb{position:absolute;left:3px;top:3px;width:8px;height:8px;border-radius:50%;
+  background:radial-gradient(circle at 34% 30%,#e9ffe9 0%,#8ef0a3 18%,#34c759 52%,#1f8f3c 84%,#176c2e 100%);
+  box-shadow:0 1px 2px rgba(15,70,30,.35),0 0 0 0 rgba(52,199,89,.45),inset 0 -1.5px 2px rgba(0,40,10,.35);
+  transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .3s,filter .3s}
+.orb::after{content:"";position:absolute;left:22%;top:14%;width:34%;height:24%;border-radius:50%;background:rgba(255,255,255,.75);filter:blur(.6px)}
+.pulse .orb{animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:scale(1);box-shadow:0 1px 2px rgba(15,70,30,.35),0 0 0 0 rgba(52,199,89,.42),inset 0 -1.5px 2px rgba(0,40,10,.35)}
+  50%{transform:scale(1.08);box-shadow:0 1px 3px rgba(15,70,30,.3),0 0 0 4px rgba(52,199,89,0),inset 0 -1.5px 2px rgba(0,40,10,.35)}}
+.dark .orb{box-shadow:0 0 6px rgba(76,208,122,.5),inset 0 -1.5px 2px rgba(0,40,10,.4)}
+.orb.gone{transform:scale(.3);opacity:0;filter:blur(3px)}
+.gbox .bars{position:absolute;opacity:0;transform:scale(.6);transition:opacity .3s .12s,transform .3s .12s;color:var(--plum)}
+.gbox.isbars .bars{opacity:1;transform:scale(1)}
+.gbox .chk{position:absolute;width:13px;height:13px;color:var(--ok);opacity:0;transition:opacity .3s}
+.gbox.ischeck .chk{opacity:1}
+.gbox.ischeck .orb,.gbox.ischeck .bars{opacity:0}
+.still .orb,.still .bars i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.orb,.bars i{animation:none!important}}
+.under{display:flex;justify-content:flex-end;padding:0 20px 14px;margin-top:-4px}
+.ctl{display:flex;gap:8px;margin:10px 0 0}
+.ctl button{font:600 12px -apple-system,sans-serif;color:#eee9ed;background:#2b2830;border:1px solid #47434c;border-radius:8px;padding:6px 10px;cursor:pointer}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:10px;max-width:1100px;margin-top:14px}
+.strip .cellz{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:10px;font-size:12px;color:#cfc5d1}
+.strip .sw{background:linear-gradient(180deg,#f9f7f4,#f1eeee);border-radius:10px;height:52px;display:flex;align-items:center;justify-content:flex-end;padding:0 12px;margin-bottom:8px;--text:#1c1a1e;--smoke:#696269;--plum:#544451;--ok:#4f7a5a;color:#1c1a1e}
+.zoomorb{display:flex;gap:30px;align-items:center;background:linear-gradient(180deg,#f9f7f4,#efeaee);border-radius:14px;padding:22px 26px;max-width:520px;margin-top:14px}
+.zoomorb .gbox{width:64px;height:64px}.zoomorb .orb{left:0;top:0;width:64px;height:64px}.zoomorb .orb::after{filter:blur(2px)}
+.zoomorb.d{background:#0c0b12}
+</style>
+<main>
+<p class="kicker">Mixtape · iOS · state board · 21 November 2026</p>
+<h1>The update note: "New update (restart)" with a green orb</h1>
+<p class="note">Revision 2, from your notes: the label is just "Update" with a much smaller "(restart required)". The orb is half the size (8 pt). On tap there are no new words: the label slides a short way left, blurs out, and only the level bars are left. Then the app closes. The next start shows "Updated ✓" and fades. <b>Tap a note to play it.</b></p>
+
+<div class="callout"><strong>One conflict to flag.</strong> "Editorial" usually means a serif, but your 17 September rule is <i>no serifs, SF only</i> (Noteworthy for the wordmark is the one exception). <b>E1</b> keeps SF and gets the editorial feel from weight and an italic: <b>New update</b> <i>(restart)</i>. <b>E2</b> uses Apple's own serif, New York. Choosing E2 replaces the rule for this one note.</div>
+
+<h2>1 · Live</h2>
+<div class="frames">
+ <figure><div class="slice demo" id="d1"></div><div class="ctl"><button data-r="d1">Replay</button></div><figcaption><b>E1 · SF <span class="rec">recommended</span></b>"Update" in semibold 13 pt. "(restart required)" is in 9.5 pt light grey italic. Tap it: the words slide left and blur out, the orb shrinks into the bars, and only the bars stay. The app closes after 1.8 s, and the next start plays "Updated ✓".</figcaption></figure>
+ <figure><div class="slice demo" id="d2"></div><div class="ctl"><button data-r="d2">Replay</button></div><figcaption><b>E2 · New York serif <span class="rec dflt">alternative</span></b>The same, in Apple's serif. It would be the only serif in the app.</figcaption></figure>
+ <figure><div class="slice dark demo" id="d3"></div><div class="ctl"><button data-r="d3">Replay</button></div><figcaption><b>E1 · Dark</b>In dark mode the orb gets a faint glow of its own.</figcaption></figure>
+</div>
+
+<h2>2 · The orb, up close</h2>
+<p class="note">A sphere with a light source at the top left: a pale highlight, a mid green body (#34C759, the system green), a darker rim and a soft inner shadow at the base. It breathes on a 2.4 s ease-in-out loop: it grows 7% while a faint green ring swells out and fades. It's drawn at 8 pt in the note, inside a 14 pt glyph box shared with the bars. Shown here at 64 pt.</p>
+<div class="frames"><div class="zoomorb"><span class="gbox pulse"><span class="orb"></span></span><span class="gbox"><span class="orb"></span></span><span style="font:12px -apple-system,sans-serif;color:#696269">breathing · still (reduced motion)</span></div><div class="zoomorb d"><span class="gbox pulse"><span class="orb"></span></span><span style="font:12px -apple-system,sans-serif;color:#98929a">dark</span></div></div>
+
+<h2>3 · The hand-off, frame by frame</h2>
+<div class="strip" id="strip"></div>
+<p class="note">The words take 280 ms to slide 10 pt left, fade, and blur to 6 px, and no new words come in. The orb shrinks and blurs out over 300 ms while the bars grow in, 120 ms behind. The bars hold for 1.8 s (back to the 20 November timing, since there's nothing to read), then mixtape closes.</p>
+
+<h2>4 · Large text, reduced motion, VoiceOver</h2>
+<ul class="tight note">
+<li><b>Largest text:</b> the label grows to 1.5× and the orb to 11 pt. If it no longer fits beside "Home", it drops under the title, aligned right, as approved on 20 November. The after-tap line can wrap onto two lines.</li>
+<li><b>Reduced motion:</b> the orb holds still (the highlight stays, there's no pulse), the bars hold still, and the words swap with a plain cross-fade: no slide, no blur.</li>
+<li><b>VoiceOver:</b>
+  <ul class="tight">
+    <li>Label: "Update, restart required. Double-tap to restart mixtape."</li>
+    <li>After the tap there are no words on screen, so VoiceOver still announces "Restarting mixtape. Open it again to finish." Without it, a VoiceOver listener would just find the app gone.</li>
+    <li>Next start: "mixtape updated."</li>
+  </ul></li>
+<li><b>Contrast:</b> the orb is decoration, so state is never shown by colour alone, and the words carry it. "(restart required)" uses the smoke grey, at 4.9:1 on the light background. At 9.5 pt it's small, so it grows with the text size.</li>
+<li><b>Ships as a patch:</b> the orb is drawn in code (gradients and shadows), and the blur is Flutter's own image filter. There are no images or new icons.</li>
+</ul>
+</main>
+<script>
+const status=`<div class="statusbar"><span>9:41</span><span></span></div>`;
+const barsH=`<span class="bars"><i></i><i></i><i></i></span>`;
+const chk=`<svg class="chk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`;
+const LBL='Update <i>(restart required)</i>', LINE='', DONE='Updated';
+function build(id,serif){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="screen">${status}<div class="titlerow"><h1>Home</h1><span class="note2 moving"><span class="word ${serif?'serif':''}">${LBL}</span><span class="gbox pulse"><span class="orb"></span>${barsH}${chk}</span></span></div></div>`;
+  el.dataset.stage='0';
+}
+function swap(el,html,cls=''){
+  const w=el.querySelector('.word');
+  w.classList.add('out');
+  setTimeout(()=>{w.innerHTML=html;w.className='word pre '+cls+(w.dataset.serif?' serif':'');void w.offsetWidth;w.className='word '+cls+(w.dataset.serif?' serif':'');},280);
+}
+function tap(id){
+  const el=document.getElementById(id); if(el.dataset.stage!=='0') return;
+  el.dataset.stage='1';
+  const g=el.querySelector('.gbox'), w=el.querySelector('.word');
+  if(w.classList.contains('serif')) w.dataset.serif='1';
+  g.classList.remove('pulse'); g.querySelector('.orb').classList.add('gone'); g.classList.add('isbars');
+  w.classList.add('out'); setTimeout(()=>{w.style.width='0';w.style.overflow='hidden';w.style.margin='0'},280);
+  setTimeout(()=>{ // app closes, next start
+    el.querySelector('.screen').style.transition='opacity .25s'; el.querySelector('.screen').style.opacity='.0';
+    setTimeout(()=>{el.querySelector('.screen').style.opacity='1'; g.classList.remove('isbars'); g.classList.add('ischeck'); const w2=el.querySelector('.word'); w2.style.width='';w2.style.overflow='';w2.innerHTML=DONE; w2.className='word pre ok'+(w2.dataset.serif?' serif':''); void w2.offsetWidth; w2.className='word ok'+(w2.dataset.serif?' serif':'');
+      setTimeout(()=>{el.querySelector('.note2').style.transition='opacity .32s ease-out';el.querySelector('.note2').style.opacity='0';},2500);
+    },700);
+  },1800);
+}
+[['d1',0],['d2',1],['d3',0]].forEach(([id,s])=>{build(id,s);document.getElementById(id).addEventListener('click',()=>tap(id));});
+document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{const id=b.dataset.r;build(id,id==='d2');});
+// strip
+const cell=(inner,cap)=>`<div class="cellz"><div class="sw">${inner}</div>${cap}</div>`;
+const st=(word,wordStyle,orbStyle,barsOn)=>`<span class="note2"><span class="word" style="${wordStyle}">${word}</span><span class="gbox ${barsOn?'isbars':''}"><span class="orb" style="${orbStyle}"></span>${barsH}</span></span>`;
+document.getElementById('strip').innerHTML=[
+ cell(st(LBL,'','',0),'0 ms · ready, breathing'),
+ cell(st(LBL,'transform:translateX(-5px);opacity:.5;filter:blur(3px)','transform:scale(.65);opacity:.5;filter:blur(1.5px)',0),'140 ms · sliding left, blurring'),
+ cell(st(LBL,'transform:translateX(-10px);opacity:0;filter:blur(6px)','transform:scale(.3);opacity:0',1),'280 ms · words gone, bars growing'),
+ cell(st('','display:none','opacity:0',1),'420 ms on · only the bars, for 1.8 s'),
+].join('');
+</script>
+</html>

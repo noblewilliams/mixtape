@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Restart copy</title>
+<style>
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1320px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:56px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+p{max-width:860px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:860px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:860px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.rec,.was,.gone{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;margin-left:6px;vertical-align:1px}
+.rec{color:#a7d8b4;border:1px solid rgba(112,151,120,.6)}
+.was{color:#cfc5d1;border:1px solid #5a5560}
+.gone{color:#e7a3b2;border:1px solid rgba(201,104,127,.6)}
+.frames{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+figure{margin:0}
+figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+figcaption b{color:#fff;font-weight:600;display:block}
+.meas{font:12px ui-monospace,Menlo,monospace;color:#a79fab;margin-top:4px;display:block}
+
+/* ---------- Product language (shell r3, reel loader) ---------- */
+.phone{width:390px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+.phone.tall{height:844px}
+.slice{width:390px;max-width:100%;border-radius:26px;padding:8px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.slice.narrow{width:336px}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --ok:#4f7a5a;
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet));
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);--group:rgba(255,255,255,.62);
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.slice .screen{border-radius:20px;padding-bottom:14px}
+.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);--ok:#9fcba9;
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);--group:rgba(255,255,255,.07);
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.large .screen{--scale:1.5}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif}
+.titlerow{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:30px 20px 8px;min-height:72px}
+.titlerow h1{margin:0;font:800 28px/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.large .titlerow h1{font-size:42px}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px;padding:0 54px 260px}
+
+/* ---------- The indicator ---------- */
+.upd{position:relative;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 2px;color:var(--plum);font:600 12px/1 -apple-system,sans-serif;white-space:nowrap;transition:opacity .32s ease-out}
+.upd .lbl{display:inline-block}
+.large .upd{font-size:18px;height:30px}
+.upd .g{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none}
+.large .upd .g{width:20px;height:20px}
+.upd.done .lbl,.upd.done .g{color:var(--ok)}
+/* ready: the record dot (transport glyph), same plum as the Mixes ready dot */
+.rec-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.large .rec-dot{width:10px;height:10px}
+/* loader A: three level bars, the voice meter's shape in plain ink */
+.bars{display:flex;align-items:center;gap:2px;height:12px}
+.bars i{width:2.5px;border-radius:1.25px;background:currentColor;height:6px}
+.bars i:nth-child(1){height:7px}.bars i:nth-child(2){height:12px}.bars i:nth-child(3){height:9px}
+.large .bars{height:17px;gap:3px}.large .bars i{width:3.5px}
+.large .bars i:nth-child(1){height:10px}.large .bars i:nth-child(2){height:17px}.large .bars i:nth-child(3){height:13px}
+.moving .bars i{animation:lvl .9s ease-in-out infinite}
+.moving .bars i:nth-child(2){animation-delay:-.3s}.moving .bars i:nth-child(3){animation-delay:-.6s}
+@keyframes lvl{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+.still .bars i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.bars i,.ring{animation:none!important}}
+/* loader B: thin ring filling over the timed step */
+.ring{width:12px;height:12px;border-radius:50%;background:conic-gradient(currentColor var(--p,35%),rgba(127,120,130,.25) 0);-webkit-mask:radial-gradient(circle,transparent 3.6px,#000 4px);mask:radial-gradient(circle,transparent 3.6px,#000 4px)}
+.check{width:12px;height:12px}
+.upd.fade{opacity:.35}
+/* 44 pt target, drawn as a dashed band for the board only */
+.upd.target::before{content:"";position:absolute;left:-8px;right:-8px;top:-9px;bottom:-9px;border:1px dashed rgba(201,104,127,.75);border-radius:8px}
+.capsule{height:28px;padding:0 10px 0 6px;border-radius:14px;background:rgba(255,255,255,.55);box-shadow:0 0 0 .5px rgba(50,44,50,.18),0 4px 12px rgba(23,22,26,.12)}
+.dark .capsule{background:rgba(255,255,255,.12)}
+
+/* ---------- Dock and Home panel (as shipped) ---------- */
+.bpanel{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 120px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px)}
+.seg{display:inline-flex;border-radius:16px;background:rgba(127,120,130,.15);padding:2px;font:500 13px -apple-system,sans-serif}
+.seg span{padding:5px 14px;border-radius:14px}.seg span:first-child{background:var(--plum);color:#fff}
+.dark .seg span:first-child{color:#1c1a1e}
+.composer{position:relative;margin-top:10px;min-height:48px;padding:12px 16px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;font-size:15px}
+.composer::after{content:"";position:absolute;left:18px;right:18px;bottom:-1px;height:2px;border-radius:2px;background:var(--prism)}
+.composer .ph{color:var(--muted)}
+.dock{position:absolute;left:24px;right:24px;bottom:26px;height:62px;border-radius:31px;background:rgba(255,255,255,.72);box-shadow:0 6px 20px rgba(23,22,26,.12);display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font:600 11px -apple-system,sans-serif;color:#1c1a1e}
+.dark .dock{background:rgba(80,70,120,.55);color:#f2eef1}
+.dock span.on{background:rgba(127,120,130,.16);margin:5px;border-radius:26px;padding:16px 0}
+
+/* ---------- You tab rows ---------- */
+.group{margin:8px 20px 0;border-radius:22px;background:var(--group)}
+.urow{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:56px;padding:8px 16px;position:relative}
+.urow+.urow::before{content:"";position:absolute;left:58px;right:0;top:0;height:1px;background:var(--hair)}
+.ico{width:30px;height:30px;border-radius:8px}
+.urow strong{font-weight:500;font-size:16px;display:block}
+.urow small{display:block;color:var(--muted);font-size:12.5px}
+.avatar{width:46px;height:46px;border-radius:50%;background:conic-gradient(var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet),var(--pink));display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}
+.chev{color:var(--muted);font-size:18px}
+
+/* ---------- Full-screen takeover (being removed) ---------- */
+.takeover{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 40px 120px}
+.takeover .t{font:600 16px -apple-system,sans-serif;margin-top:30px}
+.takeover .h{color:var(--smoke);font-size:12.5px;margin-top:4px}
+
+/* ---------- Reel artwork (CassettePainter, icon crop) ---------- */
+.reel{display:block;flex:none;overflow:hidden;border-radius:23%;box-shadow:0 1px 3px rgba(23,22,26,.3)}
+.reel svg,.tile svg{display:block;width:100%;height:100%}
+.spin .hubL{animation:hub 1.05s linear infinite}
+.spin .hubR{animation:hub 1.05s linear infinite reverse}
+.hubL{transform-origin:61px 61px}.hubR{transform-origin:139px 61px}
+@keyframes hub{to{transform:rotate(360deg)}}
+.still .hubL,.still .hubR{animation:none!important}
+@media (prefers-reduced-motion:reduce){.hubL,.hubR{animation:none!important}}
+.tilt{transform:rotate(-4deg)}
+
+/* timeline */
+.timeline{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;max-width:1000px;margin-top:14px}
+.step{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:14px}
+.step b{color:#fff;font-size:13px}
+.step .swatch,.cell .swatch{margin:12px 0 8px;padding:14px 12px;border-radius:12px;display:flex;justify-content:space-between;align-items:center}
+.swatch.l{background:linear-gradient(180deg,#f9f7f4,#f1eeee)}
+.swatch.d{background:linear-gradient(180deg,#050507,#0c0b12)}
+.swatch h1{margin:0;font:800 22px -apple-system,sans-serif;letter-spacing:-.02em}
+.swatch.l h1{color:#1c1a1e}.swatch.d h1{color:#f2eef1}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;max-width:1000px;margin-top:14px}
+.cell{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:16px}
+.fix{max-width:860px;display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+/* ---------- 21 Nov: restart copy ---------- */
+.row3{display:grid;grid-template-columns:repeat(3,390px);gap:18px;margin-top:14px}
+@media (max-width:1240px){.row3{grid-template-columns:repeat(auto-fit,minmax(300px,390px))}}
+.stepk{font:700 11px ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:#a79fab;margin:0 0 6px 4px}
+.slice .screen{min-height:150px}
+.under{display:flex;justify-content:flex-end;padding:0 20px 14px;margin-top:-4px}
+.titlerow.short{padding-bottom:4px}
+.upd .note{font-weight:600}
+.vari{margin-top:34px}
+.vari h3{font-size:17px;margin:0 0 2px;color:#fff}
+.vari p{margin:0;color:#cfc5d1;font-size:13.5px}
+.dock2{height:40px}
+.wrapline .upd{white-space:normal;height:auto;text-align:right;line-height:1.25;max-width:100%}
+.wrapline .upd .lbl{max-width:250px}
+</style>
+<main>
+<p class="kicker">Mixtape · iOS · copy board · 21 November 2026</p>
+<h1>The update note says "restart", nicely</h1>
+<p class="note">iOS can't reopen an app, so the tap still closes mixtape (decision 2026-11-20). This changes the words and timing only. The tap label uses "Restart". After the tap, a friendly line asks you to open mixtape again. On the next start, a short word confirms it worked. The note's place, glyphs and colours stay as approved on 20 November. The line after the tap is too long to sit beside "Home", so it drops onto its own line under the title, aligned right. Then the app closes after 2.5 s (it was 1.8 s).</p>
+
+<div id="vars"></div>
+
+<h2>The recommended set at the edges</h2>
+<p class="note">Dark mode, and the largest text size on a 320 pt phone.</p>
+<div class="frames" id="edges"></div>
+
+<h2>VoiceOver</h2>
+<ul class="tight note">
+<li>Tap label: "Restart to update. Double-tap to restart mixtape." (each set uses its own label words)</li>
+<li>After the tap: the line is read in full, for example "Back in a blink. Open me again."</li>
+<li>Next start: "mixtape updated."</li>
+<li>The ♪ is a text character in the app's own font, not an emoji, and VoiceOver skips it.</li>
+</ul>
+</main>
+<script>
+const bars=`<span class="g"><span class="bars"><i></i><i></i><i></i></span></span>`;
+const dot=`<span class="g"><span class="rec-dot"></span></span>`;
+const check=`<span class="g"><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>`;
+const status=`<div class="statusbar"><span>9:41</span><span></span></div>`;
+const slice=(inner,cls='')=>`<div class="slice ${cls}"><div class="screen">${status}${inner}</div></div>`;
+const beside=(note,cls='')=>slice(`<div class="titlerow"><h1>Home</h1>${note}</div>`,cls);
+const under=(note,cls='')=>slice(`<div class="titlerow short"><h1>Home</h1></div><div class="under">${note}</div>`,cls);
+const upd=(t,g,extra='')=>`<span class="upd ${extra}"><span class="lbl">${t}</span>${g}</span>`;
+const fig=(p,b,c='')=>`<figure>${p}<figcaption><b>${b}</b>${c}</figcaption></figure>`;
+const sets=[
+ {k:'A',name:'Back in a blink',rec:true,label:'Restart to update',line:'Back in a blink. Open me again ♪',done:'All fresh',why:'Warm and short. The ♪ is the one playful touch.'},
+ {k:'B',name:'Fresh tape',label:'Fresh tape ready · Restart',line:'Swapping tapes. Pop me open again',done:'New tape in',why:'Plays on the cassette, which means more tape words on screen.'},
+ {k:'C',name:'Be right back',label:'Restart for new stuff',line:'Be right back. Tap mixtape to reopen',done:'Updated',why:'The plainest, and it says exactly what to do.'},
+];
+document.getElementById('vars').innerHTML=sets.map(s=>`<div class="vari"><h3>${s.k} · ${s.name} ${s.rec?'<span class="rec">recommended</span>':''}</h3><p>${s.why}</p>
+<div class="row3">
+ ${fig(beside(upd(s.label,dot,'target')),'1 · A patch is ready','The tap target is the dashed area, 44 pt tall. Shown for this board only.')}
+ ${fig(under(upd(s.line,bars,'moving')),'2 · After the tap','The line sits under the title with the level bars for 2.5 s, then mixtape closes.')}
+ ${fig(beside(upd(s.done,check,'done')),'3 · Next start','Shows for 2.5 s, then fades.')}
+</div></div>`).join('');
+const A=sets[0];
+document.getElementById('edges').innerHTML=[
+ fig(beside(upd(A.label,dot),'dark'),'A · ready · dark'),
+ fig(under(upd(A.line,bars,'moving'),'dark'),'A · after the tap · dark'),
+ fig(beside(upd(A.done,check,'done'),'dark'),'A · next start · dark'),
+ fig(`<div class="large">${slice(`<div class="titlerow short"><h1>Home</h1></div><div class="under">${upd(A.label,dot)}</div>`,'narrow')}</div>`,'A · ready · largest text, 320 pt','At this size the label drops under the title, as approved on 20 November.'),
+ fig(`<div class="large">${slice(`<div class="titlerow short"><h1>Home</h1></div><div class="under wrapline">${upd(A.line,bars,'moving')}</div>`,'narrow')}</div>`,'A · after the tap · largest text','At this size the line wraps onto two lines, aligned right, with the bars beside the last line. It is never cut off.'),
+].join('');
+</script>
+</html>
