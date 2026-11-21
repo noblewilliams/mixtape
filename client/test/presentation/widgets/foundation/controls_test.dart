@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -578,26 +579,45 @@ void main() {
       tester.widget<Text>(find.text('Disconnected')).style?.color,
       tokens.errInk,
     );
-    expect(
+    Icon glyphOf(String label) => tester.widget<Icon>(
       find.descendant(
         of: find.ancestor(
-          of: find.text('Waiting'),
+          of: find.text(label),
           matching: find.byType(StatusWord),
         ),
         matching: find.byType(Icon),
       ),
-      findsNothing,
-      reason: 'warn carries no icon by default',
     );
+    // Filled glyphs in their own colours (add your music board r3/r4):
+    // the word keeps its ink, the glyph is the green or amber.
+    expect(glyphOf('Connected').icon, CupertinoIcons.checkmark_circle_fill);
+    expect(glyphOf('Connected').color, const Color(0xFF34A853));
     expect(
-      find.descendant(
-        of: find.ancestor(
-          of: find.text('Connected'),
-          matching: find.byType(StatusWord),
-        ),
-        matching: find.byType(Icon),
-      ),
-      findsOne,
+      glyphOf('Waiting').icon,
+      CupertinoIcons.exclamationmark_triangle_fill,
+    );
+    expect(glyphOf('Waiting').color, const Color(0xFFE0A020));
+    expect(glyphOf('Disconnected').icon, CupertinoIcons.exclamationmark_circle);
+  });
+
+  testWidgets('the filled status glyphs brighten in dark', (tester) async {
+    await _pump(tester, _gallery(), dark: true);
+    Color? glyphColor(String label) => tester
+        .widget<Icon>(
+          find.descendant(
+            of: find.ancestor(
+              of: find.text(label),
+              matching: find.byType(StatusWord),
+            ),
+            matching: find.byType(Icon),
+          ),
+        )
+        .color;
+    expect(glyphColor('Connected'), const Color(0xFF4CD07A));
+    expect(glyphColor('Waiting'), const Color(0xFFF1C04A));
+    expect(
+      tester.widget<Text>(find.text('Connected')).style?.color,
+      MixtapeTokens.dark.okInk,
     );
   });
 

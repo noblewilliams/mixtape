@@ -1,18 +1,19 @@
 // The Library tab (plan `docs/superpowers/plans/2026-09-17-native-design-
 // implementation.md` task 8.1; reworked by `docs/mockups/approved/2026-11-03-
-// library-sources.md`; 2026-11-09 one Add your music button): the sources
-// strip and the Playlists list, the title's one labelled "Add your music"
-// button into Your music, and the states the approved records name — empty,
-// loading, failed. Sync lives with Apple Music, never on this title.
+// library-sources.md`; restyled by the add your music board r3/r4, L1): two
+// flush source rows with the official icons and the Playlists list, the
+// title's one "Add music" pill into Add your music, and the states the
+// approved records name — empty, loading, failed. Sync lives with Apple
+// Music, never on this title.
 //
-// The tab hosts Your music and the playlist browser unchanged; both are
-// pushed, and this file asserts by pushed type.
+// Add your music is pushed, and this file asserts by pushed type.
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsAction;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/screens/first_run/choose_service_screen.dart';
@@ -31,13 +32,15 @@ import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/listening_import_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_providers.dart';
-import 'package:mixtape/presentation/screens/music_sources_screen.dart';
+import 'package:mixtape/presentation/screens/music_sources_screen.dart'
+    show kSourcesLoadFailedTitle;
 import 'package:mixtape/presentation/screens/playlist_browser_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 import 'package:mixtape/presentation/screens/mixes_screen.dart';
 import 'package:mixtape/presentation/screens/tabs/library_tab.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/brand_icons.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/empty_state.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
@@ -257,10 +260,11 @@ void main() {
         await _pump(tester, _container(), brightness: brightness);
 
         expect(find.text('Library'), findsOneWidget);
-        expect(
-          tester.getBottomLeft(find.text('Library')).dy,
-          lessThan(tester.getTopLeft(find.byKey(LibraryTab.addMusicKey)).dy),
-        );
+        // Beside the title, not under it (board r3 `.large-title.lib2`).
+        final title = tester.getRect(find.text('Library'));
+        final add = tester.getRect(find.byKey(LibraryTab.addMusicKey));
+        expect(add.left, greaterThan(title.right));
+        expect(add.top, lessThan(title.bottom));
         expect(find.text('Sources'), findsNothing);
         expect(find.text('Playlists'), findsOneWidget);
         expect(find.byType(GlassCluster), findsOneWidget);
@@ -276,7 +280,7 @@ void main() {
         expect(
           find.descendant(
             of: find.byKey(LibraryTab.addMusicKey),
-            matching: find.text('Add your music'),
+            matching: find.text('Add music'),
           ),
           findsOneWidget,
         );
@@ -333,7 +337,26 @@ void main() {
   });
 
   group('sources', () {
-    testWidgets('one strip of two halves, each with its status', (
+    testWidgets('VoiceOver can open each source row', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _pump(tester, _container());
+      for (final key in [
+        LibraryTab.appleSourceKey,
+        LibraryTab.spotifySourceKey,
+      ]) {
+        expect(
+          tester
+              .getSemantics(find.byKey(key))
+              .getSemanticsData()
+              .hasAction(SemanticsAction.tap),
+          isTrue,
+          reason: '$key has no tap action',
+        );
+      }
+      handle.dispose();
+    });
+
+    testWidgets('two flush rows, each with its official icon and status', (
       tester,
     ) async {
       await _pump(tester, _container());
@@ -345,28 +368,60 @@ void main() {
         findsOneWidget,
       );
       expect(
+        find.descendant(of: apple, matching: find.byType(AppleMusicIcon)),
+        findsOneWidget,
+      );
+      expect(
         find.descendant(of: apple, matching: find.text('Synced 4 Sep')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: spotify, matching: find.byType(SpotifyIcon)),
         findsOneWidget,
       );
       expect(
         find.descendant(of: spotify, matching: find.text('1 of 2 in')),
         findsOneWidget,
       );
-      // Side by side, on one row.
+      // Two rows, one above the other, each at least a 44 pt target.
       expect(
-        tester.getCenter(apple).dy,
-        moreOrLessEquals(tester.getCenter(spotify).dy, epsilon: 1),
+        tester.getRect(spotify).top,
+        greaterThanOrEqualTo(tester.getRect(apple).bottom - 1),
       );
+      for (final row in [apple, spotify]) {
+        final rect = tester.getRect(row);
+        expect(rect.height, greaterThanOrEqualTo(44));
+        expect(rect.height, lessThan(60), reason: 'compact flush rows');
+        // The 22 pt icon, the status on the same line as the name.
+        expect(
+          tester.getSize(
+            find.descendant(
+              of: row,
+              matching: find.byWidgetPredicate(
+                (w) => w is AppleMusicIcon || w is SpotifyIcon,
+              ),
+            ),
+          ),
+          const Size(22, 22),
+        );
+      }
       expect(
-        tester.getSize(apple).height,
-        lessThan(80),
-        reason: 'the strip is one compact row',
+        tester.getCenter(find.text('Synced 4 Sep')).dy,
+        moreOrLessEquals(
+          tester.getCenter(find.text('Apple Music')).dy,
+          epsilon: 2,
+        ),
       );
+      // Each row is one button that says where the service stands.
+      expect(
+        find.bySemanticsLabel('Apple Music, Synced 4 Sep'),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('Spotify, 1 of 2 in'), findsOneWidget);
     });
 
-    testWidgets('a service with nothing in yet invites adding it', (
-      tester,
-    ) async {
+    testWidgets('a service with nothing in yet says Not added, in full '
+        'colour', (tester) async {
       final listening = FakeListeningApi(
         onboarding: onboardingState(
           chosenService: 'apple',
@@ -376,24 +431,61 @@ void main() {
       );
       await _pump(tester, _container(listening: listening));
 
+      final spotify = find.byKey(LibraryTab.spotifySourceKey);
+      expect(
+        find.descendant(of: spotify, matching: find.text('Not added')),
+        findsOneWidget,
+      );
+      // The official icon is never greyed or faded.
+      expect(
+        find.descendant(of: spotify, matching: find.byType(Opacity)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: spotify, matching: find.byType(SpotifyIcon)),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('Spotify, not added'), findsOneWidget);
+    });
+
+    testWidgets('an account with only the Apple history says so', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'apple',
+          sources: [
+            musicSource(
+              source: 'apple_export',
+              lastImportedAt: DateTime(2026, 10, 28),
+            ),
+          ],
+        ),
+      );
+      await _pump(tester, _container(listening: listening));
+
       expect(
         find.descendant(
-          of: find.byKey(LibraryTab.spotifySourceKey),
-          matching: find.text('Add music'),
+          of: find.byKey(LibraryTab.appleSourceKey),
+          matching: find.text('History added'),
         ),
         findsOneWidget,
       );
     });
 
-    testWidgets('the halves stack at large text', (tester) async {
-      await _pump(tester, _container(), textScale: 1.5);
+    testWidgets('at large text the status drops under the name and the '
+        'icons grow', (tester) async {
+      await _pump(tester, _container(), textScale: 1.3);
 
-      final apple = tester.getRect(find.byKey(LibraryTab.appleSourceKey));
-      final spotify = tester.getRect(find.byKey(LibraryTab.spotifySourceKey));
-      expect(spotify.top, greaterThanOrEqualTo(apple.bottom));
+      final name = tester.getRect(find.text('Apple Music'));
+      final status = tester.getRect(find.text('Synced 4 Sep'));
+      expect(status.top, greaterThanOrEqualTo(name.bottom - 1));
+      expect(tester.getSize(find.byType(AppleMusicIcon)), const Size(28, 28));
+      expect(tester.getSize(find.byType(SpotifyIcon)), const Size(28, 28));
+      expect(tester.takeException(), isNull);
     });
 
-    testWidgets('the Apple half opens Add your music on Apple Music', (
+    testWidgets('the Apple row opens Add your music on Apple Music', (
       tester,
     ) async {
       await _pump(tester, _container());
@@ -405,7 +497,7 @@ void main() {
       expect(find.byKey(SpotifyRequestScreen.appleSyncKey), findsOneWidget);
     });
 
-    testWidgets('the Spotify half opens Add your music on Spotify', (
+    testWidgets('the Spotify row opens Add your music on Spotify', (
       tester,
     ) async {
       await _pump(tester, _container());
@@ -414,7 +506,17 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(SpotifyRequestScreen), findsOneWidget);
-      expect(find.byKey(const Key('open-exportify')), findsOneWidget);
+      expect(
+        tester
+            .widget<SpotifyRequestScreen>(find.byType(SpotifyRequestScreen))
+            .initialSegment,
+        SpotifyRequestScreen.spotifySegment,
+      );
+      // The account data is in, so its pane opens on Saved music, done.
+      expect(
+        find.byKey(SpotifyRequestScreen.spotifyImportAgainKey),
+        findsOneWidget,
+      );
     });
 
     testWidgets('no sources: the cassette, the words and a way in', (
@@ -687,12 +789,19 @@ void main() {
   });
 
   group('title', () {
-    testWidgets('Add your music opens Your music', (tester) async {
+    testWidgets('Add music opens Add your music on its default segment', (
+      tester,
+    ) async {
       await _pump(tester, _container());
 
       await tester.tap(find.byKey(LibraryTab.addMusicKey));
       await tester.pumpAndSettle();
-      expect(find.byType(MusicSourcesScreen), findsOneWidget);
+      final screen = tester.widget<SpotifyRequestScreen>(
+        find.byType(SpotifyRequestScreen),
+      );
+      expect(screen.initialSegment, isNull);
+      expect(screen.onDone, isNull);
+      expect(find.text('Your music'), findsNothing);
     });
 
     for (final service in ['apple', 'spotify']) {
@@ -714,7 +823,7 @@ void main() {
       });
     }
 
-    testWidgets('the strip carries a sync already running', (tester) async {
+    testWidgets('the Apple row carries a sync already running', (tester) async {
       await _pump(
         tester,
         _container(
@@ -727,9 +836,21 @@ void main() {
           ),
           extra: [librarySyncProvider.overrideWith(_RunningSync.new)],
         ),
+        // The spinner never settles.
+        settle: false,
       );
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
 
       expect(find.text('Syncing… 40%'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(LibraryTab.appleSourceKey),
+          matching: find.byType(CupertinoActivityIndicator),
+        ),
+        findsOneWidget,
+      );
     });
   });
 

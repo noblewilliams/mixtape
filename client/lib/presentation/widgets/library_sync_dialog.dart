@@ -1,5 +1,4 @@
-/// The library-sync alert, shared by the Library tab, Your music and Add your
-/// music (approval `docs/mockups/approved/2026-11-03-library-sources.md`).
+/// The library-sync alert, opened from Add your music (approval `docs/mockups/approved/2026-11-03-library-sources.md`).
 ///
 /// It replaces the September sync sheet: syncing needs a confirmation, so it
 /// is a centred alert, and it speaks as a re-sync once the account has one

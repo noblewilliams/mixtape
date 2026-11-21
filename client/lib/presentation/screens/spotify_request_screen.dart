@@ -1,12 +1,16 @@
-/// "Add your music": one screen for both services, with a native segmented
-/// control under the title — Apple Music | Spotify (founder, smoke round four,
-/// note 4).
+/// "Add your music": one screen for both services, with the native glass
+/// segmented control under the title — Apple Music | Spotify (founder, smoke
+/// round four, note 4; board r4, T1).
 ///
-/// Both panes share one grammar (approval `docs/mockups/approved/2026-11-03-
-/// library-sources.md`): a status row saying where the service stands, then
-/// flush sections — Apple's "Listening history" with the file picker in plain
-/// sight, Spotify's "Saved music" and "Listening history" — with the request
-/// steps folded under a disclosure row.
+/// Both panes are the same two-step checklist (board
+/// `docs/mockups/2026-11-21-add-your-music-restyle-r4.html`, approved
+/// 2026-11-21, over the 3 November grammar): a one-line header with the
+/// service's official icon, how many of its two steps are in and a two-bar
+/// meter, then the steps — Apple's "Library" and optional "Listening
+/// history", Spotify's "Saved music" and optional "Listening history" — each
+/// a state disc, a status line and its own actions (Sync as an icon, Import
+/// again, Replace, Remove), with the request steps and the Apple file folded
+/// under one row. Your music is retired; its actions live on these steps.
 ///
 /// The Spotify pane is the September 8 Exportify approval
 /// (`docs/mockups/approved/2026-09-08-exportify-import.md`) over the September
@@ -25,6 +29,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -35,8 +40,9 @@ import '../providers/device_providers.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
+import '../widgets/foundation/brand_icons.dart';
 import '../widgets/foundation/glass_cluster.dart';
-import '../widgets/foundation/service_marks.dart';
+import '../widgets/foundation/glass_segmented_control.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
@@ -48,7 +54,7 @@ import '../widgets/foundation/text_action.dart';
 import '../format/source_labels.dart';
 import '../widgets/library_sync_dialog.dart';
 import 'import_sheet.dart';
-import 'music_sources_screen.dart' show sourceDetailFor, sourceStatusFor;
+import 'music_sources_screen.dart' show removeSourceFlow;
 
 /// The address in step 1, as it reads on screen and where it opens.
 const String spotifyPrivacyAddress = 'spotify.com/account/privacy';
@@ -73,14 +79,6 @@ const List<String> exportifyQuickStartSteps = [
   'Choose Export All and save the ZIP as it is.',
   'Come back and choose the files. Mixtape will show what it found before importing.',
 ];
-
-/// The one line under the Exportify row. It was two — where the link goes and
-/// what the picker takes — and the founder read the pair as clutter beside a
-/// row that now holds both actions (smoke round four, note 4).
-const String exportifyRowNote =
-    'Opens exportify.app outside Mixtape. Takes an Exportify ZIP or CSV files, '
-    'or an official Spotify ZIP; read on this device first, reviewed before '
-    'uploading.';
 
 /// The spec's request steps, word for word (`**bold**`, `*italic*` as in
 /// the spec's own markup) — docs/superpowers/specs/2026-09-01-listening-
@@ -122,23 +120,23 @@ const List<String> appleRequestSteps = [
   'Save the ZIP as it is, come back here and choose the files.',
 ];
 
-/// What the Apple picker takes, and the privacy rule it keeps.
+/// The privacy rule the Apple picker keeps, under it inside the fold
+/// (board r4, A2).
 const String appleFileNote =
-    'An Apple Media Services ZIP, read on this device first. Mixtape shows counts '
-    'only — never a song or artist name — and you review before uploading.';
+    'Read on this device first. Mixtape shows counts only, and you review '
+    'before uploading.';
 
-/// The Apple pane's opening line before a first sync, from the web's own sync
-/// panel (`web/src/components/AppleMusicSyncPanel.tsx`).
+/// Apple's step 1 before a first sync (board r4, A4).
 const String appleSyncIntro =
-    'Sync your Apple Music songs and playlists, so the DJ builds from what you '
-    'already listen to.';
+    'Sync your songs and playlists, so the DJ builds from what you already '
+    'play.';
 
-/// The "Listening history" lines under each pane's section word.
+/// The open "Listening history" step's one line (board r4, A1 and S2); the
+/// "Optional" tag beside the step's title says the rest.
 const String appleHistoryIntro =
-    "Optional. Apple can send you everything you've played, so the DJ learns "
-    'the songs you return to, not only the ones you saved.';
+    'Teaches the DJ the songs you return to, not only the ones you saved.';
 const String spotifyHistoryIntro =
-    'Optional. Spotify can send you years of plays; it takes days to arrive.';
+    'Years of plays from Spotify. It takes days to arrive.';
 
 /// "Add your music": the Apple pane (library sync, then the optional Media
 /// Services export) and the Spotify pane (the Exportify quick start, the eight
@@ -153,16 +151,16 @@ class SpotifyRequestScreen extends ConsumerStatefulWidget {
 
   final VoidCallback? onDone;
 
-  /// The pane to open on, for the rows that name a service themselves —
-  /// "Add Spotify music" on the Library tab and on Your music. Null lets the
-  /// default rule below decide.
+  /// The pane to open on, for the rows that name a service themselves — the
+  /// Library tab's Apple Music and Spotify rows. Null lets the default rule
+  /// below decide.
   final int? initialSegment;
 
-  /// The deeper block's disclosure row, and so the way tests open it. Both
-  /// panes have one; only one pane is ever built.
+  /// The fold row in step 2, and so the way tests open it. Both panes have
+  /// one; only one pane is ever built.
   static const Key goDeeperKey = Key('go-deeper');
 
-  /// The service toggle under the title.
+  /// The service toggle under the title, a [GlassSegmentedControl].
   static const Key segmentKey = Key('add-music-segment');
 
   /// Its two segments.
@@ -173,15 +171,21 @@ class SpotifyRequestScreen extends ConsumerStatefulWidget {
   static const Key exportifyRowKey = Key('exportify-row');
 
   /// The Apple pane's sync, "Sync Apple Music" wherever it stands: the tape
-  /// button before a first sync, the status row's text action after. Every
-  /// sync control names Apple Music (founder, 2026-11-09).
+  /// button before a first sync, the icon on the Library step after (its
+  /// VoiceOver name). Every sync control names Apple Music (founder,
+  /// 2026-11-09).
   static const Key appleSyncKey = Key('add-music-apple-sync');
 
-  /// Each pane's status row.
+  /// Each pane's one-line header.
   static const Key statusRowKey = Key('add-music-status');
 
-  /// "Import again" on the Spotify status row, once saved music is in.
+  /// "Import again" on Spotify's Saved music step, once it is in.
   static const Key spotifyImportAgainKey = Key('spotify-import-again');
+
+  /// "Import again" on Spotify's Listening history step, once it is in.
+  static const Key spotifyHistoryImportAgainKey = Key(
+    'spotify-history-import-again',
+  );
 
   /// The panes, in segment order.
   static const int appleSegment = 0;
@@ -265,14 +269,17 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const SizedBox(height: 4),
                   _segmentedControl(segment),
-                  const SizedBox(height: 18),
+                  // The toggle reads as navigation, not part of the first
+                  // section (board r4, note 1).
+                  const SizedBox(height: 22),
                   if (segment == SpotifyRequestScreen.appleSegment)
                     _applePane(openLink)
                   else
                     _spotifyPane(openLink, markedAt),
                   if (widget.onDone != null) ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 20),
                     Center(
                       child: TapeButton(
                         key: const Key('request-done'),
@@ -291,40 +298,51 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
     );
   }
 
-  /// The house toggle, hugging its own labels on the left margin under the
-  /// title rather than stretching across the screen (smoke round five,
-  /// note 3).
+  /// The native glass toggle, as on Mixes, hugging the left margin under the
+  /// title (board r4, T1). Its labels stop growing at the control's cap, as
+  /// `UISegmentedControl` does; off iOS 26 it is the house toggle.
   Widget _segmentedControl(int segment) => Align(
     alignment: Alignment.centerLeft,
-    child: SegmentedToggle<int>(
-      key: SpotifyRequestScreen.segmentKey,
-      value: segment,
-      onChanged: (value) {
-        if (value == segment) return;
-        setState(() {
-          _segment = value;
-          // The other pane's deeper block is not this one's; a switch that
-          // landed on a screenful of open steps reads as a different screen.
-          _deeperOpen = false;
-        });
-      },
-      options: const [
-        SegmentedOption(
-          value: SpotifyRequestScreen.appleSegment,
-          label: 'Apple Music',
-          key: SpotifyRequestScreen.appleSegmentKey,
+    child: MediaQuery.withClampedTextScaling(
+      maxScaleFactor: GlassSegmentedControl.maxTextScale,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth:
+              MediaQuery.sizeOf(context).width -
+              2 * MixtapeMetrics.screenSidePadding,
         ),
-        SegmentedOption(
-          value: SpotifyRequestScreen.spotifySegment,
-          label: 'Spotify',
-          key: SpotifyRequestScreen.spotifySegmentKey,
+        child: GlassSegmentedControl<int>(
+          key: SpotifyRequestScreen.segmentKey,
+          value: segment,
+          onChanged: (value) {
+            if (value == segment) return;
+            setState(() {
+              _segment = value;
+              // The other pane's fold is not this one's; a switch that
+              // landed on a screenful of open steps reads as a different
+              // screen.
+              _deeperOpen = false;
+            });
+          },
+          options: const [
+            SegmentedOption(
+              value: SpotifyRequestScreen.appleSegment,
+              label: 'Apple Music',
+              key: SpotifyRequestScreen.appleSegmentKey,
+            ),
+            SegmentedOption(
+              value: SpotifyRequestScreen.spotifySegment,
+              label: 'Spotify',
+              key: SpotifyRequestScreen.spotifySegmentKey,
+            ),
+          ],
         ),
-      ],
+      ),
     ),
   );
 
   /// One row, not two stacked blocks: open the exporter, then choose what it
-  /// gave you (smoke round four, note 4). The two now sit on opposite edges of
+  /// gave you (smoke round four, note 4). The two sit on opposite edges of
   /// the row rather than huddling on the left (smoke round five, note 2), and
   /// still stack once the text is too large for both to share a line.
   Widget _exportifyRow(Future<bool> Function(Uri) openLink) => Wrap(
@@ -343,24 +361,30 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
         label: 'Open Exportify ↗',
         onPressed: () => unawaited(openLink(exportifyUrl)),
       ),
-      LabelChip(
-        key: const Key('choose-import-files'),
-        label: 'Choose files',
-        // Straight to the picker; the sheet follows the file (smoke round
-        // seven, note 1).
-        onPressed: () => unawaited(openImportFlow(context, ref)),
-      ),
+      _chooseChip(),
     ],
   );
 
-  /// Apple: where the library sync stands, then the listening history with
-  /// its file first and the request steps folded under it.
+  /// "Choose files": straight to the picker; the sheet follows the file
+  /// (smoke round seven, note 1).
+  Widget _chooseChip() => LabelChip(
+    key: const Key('choose-import-files'),
+    label: 'Choose files',
+    leading: const _FileGlyph(),
+    onPressed: () => unawaited(openImportFlow(context, ref)),
+  );
+
+  /// Apple: step 1 the library sync, step 2 the optional Media Services
+  /// export, its request steps and file folded under one row (board r4,
+  /// A1–A7).
   Widget _applePane(Future<bool> Function(Uri) openLink) {
-    final tokens = context.tokens;
     final onboarding = ref.watch(onboardingProvider).value;
     final sync = ref.watch(librarySyncProvider);
     final status = appleSyncStatus(sync, onboarding);
-    final synced = appleLiveSource(onboarding) != null;
+    final running = sync is SyncRunning;
+    // A library that landed once stays added, a failed re-sync included.
+    final libraryAdded =
+        appleLiveSource(onboarding) != null || sync is SyncDone;
     MusicSource? history;
     for (final source in onboarding?.sources ?? const <MusicSource>[]) {
       if (source.source == 'apple_export' && source.lastImportedAt != null) {
@@ -369,262 +393,803 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
     }
     void startSync() => unawaited(showLibrarySync(context, ref));
     void choose() => unawaited(openImportFlow(context, ref));
+    final syncIcon = _SyncIconButton(onPressed: startSync);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _StatusRow(
-          mark: AppleMusicMark(size: _StatusRow.markSize, color: tokens.text),
-          title: 'Apple Music library',
-          status: status,
-          action: synced && sync is! SyncRunning
-              ? TextAction(
-                  key: SpotifyRequestScreen.appleSyncKey,
-                  label: 'Sync Apple Music',
-                  onPressed: startSync,
-                )
-              : null,
-        ),
-        if (!synced && sync is! SyncRunning) ...[
-          const SizedBox(height: 14),
-          Text(appleSyncIntro, style: tokens.secondary),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TapeButton(
+    final _Step library = switch (sync) {
+      SyncRunning(:final progress) => _Step(
+        number: 1,
+        state: _StepState.current,
+        title: 'Library',
+        status: '${status.label} · you can leave this screen',
+        body: _SyncProgress(progress: progress),
+      ),
+      SyncFailed() => _Step(
+        number: 1,
+        state: _StepState.attention,
+        title: 'Library',
+        status: status.label,
+        statusKind: StatusKind.warn,
+        actions: [syncIcon],
+      ),
+      _ when libraryAdded => _Step(
+        number: 1,
+        state: _StepState.done,
+        title: 'Library',
+        status: status.label,
+        statusKind: StatusKind.ok,
+        actions: [syncIcon],
+      ),
+      _ => _Step(
+        number: 1,
+        state: _StepState.current,
+        title: 'Library',
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _Lede(appleSyncIntro),
+            TapeButton(
               key: SpotifyRequestScreen.appleSyncKey,
               label: 'Sync Apple Music',
+              leading: const _TapeGlyph(CupertinoIcons.arrow_2_circlepath),
               onPressed: startSync,
             ),
+          ],
+        ),
+      ),
+    };
+
+    final _Step historyStep;
+    if (history != null) {
+      final years = yearsRange(history.ledgerFrom, history.ledgerTo);
+      final added = 'Added ${shortDate(history.lastImportedAt!)}';
+      historyStep = _Step(
+        number: 2,
+        state: _StepState.done,
+        title: 'Listening history',
+        status: years == null ? added : '$added · $years',
+        statusKind: StatusKind.ok,
+        actions: [
+          TextAction(
+            key: const Key('choose-apple-files'),
+            label: 'Replace',
+            onPressed: choose,
+          ),
+          TextAction(
+            key: const Key('remove-apple_export'),
+            label: 'Remove',
+            quiet: true,
+            onPressed: () =>
+                unawaited(removeSourceFlow(context, ref, history!)),
           ),
         ],
-        const SectionWord('Listening history'),
-        if (history != null) ...[
-          Row(
-            children: [
-              Expanded(
+        isLast: true,
+      );
+    } else if (!libraryAdded && !running) {
+      // Before a first sync the sync is the one primary action; the file
+      // waits as a small one (board r4, A4).
+      historyStep = _Step(
+        number: 2,
+        state: _StepState.waiting,
+        title: 'Listening history',
+        optional: true,
+        status: 'After your library, or any time',
+        actions: [
+          TextAction(
+            key: const Key('choose-apple-files'),
+            label: 'Choose file',
+            onPressed: choose,
+          ),
+        ],
+        isLast: true,
+      );
+    } else {
+      historyStep = _Step(
+        number: 2,
+        state: _StepState.current,
+        title: 'Listening history',
+        optional: true,
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _Lede(appleHistoryIntro, bottom: 0),
+            _Disclosure(
+              title: 'Get your Apple file',
+              subtitle: _deeperOpen
+                  ? 'Request it, then choose it'
+                  : 'From privacy.apple.com',
+              open: _deeperOpen,
+              onTap: () => setState(() => _deeperOpen = !_deeperOpen),
+            ),
+            if (_deeperOpen)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    StatusWord(
-                      key: const Key('apple-history-status'),
-                      label:
-                          'History added ${shortDate(history.lastImportedAt!)}',
-                      kind: StatusKind.ok,
+                    _AppleSteps(
+                      onOpenAddress: () => unawaited(openLink(applePrivacyUrl)),
                     ),
-                    if (ledgerRange(history.ledgerFrom, history.ledgerTo)
-                        case final range?)
-                      Text(range, style: tokens.meta),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      // One primary action per pane (3 Nov rule): before a
+                      // first sync the file is a chip.
+                      child: libraryAdded
+                          ? TapeButton(
+                              key: const Key('choose-apple-files'),
+                              label: 'Choose your Apple file',
+                              leading: const _TapeGlyph(
+                                CupertinoIcons.arrow_up_doc,
+                              ),
+                              onPressed: choose,
+                            )
+                          : LabelChip(
+                              key: const Key('choose-apple-files'),
+                              label: 'Choose your Apple file',
+                              leading: const _FileGlyph(),
+                              onPressed: choose,
+                            ),
+                    ),
+                    const SizedBox(height: 6),
+                    _Note(appleFileNote),
                   ],
                 ),
               ),
-              TextAction(
-                key: const Key('choose-apple-files'),
-                label: 'Replace file',
-                onPressed: choose,
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Got a newer export from Apple? Choose it here.',
-            style: tokens.meta,
-          ),
-        ] else ...[
-          Text(appleHistoryIntro, style: tokens.secondary),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            // One primary action per pane: before a first sync the sync is
-            // the tape button and the file drops to a chip.
-            child: synced
-                ? TapeButton(
-                    key: const Key('choose-apple-files'),
-                    label: 'Choose your Apple file',
-                    onPressed: choose,
-                  )
-                : LabelChip(
-                    key: const Key('choose-apple-files'),
-                    label: 'Choose your Apple file',
-                    onPressed: choose,
-                  ),
-          ),
-          const SizedBox(height: 8),
-          Text(appleFileNote, style: tokens.meta),
-          const SizedBox(height: 14),
-          _Disclosure(
-            title: 'How to request it from Apple',
-            subtitle: _deeperOpen
-                ? 'Five steps on privacy.apple.com'
-                : "Haven't asked Apple yet? Start here",
-            open: _deeperOpen,
-            onTap: () => setState(() => _deeperOpen = !_deeperOpen),
-          ),
-          if (_deeperOpen)
-            _AppleSteps(
-              onOpenAddress: () => unawaited(openLink(applePrivacyUrl)),
-            ),
-        ],
-      ],
-    );
-  }
+          ],
+        ),
+        isLast: true,
+      );
+    }
 
-  /// Spotify: where the import stands, the Exportify quick start until saved
-  /// music is in, then the listening history with the official steps folded.
-  Widget _spotifyPane(Future<bool> Function(Uri) openLink, DateTime? markedAt) {
-    final tokens = context.tokens;
-    final onboarding = ref.watch(onboardingProvider).value;
-    final source = onboarding == null ? null : spotifySource(onboarding);
-    final status = source == null
-        ? (kind: StatusKind.muted, label: 'Not added yet')
-        : sourceStatusFor(source, onboarding!);
-    final savedIn = source?.packages.contains('spotify_exportify') ?? false;
-
+    final done = (libraryAdded && !running ? 1 : 0) + (history != null ? 1 : 0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _StatusRow(
-          mark: SpotifyMark(size: _StatusRow.markSize, color: tokens.text),
-          title: 'Spotify',
-          status: status,
-          detail: source == null ? null : sourceDetailFor(source),
-          action: savedIn
-              ? TextAction(
-                  key: SpotifyRequestScreen.spotifyImportAgainKey,
-                  label: 'Import again',
-                  onPressed: () => unawaited(openImportFlow(context, ref)),
-                )
-              : null,
+        _ServiceHeader(
+          icon: const AppleMusicIcon(size: _ServiceHeader.iconSize),
+          name: 'Apple Music',
+          line: running ? 'Syncing…' : _ServiceHeader.countLine(done),
+          done: done,
         ),
-        if (!savedIn) ...[
-          const SectionWord('Saved music'),
-          for (var i = 0; i < exportifyQuickStartSteps.length; i++)
-            _NumberedRow(
-              number: '${i + 1}',
-              isFirst: i == 0,
-              child: Text(exportifyQuickStartSteps[i], style: tokens.body),
+        library,
+        historyStep,
+      ],
+    );
+  }
+
+  /// Spotify: step 1 the saved music (the Exportify quick start), step 2 the
+  /// optional listening history with the eight official steps folded (board
+  /// r4, S1–S4).
+  Widget _spotifyPane(Future<bool> Function(Uri) openLink, DateTime? markedAt) {
+    final onboarding = ref.watch(onboardingProvider).value;
+    final source = onboarding == null ? null : spotifySource(onboarding);
+    final packages = source?.packages ?? const <String>[];
+    // Saved music is the Exportify package, or the official account data,
+    // which carries the same library (`spotifyStatusLabel`'s "Both in").
+    final savedIn =
+        packages.contains('spotify_exportify') ||
+        packages.contains(accountPackage);
+    final historyIn = packages.contains(extendedPackage);
+    final imported = source?.lastImportedAt;
+    final importedLabel = imported == null
+        ? 'Imported'
+        : 'Imported ${shortDate(imported)}';
+    void importAgain() => unawaited(openImportFlow(context, ref));
+    // The one export holds both steps, so one Remove, on the last step in.
+    Widget remove() => TextAction(
+      key: const Key('remove-spotify_export'),
+      label: 'Remove',
+      quiet: true,
+      onPressed: () => unawaited(removeSourceFlow(context, ref, source!)),
+    );
+
+    final saved = savedIn
+        ? _Step(
+            number: 1,
+            state: _StepState.done,
+            title: 'Saved music',
+            status: importedLabel,
+            statusKind: StatusKind.ok,
+            actions: [
+              TextAction(
+                key: SpotifyRequestScreen.spotifyImportAgainKey,
+                label: 'Import again',
+                onPressed: importAgain,
+              ),
+              if (!historyIn) remove(),
+            ],
+          )
+        : _Step(
+            number: 1,
+            state: _StepState.current,
+            title: 'Saved music',
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < exportifyQuickStartSteps.length; i++)
+                  _NumberedRow(
+                    number: '${i + 1}',
+                    isFirst: i == 0,
+                    child: Text(
+                      exportifyQuickStartSteps[i],
+                      style: _stepStyle(context),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                _exportifyRow(openLink),
+                const SizedBox(height: 4),
+              ],
             ),
-          const SizedBox(height: 12),
-          _exportifyRow(openLink),
-          Text(exportifyRowNote, style: tokens.meta),
+          );
+
+    final _Step history;
+    if (historyIn) {
+      final years = source == null
+          ? null
+          : yearsRange(source.ledgerFrom, source.ledgerTo);
+      history = _Step(
+        number: 2,
+        state: _StepState.done,
+        title: 'Listening history',
+        status: years == null ? importedLabel : '$importedLabel · $years',
+        statusKind: StatusKind.ok,
+        actions: [
+          TextAction(
+            key: SpotifyRequestScreen.spotifyHistoryImportAgainKey,
+            label: 'Import again',
+            onPressed: importAgain,
+          ),
+          remove(),
         ],
-        const SectionWord('Listening history'),
-        Text(spotifyHistoryIntro, style: tokens.secondary),
-        const SizedBox(height: 14),
-        _Disclosure(
-          title: 'How to request it from Spotify',
-          // Collapsed, the row carries the wait so the listener sees it
-          // without opening the block; open, the block's own line says it.
-          subtitle: !_deeperOpen && markedAt != null
-              ? 'Requested ${elapsedWait(markedAt)}'
-              : 'Eight steps, mostly waiting for email',
-          open: _deeperOpen,
-          onTap: () => setState(() => _deeperOpen = !_deeperOpen),
+        isLast: true,
+      );
+    } else if (!savedIn) {
+      // Waiting on saved music, but the request is days of email, so it can
+      // start now: a small action opens the same eight steps (Home's waiting
+      // card sends a listener here to make that request).
+      history = _Step(
+        number: 2,
+        state: _StepState.waiting,
+        title: 'Listening history',
+        optional: true,
+        status: markedAt == null
+            ? 'Request it from Spotify any time'
+            : 'Requested ${elapsedWait(markedAt)}',
+        actions: [
+          if (!_deeperOpen)
+            TextAction(
+              key: SpotifyRequestScreen.goDeeperKey,
+              label: 'How to request it',
+              onPressed: () => setState(() => _deeperOpen = true),
+            ),
+        ],
+        body: _deeperOpen
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _Disclosure(
+                    title: 'How to request it',
+                    subtitle: '${spotifyRequestSteps.length} steps',
+                    open: true,
+                    onTap: () => setState(() => _deeperOpen = false),
+                  ),
+                  _DeeperSteps(
+                    markedAt: markedAt,
+                    onOpenAddress: () => unawaited(openLink(spotifyPrivacyUrl)),
+                    onMarkRequested: _markRequested,
+                  ),
+                ],
+              )
+            : null,
+        isLast: true,
+      );
+    } else {
+      history = _Step(
+        number: 2,
+        state: _StepState.current,
+        title: 'Listening history',
+        optional: true,
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _Lede(spotifyHistoryIntro, bottom: 0),
+            _Disclosure(
+              title: 'How to request it',
+              // Collapsed, the row carries the wait so the listener sees it
+              // without opening the block; open, the block's own line says it.
+              subtitle: !_deeperOpen && markedAt != null
+                  ? 'Requested ${elapsedWait(markedAt)}'
+                  : '${spotifyRequestSteps.length} steps',
+              open: _deeperOpen,
+              onTap: () => setState(() => _deeperOpen = !_deeperOpen),
+            ),
+            if (_deeperOpen)
+              _DeeperSteps(
+                markedAt: markedAt,
+                onOpenAddress: () => unawaited(openLink(spotifyPrivacyUrl)),
+                onMarkRequested: _markRequested,
+              ),
+            const SizedBox(height: 6),
+            Align(alignment: Alignment.centerLeft, child: _chooseChip()),
+            const SizedBox(height: 4),
+          ],
         ),
-        if (_deeperOpen)
-          _DeeperSteps(
-            markedAt: markedAt,
-            onOpenAddress: () => unawaited(openLink(spotifyPrivacyUrl)),
-            onMarkRequested: _markRequested,
-          ),
-        if (savedIn) ...[
-          const SizedBox(height: 14),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: LabelChip(
-              key: const Key('choose-import-files'),
-              label: 'Choose files',
-              onPressed: () => unawaited(openImportFlow(context, ref)),
-            ),
-          ),
-        ],
+        isLast: true,
+      );
+    }
+
+    final done = (savedIn ? 1 : 0) + (historyIn ? 1 : 0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ServiceHeader(
+          icon: const SpotifyIcon(size: _ServiceHeader.iconSize),
+          name: 'Spotify',
+          line: _ServiceHeader.countLine(done),
+          done: done,
+        ),
+        saved,
+        history,
       ],
     );
   }
 }
 
-/// Where a service stands, at the top of its pane: the mark, the name, the
-/// status line and the one action that belongs to it.
-class _StatusRow extends StatelessWidget {
-  const _StatusRow({
-    required this.mark,
-    required this.title,
-    required this.status,
-    this.detail,
-    this.action,
+/// The step copy's size inside a checklist (board r4 `.item3 .step`).
+TextStyle _stepStyle(BuildContext context) =>
+    context.tokens.body.copyWith(fontSize: 13.5, height: 1.4);
+
+/// Where a service stands, at the top of its pane, on one line: the official
+/// icon, the name, "· 1 of 2 added", and a two-bar meter at the right (board
+/// r4 `.hero3`). At large text the count and the meter drop under the name.
+class _ServiceHeader extends StatelessWidget {
+  const _ServiceHeader({
+    required this.icon,
+    required this.name,
+    required this.line,
+    required this.done,
   });
 
-  final Widget mark;
-  final String title;
-  final ({StatusKind kind, String label}) status;
-  final String? detail;
-  final Widget? action;
+  final Widget icon;
+  final String name;
+  final String line;
 
-  static const double markSize = 34;
+  /// How many of the two steps are in: the meter's green bars.
+  final int done;
 
-  /// Under this width, or at [stackScale] text and above, the action drops
-  /// under the status line: beside it, "Sync Apple Music" would squeeze the
-  /// title into a column of letters.
-  static const double stackWidth = 340;
+  static const double iconSize = 32;
+
+  /// At this text scale the header stacks.
   static const double stackScale = 1.3;
 
-  /// The status word, for tests.
-  static const Key statusKey = Key('add-music-status-word');
+  static String countLine(int done) => switch (done) {
+    2 => 'All in',
+    1 => '1 of 2 added',
+    _ => 'Not added yet',
+  };
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => _row(
-      context,
-      stacked:
-          constraints.maxWidth < stackWidth ||
-          MediaQuery.textScalerOf(context).scale(1) >= stackScale,
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final stacked = MediaQuery.textScalerOf(context).scale(1) >= stackScale;
+    final nameStyle = TextStyle(
+      fontSize: 17,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.2,
+      height: 1.2,
+      color: tokens.text,
+    );
+    final lineStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      color: tokens.muted,
+    );
+    final meter = ExcludeSemantics(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < 2; i++) ...[
+            if (i > 0) const SizedBox(width: 3),
+            Container(
+              width: 18,
+              height: 3,
+              decoration: BoxDecoration(
+                color: i < done ? statusOkGlyph(context) : tokens.hairline,
+                borderRadius: BorderRadius.circular(1.5),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    return Semantics(
+      key: SpotifyRequestScreen.statusRowKey,
+      container: true,
+      label: '$name, $line',
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: stacked
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  icon,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: nameStyle),
+                        Text(line, style: lineStyle),
+                        const SizedBox(height: 6),
+                        meter,
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  icon,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: name, style: nameStyle),
+                          TextSpan(text: ' · $line', style: lineStyle),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  meter,
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// Where a checklist step stands, and so its disc.
+enum _StepState { done, current, waiting, attention }
+
+/// One checklist step between hairlines (board r4 `.item3`): the state disc,
+/// the title (with "Optional" on the history steps), the status line, the
+/// actions at the right of that block, and the step's open body under it.
+///
+/// The step is one semantics container ("Step 1, Library, done, Synced 2
+/// Nov"); its actions and body stay reachable inside it.
+class _Step extends StatelessWidget {
+  const _Step({
+    required this.number,
+    required this.state,
+    required this.title,
+    this.optional = false,
+    this.status,
+    this.statusKind = StatusKind.muted,
+    this.actions = const [],
+    this.body,
+    this.isLast = false,
+  });
+
+  final int number;
+  final _StepState state;
+  final String title;
+  final bool optional;
+  final String? status;
+  final StatusKind statusKind;
+  final List<Widget> actions;
+  final Widget? body;
+  final bool isLast;
+
+  /// The disc and the column it sits in.
+  static const double disc = 20;
+  static const double discColumn = 22;
+  static const double gap = 12;
+
+  /// At this text scale, or under [stackWidth], the actions drop under the
+  /// status line rather than squeezing the title.
+  static const double stackScale = 1.3;
+  static const double stackWidth = 260;
+
+  String get _stateWord => switch (state) {
+    _StepState.done => 'done',
+    _StepState.current => 'to do',
+    _StepState.waiting => 'waiting',
+    _StepState.attention => 'needs attention',
+  };
+
+  String get semanticsLabel => [
+    'Step $number',
+    title,
+    if (optional) 'optional',
+    _stateWord,
+    ?status,
+  ].join(', ');
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final hairline = Container(height: 1, color: tokens.hairline);
+    return Semantics(
+      container: true,
+      // The actions and the body keep nodes of their own inside the step.
+      explicitChildNodes: true,
+      label: semanticsLabel,
+      child: Stack(
+        children: [
+          Positioned(left: 0, right: 0, top: 0, child: hairline),
+          if (isLast) Positioned(left: 0, right: 0, bottom: 0, child: hairline),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: LayoutBuilder(
+              builder: (context, constraints) => _content(
+                context,
+                stacked:
+                    constraints.maxWidth < stackWidth ||
+                    MediaQuery.textScalerOf(context).scale(1) >= stackScale,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _content(BuildContext context, {required bool stacked}) {
+    final tokens = context.tokens;
+    final scaler = MediaQuery.textScalerOf(context);
+    final titleStyle = TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.w600,
+      height: 1.3,
+      color: tokens.text,
+    );
+    final statusStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      height: 1.3,
+      color: switch (statusKind) {
+        StatusKind.ok => tokens.okInk,
+        StatusKind.warn => tokens.warnInk,
+        StatusKind.err => tokens.errInk,
+        _ => tokens.muted,
+      },
+    );
+    final block = ExcludeSemantics(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(text: title, style: titleStyle),
+                if (optional)
+                  TextSpan(
+                    text: '  Optional',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: tokens.muted,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (status != null) ...[
+            const SizedBox(height: 1),
+            Text(status!, style: statusStyle),
+          ],
+        ],
+      ),
+    );
+
+    // The block's height beside a 44 pt action, so the disc can sit level
+    // with the title rather than with the block's middle.
+    final titleLine = scaler.scale(15) * 1.3;
+    final blockHeight =
+        titleLine + (status == null ? 0 : 1 + scaler.scale(12) * 1.3);
+    final besideActions = actions.isNotEmpty && !stacked;
+    final blockTop = besideActions
+        ? ((MixtapeMetrics.minTarget - blockHeight) / 2).clamp(0.0, 44.0)
+        : 0.0;
+    // The actions' own centre lifted to the title line (board `.hd`
+    // aligns them on its baseline); their 44 pt targets keep their size.
+    final lift = besideActions
+        ? -((blockHeight - titleLine) / 2).clamp(0.0, 44.0)
+        : 0.0;
+
+    final header = besideActions
+        ? Row(
+            children: [
+              Expanded(child: block),
+              const SizedBox(width: 8),
+              Transform.translate(
+                offset: Offset(8, lift),
+                child: Row(mainAxisSize: MainAxisSize.min, children: actions),
+              ),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              block,
+              if (actions.isNotEmpty)
+                // The actions' own 8 pt inset, pulled back so the first word
+                // lines up with the title.
+                Transform.translate(
+                  offset: const Offset(-8, 0),
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: actions,
+                  ),
+                ),
+            ],
+          );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: discColumn,
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: blockTop + ((titleLine - disc) / 2).clamp(0.0, 20.0),
+            ),
+            child: ExcludeSemantics(child: _StepDisc(state, number)),
+          ),
+        ),
+        const SizedBox(width: gap),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              header,
+              if (body != null) ...[const SizedBox(height: 4), body!],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The 20 pt state disc: a green check when done, the plum number for the
+/// step to do now, a grey number while it waits, an amber "!" when it needs
+/// attention.
+class _StepDisc extends StatelessWidget {
+  const _StepDisc(this.state, this.number);
+
+  final _StepState state;
+  final int number;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    const size = _Step.disc;
+    final numberStyle = TextStyle(
+      fontSize: 10.5,
+      fontWeight: FontWeight.w700,
+      height: 1,
+      color: state == _StepState.current ? tokens.plum : tokens.muted,
+    );
+    return switch (state) {
+      _StepState.done => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: statusOkGlyph(context),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          CupertinoIcons.checkmark_alt,
+          size: 13,
+          color: Colors.white,
+        ),
+      ),
+      _StepState.attention => Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: statusWarnGlyph(context),
+          shape: BoxShape.circle,
+        ),
+        child: const Text(
+          '!',
+          textScaler: TextScaler.noScaling,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            height: 1,
+            color: Colors.white,
+          ),
+        ),
+      ),
+      _ => Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            width: 1.5,
+            color: state == _StepState.current
+                ? tokens.plum
+                : tokens.muted.withValues(alpha: 0.45),
+          ),
+        ),
+        child: Text(
+          '$number',
+          textScaler: TextScaler.noScaling,
+          style: numberStyle,
+        ),
+      ),
+    };
+  }
+}
+
+/// "Sync Apple Music" as an icon: the two-arrow glyph drawn 30 pt in a 44 pt
+/// target (board r4, A1), named for VoiceOver.
+class _SyncIconButton extends StatelessWidget {
+  const _SyncIconButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  static const String label = 'Sync Apple Music';
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: label,
+    // excludeSemantics drops the InkResponse's tap action; declare it here.
+    onTap: onPressed,
+    excludeSemantics: true,
+    child: InkResponse(
+      key: SpotifyRequestScreen.appleSyncKey,
+      onTap: onPressed,
+      radius: 22,
+      child: SizedBox.square(
+        dimension: MixtapeMetrics.minTarget,
+        child: Center(
+          child: SizedBox.square(
+            dimension: 30,
+            child: Icon(
+              CupertinoIcons.arrow_2_circlepath,
+              size: 20,
+              color: context.tokens.plum,
+            ),
+          ),
+        ),
+      ),
     ),
   );
+}
 
-  Widget _row(BuildContext context, {required bool stacked}) {
+/// A sync in flight: the thin plum bar under the status line.
+class _SyncProgress extends StatelessWidget {
+  const _SyncProgress({required this.progress});
+
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return DecoratedBox(
-      key: SpotifyRequestScreen.statusRowKey,
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: tokens.hairline)),
-      ),
+    return Align(
+      alignment: Alignment.centerLeft,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 64),
+        constraints: const BoxConstraints(maxWidth: 220),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: [
-              mark,
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: tokens.rowTitle.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    StatusWord(
-                      key: statusKey,
-                      label: status.label,
-                      kind: status.kind,
-                    ),
-                    if (detail != null) Text(detail!, style: tokens.meta),
-                    if (stacked && action != null)
-                      // The action's own 8 pt inset, pulled back so its word
-                      // lines up with the title.
-                      Transform.translate(
-                        offset: const Offset(-8, 0),
-                        child: action!,
-                      ),
-                  ],
-                ),
-              ),
-              if (!stacked && action != null) action!,
-            ],
+          padding: const EdgeInsets.only(top: 4),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 4,
+            borderRadius: BorderRadius.circular(2),
+            color: tokens.plum,
+            backgroundColor: tokens.hairline,
           ),
         ),
       ),
@@ -632,7 +1197,56 @@ class _StatusRow extends StatelessWidget {
   }
 }
 
-/// A flush disclosure row between hairlines: the request steps live under it.
+/// A step's one line of explanation (board r4 `.item3 p`).
+class _Lede extends StatelessWidget {
+  const _Lede(this.text, {this.bottom = 8});
+
+  final String text;
+  final double bottom;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(bottom: bottom),
+    child: Text(
+      text,
+      style: context.tokens.secondary.copyWith(fontSize: 12.5, height: 1.38),
+    ),
+  );
+}
+
+/// The muted one-liner under a file action (board r4 `.fnote2`).
+class _Note extends StatelessWidget {
+  const _Note(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) =>
+      Text(text, style: context.tokens.meta.copyWith(height: 1.4));
+}
+
+/// The file glyph on a chip.
+class _FileGlyph extends StatelessWidget {
+  const _FileGlyph();
+
+  @override
+  Widget build(BuildContext context) =>
+      Icon(CupertinoIcons.arrow_up_doc, size: 15, color: context.tokens.plum);
+}
+
+/// A glyph on a tape button, in the tape's ink.
+class _TapeGlyph extends StatelessWidget {
+  const _TapeGlyph(this.icon);
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) =>
+      Icon(icon, size: 18, color: context.tokens.tapeInk);
+}
+
+/// The fold inside a step: a flush row whose words say what is under it
+/// (board r4 `.how3`), a 44 pt target that says whether it is open.
 class _Disclosure extends StatelessWidget {
   const _Disclosure({
     required this.title,
@@ -649,45 +1263,43 @@ class _Disclosure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final hairline = BorderSide(color: tokens.hairline);
     return Semantics(
       button: true,
       expanded: open,
       child: InkWell(
         key: SpotifyRequestScreen.goDeeperKey,
         onTap: onTap,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            border: Border(
-              top: hairline,
-              bottom: open ? BorderSide.none : hairline,
-            ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minHeight: MixtapeMetrics.minTarget,
           ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 52),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: tokens.rowTitle),
-                        Text(subtitle, style: tokens.meta),
-                      ],
+          child: Row(
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.end,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w500,
+                        height: 1.25,
+                        color: tokens.text,
+                      ),
                     ),
-                  ),
-                  Icon(
-                    open
-                        ? CupertinoIcons.chevron_up
-                        : CupertinoIcons.chevron_down,
-                    size: 18,
-                    color: tokens.muted,
-                  ),
-                ],
+                    Text(subtitle, style: tokens.meta.copyWith(height: 1.35)),
+                  ],
+                ),
               ),
-            ),
+              const SizedBox(width: 10),
+              Icon(
+                open ? CupertinoIcons.chevron_up : CupertinoIcons.chevron_down,
+                size: 14,
+                color: tokens.muted,
+              ),
+            ],
           ),
         ),
       ),
@@ -804,14 +1416,15 @@ class _NumberedRow extends StatelessWidget {
   final bool isFirst;
   final Widget child;
 
-  /// The number column's width, and so the hairline's inset.
-  static const double numberColumn = 28;
+  /// The number column's width, and so the hairline's inset (board r4
+  /// `.step`).
+  static const double numberColumn = 24;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: MixtapeMetrics.minTarget),
+      constraints: const BoxConstraints(minHeight: 32),
       child: Stack(
         children: [
           if (!isFirst)
@@ -822,7 +1435,7 @@ class _NumberedRow extends StatelessWidget {
               child: Container(height: 1, color: tokens.hairline),
             ),
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
+            padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -864,7 +1477,7 @@ class _StepText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final body = tokens.body;
+    final body = _stepStyle(context);
     return Text.rich(
       TextSpan(
         style: body,

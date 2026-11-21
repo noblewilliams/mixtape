@@ -1,18 +1,11 @@
-/// "Your music": every connected source with what landed and when, "Sync
-/// Apple Music" on the Apple Music row, "Import again" on Spotify rows, and
-/// "Remove" on the export rows
-/// (`docs/mockups/approved/2026-09-04-web-your-music-integration.md`,
-/// restyled for `docs/mockups/approved/2026-09-17-mobile-shell.md` → Library
-/// by plan task 8.1).
+/// What the retired "Your music" screen shared with the rest of the app: the
+/// pushed Library scaffold, a source's status word and detail, and the removal
+/// flow with its copy (September 4 approval,
+/// `docs/mockups/approved/2026-09-04-web-your-music-integration.md`).
 ///
-/// Reads the same source rows the onboarding state carries (they are the
-/// `/me/music-sources` rows), so Home's waiting card, the Library tab and this
-/// list never disagree. Pushed from the Library tab's "Add your music" button.
-///
-/// Sync is Apple Music's alone, so it lives on Apple Music's row and says so
-/// (founder, 2026-11-09): a bare "Sync" in the title read as syncing
-/// everything, Spotify included. Without a live Apple library a "Sync Apple
-/// Music" row stands beside "Add Spotify music".
+/// The screen itself is gone (add your music board r3/r4, 2026-11-21): the
+/// Library tab's "Add music" opens Add your music, where each service's steps
+/// carry their own Sync, Import again, Replace and Remove.
 library;
 
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
@@ -28,29 +21,15 @@ import '../../data/listening/listening_models.dart';
 import '../format/import_format.dart';
 import '../format/source_labels.dart';
 import '../providers/onboarding_provider.dart';
-import '../theme/mixtape_theme.dart';
-import '../widgets/foundation/empty_state.dart';
-import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
-import '../widgets/foundation/section_word.dart';
-import '../widgets/foundation/service_marks.dart';
 import '../widgets/foundation/status_word.dart';
-import '../widgets/foundation/tape_button.dart';
-import '../widgets/foundation/text_action.dart';
-import '../widgets/library_sync_dialog.dart';
-import 'import_sheet.dart';
-import 'playlist_browser_screen.dart';
-import 'spotify_request_screen.dart';
 
-/// What Library and Your music say when the sources fail to load.
+/// What Library says when the sources fail to load.
 const String kSourcesLoadFailedTitle = 'Couldn’t load your music';
 
 const _removeFailedMessage = "couldn't remove — try again";
-
-/// The leading mark's side on a source row (board L1: `--artw:44px`).
-const double kSourceMarkSize = 44;
 
 /// A pushed Library screen: the gradient, the glass Back cluster pinned at
 /// the top-left by [LargeTitleScaffold.leading], and the large title under it.
@@ -140,233 +119,8 @@ String? sourceDetailFor(MusicSource source) {
   return ledger == null ? when : '$when · $ledger';
 }
 
-/// The 44 pt square mark: the Apple glyph for Apple sources, a note for the
-/// rest.
-class SourceMark extends StatelessWidget {
-  const SourceMark({super.key, required this.source});
-
-  final String source;
-
-  @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: kSourceMarkSize,
-    child: Center(
-      child: source.startsWith('apple')
-          ? const AppleMusicMark(size: 24)
-          : const SpotifyMark(size: 24),
-    ),
-  );
-}
-
-/// A source's subtitle: the status word, then the detail after a separator.
-///
-/// The separator is its own [Text] so the detail line stays one string, and
-/// the [Wrap] lets both fall to a second line at large text sizes.
-class SourceSubtitle extends StatelessWidget {
-  const SourceSubtitle({
-    super.key,
-    required this.source,
-    required this.state,
-    this.statusKey,
-  });
-
-  final MusicSource source;
-  final OnboardingState state;
-  final Key? statusKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final status = sourceStatusFor(source, state);
-    final detail = sourceDetailFor(source);
-    final meta = tokens.meta.copyWith(fontSize: 12.5, color: tokens.muted);
-
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        StatusWord(key: statusKey, label: status.label, kind: status.kind),
-        if (detail != null) ...[
-          Text(' · ', style: meta),
-          Text(detail, style: meta),
-        ],
-      ],
-    );
-  }
-}
-
-class MusicSourcesScreen extends ConsumerWidget {
-  const MusicSourcesScreen({super.key});
-
-  static const Key backKey = Key('sources-back');
-
-  /// "Sync Apple Music": on the Apple Music row once there is one, its own
-  /// row before that, and a text action in the empty state.
-  static const Key syncKey = Key('sources-sync');
-  static const String syncLabel = 'Sync Apple Music';
-
-  Future<void> _import(BuildContext context, WidgetRef ref) =>
-      openImportFlow(context, ref);
-
-  Future<void> _addSpotify(BuildContext context, WidgetRef ref) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        // The row names the service, so it opens on that pane.
-        builder: (_) => const SpotifyRequestScreen(
-          initialSegment: SpotifyRequestScreen.spotifySegment,
-        ),
-      ),
-    );
-    if (context.mounted) {
-      await ref.read(onboardingProvider.notifier).refresh();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final onboarding = ref.watch(onboardingProvider);
-    return LibraryBackScaffold(
-      title: 'Your music',
-      backKey: backKey,
-      trailing: GlassCluster(
-        children: [
-          GlassButton(
-            key: const Key('browse-playlists'),
-            icon: Icons.queue_music_rounded,
-            label: 'Browse playlists',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const PlaylistBrowserScreen()),
-            ),
-          ),
-        ],
-      ),
-      slivers: [
-        // Riverpod retries a failed provider, which parks it back in loading
-        // with the error still attached: failure is "no value and an error".
-        if (onboarding.hasError && !onboarding.hasValue)
-          EmptyStateSliver(
-            child: LoadErrorState(
-              title: kSourcesLoadFailedTitle,
-              retryKey: const Key('sources-retry'),
-              error: onboarding.error,
-              onRetry: () => ref.read(onboardingProvider.notifier).refresh(),
-            ),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.only(
-              bottom: LibraryBackScaffold.bottomInset,
-            ),
-            sliver: SliverToBoxAdapter(child: _body(context, ref, onboarding)),
-          ),
-      ],
-    );
-  }
-
-  Widget _body(
-    BuildContext context,
-    WidgetRef ref,
-    AsyncValue<OnboardingState> onboarding,
-  ) {
-    final state = onboarding.value;
-    if (state == null) {
-      // The same quiet stand-in rows the playlists use while they load.
-      return const Padding(
-        padding: EdgeInsets.only(top: 16),
-        child: PlaylistSkeletonRows(rows: 3),
-      );
-    }
-    if (state.sources.isEmpty) {
-      return _Centred(
-        children: [
-          Text(
-            'Nothing connected yet.',
-            key: const Key('sources-empty'),
-            textAlign: TextAlign.center,
-            style: context.tokens.body,
-          ),
-          const SizedBox(height: 8),
-          TextAction(
-            key: syncKey,
-            label: syncLabel,
-            onPressed: () => showLibrarySync(context, ref),
-          ),
-          TextAction(
-            key: const Key('sources-add-spotify'),
-            label: 'Add Spotify music',
-            onPressed: () => _addSpotify(context, ref),
-          ),
-          const SizedBox(height: 16),
-          TapeButton(
-            key: const Key('sources-import'),
-            label: 'Choose Spotify files',
-            onPressed: () => _import(context, ref),
-          ),
-        ],
-      );
-    }
-
-    final hasSpotify = state.sources.any(
-      (source) => source.source == 'spotify_export',
-    );
-    final hasAppleLibrary = appleLiveSource(state) != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SectionWord('Sources'),
-        FlushList(
-          children: [
-            for (final source in state.sources)
-              SourceRow(
-                key: Key('source-${source.source}'),
-                source: source,
-                state: state,
-                onSync: source.source == 'apple_live'
-                    ? () => showLibrarySync(context, ref)
-                    : null,
-                onImportAgain: source.source == 'spotify_export'
-                    ? () => _import(context, ref)
-                    : null,
-                onRemove:
-                    source.source == 'spotify_export' ||
-                        source.source == 'apple_export'
-                    ? () => removeSourceFlow(context, ref, source)
-                    : null,
-              ),
-            if (!hasAppleLibrary)
-              FlushRow(
-                key: syncKey,
-                leading: const SizedBox.square(
-                  dimension: kSourceMarkSize,
-                  child: Center(
-                    child: Icon(CupertinoIcons.arrow_2_circlepath, size: 22),
-                  ),
-                ),
-                leadingSize: kSourceMarkSize,
-                title: syncLabel,
-                subtitle: 'Bring in your songs and playlists',
-                onTap: () => showLibrarySync(context, ref),
-              ),
-            if (!hasSpotify)
-              FlushRow(
-                key: const Key('sources-add-spotify'),
-                leading: const SizedBox.square(
-                  dimension: kSourceMarkSize,
-                  child: Center(child: Icon(Icons.add, size: 22)),
-                ),
-                leadingSize: kSourceMarkSize,
-                title: 'Add Spotify music',
-                subtitle: 'Bring a Spotify export across',
-                onTap: () => _addSpotify(context, ref),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-/// Confirm, delete, and refresh — the September 4 removal flow, shared with
-/// the Library tab's source sheet.
+/// Confirm, delete, and refresh — the September 4 removal flow, behind each
+/// Remove on Add your music.
 ///
 /// A failed delete keeps the row and says so on the nearest
 /// [ScaffoldMessenger].
@@ -393,7 +147,7 @@ Future<void> removeSourceFlow(
   await ref.read(onboardingProvider.notifier).refresh();
 }
 
-/// The removal confirmation, shared with the Library tab's source sheet.
+/// The removal confirmation.
 ///
 /// Copy unchanged from the September 4 approval: what goes, what stays.
 Future<bool?> confirmSourceRemoval(BuildContext context, MusicSource source) =>
@@ -429,84 +183,3 @@ String removalCopyFor(MusicSource source) => switch (source.source) {
     'Deletes your listening history, liked songs, artists, and playlists from Mixtape. The '
         'DJ forgets nothing you told it in the interview, and the songs you pasted stay.',
 };
-
-/// One source as a flush row, with its actions underneath.
-class SourceRow extends StatelessWidget {
-  const SourceRow({
-    super.key,
-    required this.source,
-    required this.state,
-    this.onSync,
-    required this.onImportAgain,
-    required this.onRemove,
-  });
-
-  final MusicSource source;
-  final OnboardingState state;
-
-  /// "Sync Apple Music", on the live Apple library's row.
-  final VoidCallback? onSync;
-  final VoidCallback? onImportAgain;
-  final VoidCallback? onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final actions = <Widget>[
-      if (onSync != null)
-        TextAction(
-          key: MusicSourcesScreen.syncKey,
-          label: MusicSourcesScreen.syncLabel,
-          onPressed: onSync,
-        ),
-      if (onImportAgain != null)
-        TextAction(
-          key: Key('import-again-${source.source}'),
-          label: 'Import again',
-          onPressed: onImportAgain,
-        ),
-      if (onRemove != null)
-        TextAction(
-          key: Key('remove-${source.source}'),
-          label: 'Remove',
-          quiet: true,
-          onPressed: onRemove,
-        ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        FlushRow(
-          leading: SourceMark(source: source.source),
-          leadingSize: kSourceMarkSize,
-          title: sourceName(source),
-          subtitleWidget: SourceSubtitle(
-            source: source,
-            state: state,
-            statusKey: Key('source-status-${source.source}'),
-          ),
-        ),
-        if (actions.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(
-              left: kSourceMarkSize + FlushRow.gap - 8,
-              bottom: 4,
-            ),
-            child: Wrap(children: actions),
-          ),
-      ],
-    );
-  }
-}
-
-class _Centred extends StatelessWidget {
-  const _Centred({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 64),
-    child: Column(mainAxisSize: MainAxisSize.min, children: children),
-  );
-}

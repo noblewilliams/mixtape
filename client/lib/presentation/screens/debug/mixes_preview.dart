@@ -41,6 +41,8 @@ import '../../providers/capabilities_provider.dart';
 import '../../providers/dj_providers.dart';
 import '../../providers/dj_status_provider.dart';
 import '../../providers/mix_activity_provider.dart';
+import '../../providers/onboarding_provider.dart';
+import '../../../data/listening/listening_models.dart';
 import '../../providers/playlist_context_provider.dart';
 import '../mixes_screen.dart';
 import '../shell/shell_screen.dart';
@@ -91,6 +93,10 @@ class _MixesPreviewState extends State<MixesPreview> {
       ...updatePreviewOverrides(
         const String.fromEnvironment('MIXTAPE_PREVIEW'),
       ),
+      // `--dart-define=MIXTAPE_PREVIEW_SOURCES=apple|spotify|both|history`:
+      // Library and Add your music on made-up sources.
+      if (_previewSources.isNotEmpty)
+        onboardingProvider.overrideWith(_PreviewOnboarding.new),
     ],
   );
 
@@ -619,4 +625,56 @@ class _PreviewContextApi implements PlaylistContextApi {
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('not wired in the Mixes preview');
+}
+
+const String _previewSources = String.fromEnvironment(
+  'MIXTAPE_PREVIEW_SOURCES',
+);
+
+/// Made-up music sources for the Library and Add your music previews.
+class _PreviewOnboarding extends OnboardingNotifier {
+  @override
+  Future<OnboardingState> build() async {
+    final synced = DateTime(2026, 11, 2);
+    final apple = _previewSources != 'spotify';
+    final spotify = _previewSources == 'spotify' || _previewSources == 'both';
+    return OnboardingState(
+      userId: 'preview',
+      sources: [
+        if (apple)
+          MusicSource(
+            source: 'apple_live',
+            connectedAt: synced,
+            lastImportedAt: synced,
+            ledgerFrom: null,
+            ledgerTo: null,
+          ),
+        if (_previewSources == 'history')
+          MusicSource(
+            source: 'apple_export',
+            connectedAt: DateTime(2026, 10, 28),
+            lastImportedAt: DateTime(2026, 10, 28),
+            ledgerFrom: '2019-03-01',
+            ledgerTo: '2026-10-20',
+          ),
+        if (spotify)
+          MusicSource(
+            source: 'spotify_export',
+            connectedAt: DateTime(2026, 10, 12),
+            lastImportedAt: DateTime(2026, 10, 12),
+            ledgerFrom: '2018-01-01',
+            ledgerTo: '2026-10-01',
+            packages: const ['spotify_exportify'],
+          ),
+      ],
+      hasLibrary: apple,
+      chosenService: apple ? 'apple' : 'spotify',
+      markedRequestedAt: null,
+      interviewCompletedAt: synced,
+      importCompletedAt: synced,
+    );
+  }
+
+  @override
+  Future<bool> refresh() async => true;
 }

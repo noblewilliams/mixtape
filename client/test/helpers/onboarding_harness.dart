@@ -121,6 +121,9 @@ ProviderContainer onboardingContainer({
   FakeOpenedArchiveSource? opened,
   String timeZone = 'Africa/Lagos',
   ExportDiagnoser? diagnoser,
+  // Further overrides (a running library sync); `Override` is not exported
+  // by flutter_riverpod, so the list is spread into the container's own.
+  List<dynamic> extra = const [],
 }) {
   final container = ProviderContainer(
     overrides: [
@@ -138,6 +141,7 @@ ProviderContainer onboardingContainer({
           .overrideWithValue(prefs ?? InMemoryServicePreferenceStore()),
       funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
       linkOpenerProvider.overrideWithValue((links ?? FakeLinkOpener()).call),
+      ...extra,
     ],
   );
   addTearDown(container.dispose);

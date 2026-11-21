@@ -2165,3 +2165,49 @@ app only closes on an explicit tap, with the reason given to VoiceOver.
 **Reopens if:** App Review rejects it (fall back to apply-on-next-open: drop
 the tap and keep "Updated" on the next start), or Shorebird ships an in-process
 restart that loads a patch.
+
+## 2026-11-21 — Add your music is a checklist, Library sources are rows, and the service icons are the brands' own files
+
+From TestFlight 1.1.1 (14), the founder flagged three problems:
+
+- "Add your music" on Library opened Your music, not Add your music.
+- Add your music looked shabby.
+- The Apple Music and Spotify halves at the top of Library looked shabby too.
+
+After four board revisions (approval
+`docs/mockups/approved/2026-11-21-add-your-music-redesign.md`), the result is
+this:
+
+- **Library:** a small "Add music" pill beside the title opens Add your music,
+  and Your music is retired. Its Remove actions move into Add your music.
+  Sources are two flush 44 pt rows.
+- **Add your music:** the native glass segmented toggle (the Mixes one), a
+  one-line service header ("1 of 2 added"), then a two-step checklist per
+  service:
+  - Apple Music: Library, then Listening history (optional).
+  - Spotify: Saved music, then Listening history (optional).
+
+  Done steps fold to one line, with their actions at the right. The Apple
+  Library step's sync is an icon. The Apple file picker lives inside the
+  "Get your Apple file" fold.
+
+**Service icons.** The founder asked for the real files instead of drawn
+marks, so these two screens use the brands' official icons:
+
+- Apple's colour icon, from the Apple Music Icon 2020 pack.
+- Spotify's one-colour icon, from the 2024 icon pack. It is black on light
+  and white on dark, because Spotify allows the green icon only on pure black
+  or white.
+
+Neither is tinted or greyed, because both brands forbid alteration, so a
+service that isn't added says "Not added" in words. The original files are in
+`docs/brand/`. The app embeds their SVG source as Dart strings rendered with
+`flutter_svg`, because Shorebird patches carry Dart, not assets.
+
+This supersedes the 2026-09-18 single-tone mark rule for these two screens.
+Other screens keep the drawn marks until they are revisited. The ok and warn
+status glyphs become filled symbols app-wide.
+
+**Reopens if:** either brand objects to the use, or the founder wants the
+official icons on the other screens (first-run choose service, the music
+door).

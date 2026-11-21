@@ -1,5 +1,8 @@
 /// Status as a coloured word, never a box (`.status` in
-/// `docs/mockups/2026-09-17-mobile-shell-r3.html`).
+/// `docs/mockups/2026-09-17-mobile-shell-r3.html`). Since the add your music
+/// board (`docs/mockups/2026-11-21-add-your-music-restyle-r3.html`, `.sg`)
+/// ok and warn carry SF-style filled glyphs in their own green and amber,
+/// while the word keeps its status ink.
 library;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
@@ -11,10 +14,21 @@ import '../../theme/mixtape_theme.dart';
 /// word that marks rather than warns (the arrangement's "New to you").
 enum StatusKind { ok, warn, err, muted, accent }
 
+/// The filled check's green, light and dark (board r3 `.sg.okf`); also the
+/// done disc and meter on Add your music.
+Color statusOkGlyph(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0xFF4CD07A)
+    : const Color(0xFF34A853);
+
+/// The filled triangle's amber, light and dark (board r3 `.sg.wf`); also the
+/// needs-attention disc on Add your music.
+Color statusWarnGlyph(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0xFFF1C04A)
+    : const Color(0xFFE0A020);
+
 /// An inline coloured word with an optional 14 pt mark.
-///
-/// Warn carries no mark by default: the board reserves the icon for the states
-/// a reader must act on.
 class StatusWord extends StatelessWidget {
   const StatusWord({
     super.key,
@@ -36,9 +50,9 @@ class StatusWord extends StatelessWidget {
   };
 
   IconData? get _glyph => switch (kind) {
-    StatusKind.ok => CupertinoIcons.check_mark_circled,
+    StatusKind.ok => CupertinoIcons.checkmark_circle_fill,
     StatusKind.err => CupertinoIcons.exclamationmark_circle,
-    StatusKind.warn => null,
+    StatusKind.warn => CupertinoIcons.exclamationmark_triangle_fill,
     StatusKind.muted => null,
     StatusKind.accent => null,
   };
@@ -47,6 +61,11 @@ class StatusWord extends StatelessWidget {
   Widget build(BuildContext context) {
     final ink = _ink(context.tokens);
     final glyph = icon ? _glyph : null;
+    final glyphInk = switch (kind) {
+      StatusKind.ok => statusOkGlyph(context),
+      StatusKind.warn => statusWarnGlyph(context),
+      _ => ink,
+    };
 
     return Semantics(
       label: label,
@@ -55,7 +74,7 @@ class StatusWord extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (glyph != null) ...[
-            Icon(glyph, size: 14, color: ink),
+            Icon(glyph, size: 14, color: glyphInk),
             const SizedBox(width: 5),
           ],
           Flexible(

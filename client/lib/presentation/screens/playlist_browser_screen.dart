@@ -2,8 +2,9 @@
 /// (`docs/mockups/approved/2026-09-04-web-your-music-integration.md`,
 /// restyled for the approved shell by plan task 8.1).
 ///
-/// Still pushed from Your music; the Library tab shows the same rows inline
-/// through [playlistCollectionSliver].
+/// Your music, which pushed it, is retired (2026-11-21), so nothing in the
+/// app opens this screen now; the Library tab shows the same rows inline
+/// through [playlistCollectionSliver], which lives here.
 library;
 
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';

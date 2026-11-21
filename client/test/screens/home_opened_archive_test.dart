@@ -10,7 +10,7 @@ import 'package:mixtape/presentation/providers/opened_archive_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/screens/import_sheet.dart';
-import 'package:mixtape/presentation/screens/music_sources_screen.dart';
+import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
@@ -247,7 +247,7 @@ void main() {
   );
 
   testWidgets(
-    'a handed file never stacks a second sheet over the one the sources screen opened, '
+    'a handed file never stacks a second sheet over the one Add your music opened, '
     'and waits while that review is still open',
     (tester) async {
       final opened = FakeOpenedArchiveSource();
@@ -257,8 +257,8 @@ void main() {
           onboarding: onboardingState(chosenService: 'spotify'),
         ),
         opened: opened,
-        // The picker comes first now, so the sources screen's sheet is the
-        // sheet over a file it actually read (smoke round seven, note 1).
+        // The picker comes first now, so Add your music's sheet is the sheet
+        // over a file it actually read (smoke round seven, note 1).
         picker: FakeArchivePicker(extendedArchive),
         importService: service,
       );
@@ -266,11 +266,11 @@ void main() {
       // The Library tab owns this entry now (task 2.2); what this case is
       // about is the one sheet, wherever it was opened from.
       Navigator.of(tester.element(find.byType(HomeScreen))).push(
-        MaterialPageRoute<void>(builder: (_) => const MusicSourcesScreen()),
+        MaterialPageRoute<void>(builder: (_) => const SpotifyRequestScreen()),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(MusicSourcesScreen), findsOneWidget);
-      await tester.tap(find.byKey(const Key('sources-import')));
+      expect(find.byType(SpotifyRequestScreen), findsOneWidget);
+      await tester.tap(find.byKey(const Key('choose-import-files')));
       await tester.pumpAndSettle();
       expect(find.byType(ImportSheet), findsOneWidget);
 
@@ -283,13 +283,13 @@ void main() {
         reason: 'one sheet, wherever it came from',
       );
 
-      // Put the sources screen's sheet away and go back: the review that is
+      // Put Add your music's sheet away and go back: the review that is
       // still open is a run in progress, so the handed file waits rather
       // than throwing it away, and the one sheet comes back to where the run
       // got to.
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(MusicSourcesScreen.backKey));
+      await tester.tap(find.byKey(const Key('request-back')));
       await tester.pumpAndSettle();
 
       expect(find.byType(ImportSheet), findsOneWidget);

@@ -3,21 +3,23 @@
 /// plan `docs/superpowers/plans/2026-09-17-native-design-implementation.md`
 /// task 8.1).
 ///
-/// The sources strip and the playlists the listener owns. The strip is one
-/// row of two halves, Apple Music and Spotify, each a mark, the service name
+/// The sources and the playlists the listener owns. The sources are two flush
+/// rows, Apple Music and Spotify, each the service's official icon, its name
 /// and where it stands; each opens Add your music on its own segment
-/// (approval `docs/mockups/approved/2026-11-03-library-sources.md`, which
-/// supersedes the More menu and the chip-row sources).
+/// (approval `docs/mockups/approved/2026-11-03-library-sources.md`, restyled
+/// by board L1 in `docs/mockups/2026-11-21-add-your-music-restyle-r3.html`,
+/// kept by r4).
 ///
-/// The title carries one labelled button, "Add your music", into Your music,
-/// where each source lives (founder, 2026-11-09). Sync is Apple Music's alone,
-/// so it sits with Apple Music there and on Add your music, never here.
+/// The title carries one glass pill, "Add music", beside it, into Add your
+/// music (r3; Your music is retired). Sync is Apple Music's alone, so it sits
+/// with Apple Music on Add your music, never here.
 ///
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root:
 /// pushes go to the nearest [Navigator] and it draws no app bar of its own.
 library;
 
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/cupertino.dart'
+    show CupertinoActivityIndicator, CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,17 +29,18 @@ import '../../providers/library_sync_provider.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../providers/playlist_providers.dart';
 import '../../theme/mixtape_theme.dart';
+import '../../widgets/foundation/brand_icons.dart';
 import '../../widgets/foundation/empty_state.dart';
 import '../../widgets/foundation/glass_cluster.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
 import '../../widgets/foundation/section_word.dart';
-import '../../widgets/foundation/service_marks.dart';
 import '../../widgets/foundation/status_word.dart';
 import '../../widgets/foundation/tape_button.dart';
 import '../../widgets/library_sync_dialog.dart';
 import '../first_run/first_run_flow.dart';
-import '../music_sources_screen.dart';
+import '../music_sources_screen.dart'
+    show kSourcesLoadFailedTitle, sourceStatusFor;
 import '../playlist_browser_screen.dart';
 import '../spotify_request_screen.dart';
 
@@ -50,7 +53,7 @@ class LibraryTab extends ConsumerStatefulWidget {
   /// [LargeTitleScaffold] already emits at the end of the slivers.
   static const double defaultBottomInset = 16;
 
-  /// The title's one button, "Add your music", which opens Your music.
+  /// The title's one button, "Add music", which opens Add your music.
   static const Key addMusicKey = Key('library-add-music');
 
   /// The no-sources empty state's action.
@@ -62,11 +65,12 @@ class LibraryTab extends ConsumerStatefulWidget {
   /// The skeleton shown while the sources are in flight.
   static const Key sourcesSkeletonKey = Key('library-sources-skeleton');
 
-  /// The strip's two halves.
+  /// The two source rows.
   static const Key appleSourceKey = Key('library-source-apple');
   static const Key spotifySourceKey = Key('library-source-spotify');
 
-  /// At this text scale the halves stack into full-width rows.
+  /// At this text scale a row's status drops under the service name and the
+  /// icons grow (board r3 `.phone.large .frow3`).
   static const double stackStripScale = 1.3;
 
   /// The empty state's words.
@@ -163,11 +167,11 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
         backgroundColor: Colors.transparent,
         body: LargeTitleScaffold(
           title: 'Library',
-          accessoriesBelowTitle: true,
           controller: _controller,
-          // Keep the full title above the action, including on narrow phones.
-          // With no sources the empty state's own "Add your music" is the way
-          // in, so the title does not offer a second one that goes elsewhere.
+          // Beside the title (board r3); at the largest text the scaffold
+          // gives it a row of its own. With no sources the empty state's own
+          // "Add your music" is the way in, so the title does not offer a
+          // second one that goes elsewhere.
           trailing: noSources
               ? null
               : FittedBox(
@@ -177,8 +181,9 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
                       GlassLabelButton(
                         key: LibraryTab.addMusicKey,
                         icon: CupertinoIcons.add,
-                        label: 'Add your music',
-                        onPressed: () => _push(const MusicSourcesScreen()),
+                        label: 'Add music',
+                        // The default segment rule picks the pane.
+                        onPressed: () => _push(const SpotifyRequestScreen()),
                       ),
                     ],
                   ),
@@ -254,8 +259,8 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
   }
 }
 
-/// The sources strip: Apple Music and Spotify side by side, or stacked at
-/// large text, flush on the background with a hairline under it.
+/// The sources: Apple Music over Spotify, flush rows with hairlines inset to
+/// the text (board r3 `.rows3`).
 class _SourcesStrip extends StatelessWidget {
   const _SourcesStrip({
     required this.state,
@@ -270,7 +275,7 @@ class _SourcesStrip extends StatelessWidget {
   final VoidCallback onSpotify;
 
   /// Apple: the library sync's own line; an account that only imported the
-  /// Apple history says so; nothing at all is an invitation.
+  /// Apple history says so; nothing at all is "Not added".
   ({StatusKind kind, String label})? get _appleStatus {
     MusicSource? export;
     for (final source in state.sources) {
@@ -293,156 +298,166 @@ class _SourcesStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = context.tokens;
     final stacked =
         MediaQuery.textScalerOf(context).scale(1) >= LibraryTab.stackStripScale;
-
-    final apple = _SourceHalf(
-      key: LibraryTab.appleSourceKey,
-      mark: AppleMusicMark(size: _SourceHalf.markSize, color: tokens.text),
-      emptyMark: AppleMusicMark(
-        size: _SourceHalf.markSize,
-        color: tokens.muted,
-      ),
-      name: 'Apple Music',
-      status: _appleStatus,
-      stacked: stacked,
-      onTap: onApple,
-    );
-    final spotify = _SourceHalf(
-      key: LibraryTab.spotifySourceKey,
-      mark: SpotifyMark(size: _SourceHalf.markSize, color: tokens.text),
-      emptyMark: SpotifyMark(size: _SourceHalf.markSize, color: tokens.muted),
-      name: 'Spotify',
-      status: _spotifyStatus,
-      stacked: stacked,
-      onTap: onSpotify,
-    );
-    final hairline = Container(height: 1, color: tokens.hairline);
+    final iconSize = stacked
+        ? _SourceRow.largeIconSize
+        : _SourceRow.smallIconSize;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 2),
+      padding: const EdgeInsets.only(top: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (stacked) ...[
-            apple,
-            hairline,
-            spotify,
-          ] else
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: apple),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
-                    ),
-                    child: Container(width: 1, color: tokens.hairline),
-                  ),
-                  Expanded(child: spotify),
-                ],
-              ),
-            ),
-          hairline,
+          _SourceRow(
+            key: LibraryTab.appleSourceKey,
+            icon: AppleMusicIcon(size: iconSize),
+            iconSize: iconSize,
+            name: 'Apple Music',
+            status: _appleStatus,
+            syncing: sync is SyncRunning,
+            stacked: stacked,
+            isFirst: true,
+            onTap: onApple,
+          ),
+          _SourceRow(
+            key: LibraryTab.spotifySourceKey,
+            icon: SpotifyIcon(size: iconSize),
+            iconSize: iconSize,
+            name: 'Spotify',
+            status: _spotifyStatus,
+            stacked: stacked,
+            isLast: true,
+            onTap: onSpotify,
+          ),
         ],
       ),
     );
   }
 }
 
-/// One service in the strip: its mark, its name and its status line, or
-/// "Add music" when nothing of it is in yet. The whole half is the button.
-class _SourceHalf extends StatelessWidget {
-  const _SourceHalf({
+/// One service: its official icon, its name, where it stands (or "Not
+/// added") and a chevron. The whole row is the button.
+class _SourceRow extends StatelessWidget {
+  const _SourceRow({
     super.key,
-    required this.mark,
-    required this.emptyMark,
+    required this.icon,
+    required this.iconSize,
     required this.name,
     required this.status,
     required this.stacked,
     required this.onTap,
+    this.syncing = false,
+    this.isFirst = false,
+    this.isLast = false,
   });
 
-  final Widget mark;
-  final Widget emptyMark;
+  final Widget icon;
+  final double iconSize;
   final String name;
   final ({StatusKind kind, String label})? status;
   final bool stacked;
+  final bool syncing;
+  final bool isFirst;
+  final bool isLast;
   final VoidCallback onTap;
 
-  static const double markSize = 28;
-  static const String addLabel = 'Add music';
+  /// The icon's side at 1x and at large text (board r3 `.frow3`).
+  static const double smallIconSize = 22;
+  static const double largeIconSize = 28;
+
+  /// The gap between the icon column and the name.
+  static const double gap = 12;
+
+  static const String notAddedLabel = 'Not added';
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final status = this.status;
-    final line = status == null
+    final Widget line = status == null
+        ? Text(
+            notAddedLabel,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: tokens.muted,
+            ),
+          )
+        : syncing
         ? Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(CupertinoIcons.add, size: 13, color: tokens.plum),
-              const SizedBox(width: 4),
+              const CupertinoActivityIndicator(radius: 6),
+              const SizedBox(width: 5),
               Flexible(
-                child: Text(
-                  addLabel,
-                  maxLines: stacked ? 2 : 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: tokens.plum,
-                  ),
-                ),
+                child: StatusWord(label: status.label, kind: status.kind),
               ),
             ],
           )
         : StatusWord(label: status.label, kind: status.kind);
+    final nameText = Text(
+      name,
+      style: tokens.rowTitle.copyWith(fontWeight: FontWeight.w500),
+    );
+    final hairline = Container(height: 1, color: tokens.hairline);
+    final inset = iconSize + gap;
 
     return Semantics(
       button: true,
-      label: '$name, ${status?.label ?? 'not added. $addLabel'}',
+      label: '$name, ${status?.label ?? 'not added'}',
+      // excludeSemantics drops the InkWell's own tap action; declare it here
+      // so VoiceOver can open the row.
+      onTap: onTap,
       excludeSemantics: true,
       child: InkWell(
         onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 62),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                status == null ? emptyMark : mark,
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        name,
-                        maxLines: stacked ? 2 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: tokens.rowTitle.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      line,
-                    ],
-                  ),
+        child: Stack(
+          children: [
+            if (!isFirst)
+              Positioned(left: inset, right: 0, top: 0, child: hairline),
+            if (isLast)
+              Positioned(left: inset, right: 0, bottom: 0, child: hairline),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: stacked ? 58 : MixtapeMetrics.minTarget,
+              ),
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: stacked ? 8 : 4),
+                child: Row(
+                  children: [
+                    SizedBox.square(dimension: iconSize, child: icon),
+                    const SizedBox(width: gap),
+                    Expanded(
+                      child: stacked
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                nameText,
+                                const SizedBox(height: 2),
+                                line,
+                              ],
+                            )
+                          : Row(
+                              children: [
+                                Expanded(child: nameText),
+                                const SizedBox(width: 12),
+                                Flexible(child: line),
+                              ],
+                            ),
+                    ),
+                    const SizedBox(width: 12),
+                    Icon(
+                      CupertinoIcons.chevron_right,
+                      size: stacked ? 16 : 13,
+                      color: tokens.muted,
+                    ),
+                  ],
                 ),
-                if (stacked)
-                  Icon(
-                    CupertinoIcons.chevron_right,
-                    size: 18,
-                    color: tokens.muted,
-                  ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
