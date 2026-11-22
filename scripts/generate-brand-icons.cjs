@@ -8,7 +8,7 @@ const sharp = require(process.env.SHARP_MODULE_PATH || 'sharp');
 const root = path.resolve(__dirname, '..');
 const appSource = path.join(root, 'assets/brand/app-icon.svg');
 // Mono artwork for the iOS tinted and clear home-screen appearances: grayscale on
-// black, kept dim so the system's glass rendering doesn't wash the label to white.
+// black, label mid-grey: too dark vanishes in clear mode, too light goes solid white.
 const tintedSource = path.join(root, 'assets/brand/app-icon-tinted.svg');
 const faviconSource = path.join(root, 'assets/brand/favicon.svg');
 const catalog = path.join(root, 'client/ios/Runner/Assets.xcassets/AppIcon.appiconset');

@@ -4,8 +4,10 @@ Approved September 25, 2026 in `docs/mockups/approved/2026-09-25-ui-polish.md`.
 
 - `app-icon.svg`: full-bleed right-reel crop, viewBox `108 22 78 78`.
 - `app-icon-tinted.svg`: mono variant of the same crop for the iOS tinted and clear
-  home-screen styles. Grayscale on black, label kept dark (#262626) so the glass
-  rendering doesn't turn it white; stripes and reel hub carry the highlights.
+  home-screen styles. Grayscale on black: clear mode turns luminance into glass
+  opacity, so anything under ~25% grey vanishes on device. The label sits at
+  mid-grey (#5c5c5c) so the cassette reads as frosted glass without going solid
+  white; stripes, reel and hub carry the highlights.
 - `favicon.svg`: simplified complete cassette for browser tabs and web shortcuts.
 
 Both derive from `web/public/tape.svg`; that full illustration remains unchanged.
