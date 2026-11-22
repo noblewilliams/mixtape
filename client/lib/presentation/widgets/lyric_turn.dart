@@ -29,6 +29,7 @@ import 'conversation_turn.dart'
 import 'foundation/cassette_tile.dart';
 import 'foundation/haptics.dart';
 import 'foundation/shimmer.dart';
+import 'mix_quote.dart';
 
 export 'conversation_turn.dart' show ConversationTurnKind;
 
@@ -118,12 +119,7 @@ class LyricTurn extends StatelessWidget {
         child: FractionallySizedBox(
           widthFactor: userMaxWidthFraction,
           alignment: Alignment.centerRight,
-          child: Text(
-            text,
-            key: userKey,
-            textAlign: TextAlign.right,
-            style: userStyle(tokens),
-          ),
+          child: _userLine(tokens),
         ),
       ),
       ConversationTurnKind.error => _FailedLine(
@@ -132,6 +128,28 @@ class LyricTurn extends StatelessWidget {
         resendEnabled: resendEnabled,
       ),
     };
+  }
+
+  /// The listener's words, under any songs they quoted ([QuotedSong]): the
+  /// quote lines are drawn as quotes, never as their `>` markup.
+  Widget _userLine(MixtapeTokens tokens) {
+    final split = splitQuotedMessage(text);
+    final words = Text(
+      split.text,
+      key: split.quotes.isEmpty ? userKey : null,
+      textAlign: TextAlign.right,
+      style: userStyle(tokens),
+    );
+    if (split.quotes.isEmpty) return words;
+    return Column(
+      key: userKey,
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        QuotedSongLines(quotes: split.quotes),
+        if (split.text.isNotEmpty) words,
+      ],
+    );
   }
 }
 
@@ -262,9 +280,7 @@ class DjWorkingPhrases {
       'Labelling the cassette',
       'Spooling it up',
     ]),
-    DjWorkingPhase(Duration(seconds: 50), [
-      'Still at the decks',
-    ]),
+    DjWorkingPhase(Duration(seconds: 50), ['Still at the decks']),
   ]);
 
   /// An album session's (board A1's line first: it says the catalogue check
@@ -441,9 +457,7 @@ class DjWorkingPhrases {
       case 'pressing':
         final count = step.count;
         if (count == null || count < 1) return null;
-        return count == 1
-            ? 'Pressing one song'
-            : 'Pressing $count songs';
+        return count == 1 ? 'Pressing one song' : 'Pressing $count songs';
     }
     return null;
   }

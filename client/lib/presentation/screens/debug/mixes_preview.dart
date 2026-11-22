@@ -448,15 +448,24 @@ class _PreviewApi
   }
 
   TurnResult _reply(String id) {
+    // A mix with a tape keeps it (one version on), so a turn sent from the
+    // tape can be watched landing there.
+    final tape = id == 'a0' || id == 'a1'
+        ? null
+        : _withTape(
+            _sessions.firstWhere((s) => s.id == id),
+            DateTime.now(),
+          );
     return TurnResult(
       djMessage: DjMessage(
         id: '$id-${DateTime.now().millisecondsSinceEpoch}',
         role: 'dj',
         content: 'Here is a made-up reply: the preview has no DJ.',
         createdAt: DateTime.now(),
+        queueVersion: tape == null ? null : 3,
       ),
-      queue: const [],
-      queueVersion: 0,
+      queue: tape?.queue ?? const [],
+      queueVersion: tape == null ? 0 : 3,
     );
   }
 

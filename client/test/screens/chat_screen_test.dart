@@ -40,6 +40,7 @@ import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
+import 'package:mixtape/presentation/widgets/mix_quote.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
@@ -784,6 +785,57 @@ void main() {
 
       expect(find.byKey(MixEnergySummary.lineKey), findsOneWidget);
       expect(find.text('Build, then settle · limited coverage'), findsOneWidget);
+    });
+
+    testWidgets('a quoted song reads as a quote, not as markup', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [
+          _msg('m1', 'user', '> Terminator — Asake\nfeels out of place'),
+          _msg('m2', 'dj', 'Swapped it.', queueVersion: 2),
+        ],
+        queue: [_track(0)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      expect(find.byKey(QuotedSongLines.lineKey), findsOneWidget);
+      expect(find.text('Terminator · Asake'), findsOneWidget);
+      expect(find.text('feels out of place'), findsOneWidget);
+      expect(find.textContaining('>'), findsNothing);
+    });
+
+    testWidgets('the energy line wears the shape it names', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [_msg('m1', 'dj', 'here you go', queueVersion: 2)],
+        queue: [_track(0)],
+      );
+      final container = ProviderContainer(
+        overrides: [
+          mixEnergyProvider.overrideWith(
+            (ref, key) async => <String, dynamic>{
+              'energyArc': 'steady',
+              'energyJourney': {'status': 'mixed'},
+            },
+          ),
+          tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
+          djApiProvider.overrideWithValue(api),
+          authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
+          playbackProvider.overrideWithValue(
+            PlaybackController(playback.FakeApi(), playback.FakeBridge()),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+
+      expect(find.text('Steady · a gentler journey'), findsOneWidget);
+      final glyph = tester.widget<EnergyShapeGlyph>(
+        find.byKey(EnergyLine.glyphKey),
+      );
+      expect(glyph.arc, EnergyArc.steady);
     });
 
     testWidgets('no current marker when the current turn emptied the queue', (tester) async {

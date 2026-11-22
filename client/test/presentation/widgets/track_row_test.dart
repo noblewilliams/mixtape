@@ -4,7 +4,6 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
-import 'package:mixtape/presentation/widgets/foundation/reason_band.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/track_row.dart';
 
@@ -125,15 +124,15 @@ void main() {
       ),
     );
 
-    expect(find.byType(ReasonBand), findsNothing);
+    expect(find.byKey(TrackRow.reasonKey('t1')), findsNothing);
     await tester.tap(find.byKey(TrackRow.rowKey('t1')));
     await tester.pumpAndSettle();
-    expect(find.byType(ReasonBand), findsOneWidget);
+    expect(find.byKey(TrackRow.reasonKey('t1')), findsOneWidget);
     expect(find.text('Quiet opener, matches "tired"'), findsOneWidget);
 
     await tester.tap(find.byKey(TrackRow.rowKey('t1')));
     await tester.pumpAndSettle();
-    expect(find.byType(ReasonBand), findsNothing);
+    expect(find.byKey(TrackRow.reasonKey('t1')), findsNothing);
   });
 
   testWidgets('a reasonless row reveals the DJ-has-nothing line', (

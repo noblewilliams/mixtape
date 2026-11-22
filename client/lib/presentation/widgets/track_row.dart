@@ -9,13 +9,12 @@ import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import '../../data/dj/dj_models.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/haptics.dart';
-import 'foundation/reason_band.dart';
 import 'foundation/square_art.dart';
 import 'foundation/status_word.dart';
 import 'playlist_artwork.dart' show playlistArtworkColor, playlistArtworkUrl;
 
-/// Number, 48 pt square art, title, artist and a drag grip; tapping reveals
-/// the DJ's note on a [ReasonBand] underneath.
+/// Number, 48 pt square art, title, artist and a drag grip; tapping opens
+/// the DJ's note underneath ([TrackNote]).
 ///
 /// The row is presentational: it neither owns the expanded flag nor posts the
 /// move — [QueueScreen] holds both, because a move has to resolve against the
@@ -34,7 +33,12 @@ class TrackRow extends StatelessWidget {
     this.onMoveUp,
     this.onMoveDown,
     this.showGrip = true,
+    this.showHairline = true,
   });
+
+  /// False while this row or the one above it is being swiped: the lifted
+  /// card stands clear of the lines around it.
+  final bool showHairline;
 
   /// 1-based, as drawn. The screen numbers by the queue's own order, so the
   /// list never renumbers before the server confirms an edit.
@@ -77,7 +81,7 @@ class TrackRow extends StatelessWidget {
   /// The lifted row's corner and its raised fill.
   static const double liftRadius = 10;
 
-  static const String noReasonText = 'no notes from the DJ';
+  static const String noReasonText = 'Nothing written for this one.';
   static const String unavailableText = 'Not in Apple Music · skipped on play';
   static const String newToYouText = 'New to you';
 
@@ -302,17 +306,26 @@ class TrackRow extends StatelessWidget {
             ),
           ),
         ),
-        if (expanded)
-          KeyedSubtree(
-            key: reasonKey(track.trackId),
-            child: ReasonBand(text: hasReason ? track.reason! : noReasonText),
-          ),
+        // Opens and closes in place rather than jumping.
+        AnimatedSize(
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: expanded
+              ? KeyedSubtree(
+                  key: reasonKey(track.trackId),
+                  child: TrackNote(text: hasReason ? track.reason! : null),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
       ],
     );
 
     Widget body = Stack(
       children: [
-        if (!isFirst && !lifted && !expanded)
+        if (!isFirst && !lifted && showHairline)
           Positioned(
             left: hairlineInset,
             right: 0,
@@ -365,6 +378,40 @@ class TrackRow extends StatelessWidget {
           onTap: onTap,
           excludeFromSemantics: true,
           child: body,
+        ),
+      ),
+    );
+  }
+}
+
+/// The DJ's note on one song: one small italic line under the row, starting
+/// at the art's edge. Nothing else: no label, no actions.
+class TrackNote extends StatelessWidget {
+  const TrackNote({super.key, this.text});
+
+  /// The DJ's words, or null when there are none.
+  final String? text;
+
+  /// About 10 pt, as asked: smaller than the artist line beside it.
+  static const double fontSize = 11;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final words = text;
+    return Padding(
+      padding: const EdgeInsets.only(
+        left: TrackRow.numberWidth + TrackRow.gap,
+        right: TrackRow.gripWidth,
+        bottom: 8,
+      ),
+      child: Text(
+        words ?? TrackRow.noReasonText,
+        style: TextStyle(
+          fontSize: fontSize,
+          height: 1.35,
+          fontStyle: FontStyle.italic,
+          color: words == null ? tokens.muted : tokens.smoke,
         ),
       ),
     );

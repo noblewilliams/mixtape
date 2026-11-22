@@ -135,10 +135,15 @@ class TapeBar extends StatelessWidget {
     required this.primary,
     this.secondary,
     this.reason,
+    this.composer,
   });
 
   final Widget primary;
   final Widget? secondary;
+
+  /// Under the actions: the tape's composer, so the conversation goes on
+  /// without going back to it. Rides the keyboard when it is up.
+  final Widget? composer;
 
   /// A muted line above the actions (why Play cannot work, say); a widget
   /// that draws nothing is fine.
@@ -149,7 +154,13 @@ class TapeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final bottom = MediaQuery.paddingOf(context).bottom;
+    // Over the keyboard when the composer has it up; otherwise clear of the
+    // home indicator.
+    final media = MediaQuery.of(context);
+    final typing = composer != null && media.viewInsets.bottom > 0;
+    final bottom = typing
+        ? media.viewInsets.bottom + 8
+        : media.padding.bottom + 12;
     final stacked = MediaQuery.textScalerOf(context).scale(100) / 100 >= 1.5;
     return ClipRect(
       child: BackdropFilter(
@@ -161,32 +172,40 @@ class TapeBar extends StatelessWidget {
             border: Border(top: BorderSide(color: tokens.hairline)),
           ),
           child: Padding(
-            padding: EdgeInsets.fromLTRB(18, 10, 18, bottom + 12),
+            padding: EdgeInsets.fromLTRB(18, 10, 18, bottom),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (reason != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Center(child: reason),
-                  ),
-                if (stacked) ...[
-                  primary,
-                  if (secondary != null) ...[
-                    const SizedBox(height: 6),
-                    Center(child: secondary),
-                  ],
-                ] else
-                  Row(
-                    children: [
-                      Expanded(child: primary),
-                      if (secondary != null) ...[
-                        const SizedBox(width: 10),
-                        secondary!,
-                      ],
+                // While the listener types, the actions step aside so the
+                // songs keep the room over the keyboard.
+                if (!typing) ...[
+                  if (reason != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Center(child: reason),
+                    ),
+                  if (stacked) ...[
+                    primary,
+                    if (secondary != null) ...[
+                      const SizedBox(height: 6),
+                      Center(child: secondary),
                     ],
-                  ),
+                  ] else
+                    Row(
+                      children: [
+                        Expanded(child: primary),
+                        if (secondary != null) ...[
+                          const SizedBox(width: 10),
+                          secondary!,
+                        ],
+                      ],
+                    ),
+                ],
+                if (composer != null) ...[
+                  if (!typing) const SizedBox(height: 10),
+                  composer!,
+                ],
               ],
             ),
           ),

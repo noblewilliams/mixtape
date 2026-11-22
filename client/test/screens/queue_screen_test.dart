@@ -1,8 +1,8 @@
-import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart' show CupertinoTextField, CupertinoDialogAction;
+import 'package:flutter/cupertino.dart'
+    show CupertinoTextField, CupertinoDialogAction;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,6 +34,9 @@ import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
 import 'package:mixtape/presentation/widgets/lyric_turn.dart';
+import 'package:mixtape/presentation/widgets/mix_quote.dart';
+import 'package:mixtape/presentation/widgets/foundation/mini_toast.dart';
+import 'package:mixtape/presentation/widgets/foundation/swipe_action_row.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
 import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
@@ -90,24 +93,33 @@ class FakeDjApi implements DjApi, DjRemakeSender {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<AlbumPickState> choosePick(String sessionId, {required String albumId, int? expectedVersion}) =>
+  Future<AlbumPickState> choosePick(
+    String sessionId, {
+    required String albumId,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<AlbumPickState> goBackToPick(
+    String sessionId, {
+    required int version,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<ListenLaterEntry>> listListenLater() =>
       throw UnimplementedError();
 
   @override
-  Future<AlbumPickState> goBackToPick(String sessionId, {required int version, int? expectedVersion}) =>
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) =>
       throw UnimplementedError();
-
-  @override
-  Future<List<ListenLaterEntry>> listListenLater() => throw UnimplementedError();
-
-  @override
-  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) => throw UnimplementedError();
 
   @override
   Future<void> unsaveForLater(String albumId) => throw UnimplementedError();
 
   @override
-  Future<ListenLaterEntry> markListened(String albumId) => throw UnimplementedError();
+  Future<ListenLaterEntry> markListened(String albumId) =>
+      throw UnimplementedError();
 
   @override
   Future<SessionDetail> createSession(
@@ -665,7 +677,11 @@ void main() {
         queue: [_track(0), _track(1), _track(2)],
       );
       final bridge = FakeBridge();
-      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
+      final container = _makeContainer(
+        api,
+        player: _appPlayerRefuses(),
+        bridge: bridge,
+      );
       await _pump(tester, container);
 
       await _playInMusic(tester);
@@ -686,7 +702,11 @@ void main() {
         queue: [_track(0), _track(1, appleId: null), _track(2)],
       );
       final bridge = FakeBridge();
-      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
+      final container = _makeContainer(
+        api,
+        player: _appPlayerRefuses(),
+        bridge: bridge,
+      );
       await _pump(tester, container);
 
       await _playInMusic(tester);
@@ -877,32 +897,35 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a whitespace-only playlist name disables saving',
-    (tester) async {
-      final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(
-        session: _session(title: 'Road Trip'),
-        messages: [],
-        queue: [_track(0)],
-      );
-      final bridge = FakeBridge();
-      final container = _makeContainer(api, bridge: bridge);
-      await _pump(tester, container);
+  testWidgets('a whitespace-only playlist name disables saving', (
+    tester,
+  ) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(
+      session: _session(title: 'Road Trip'),
+      messages: [],
+      queue: [_track(0)],
+    );
+    final bridge = FakeBridge();
+    final container = _makeContainer(api, bridge: bridge);
+    await _pump(tester, container);
 
-      await tester.tap(find.byKey(const Key('save-button')));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('playlist-name-field')),
-        '   ',
-      );
-      await tester.tap(find.byKey(const Key('save-confirm-button')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('playlist-name-field')), '   ');
+    await tester.tap(find.byKey(const Key('save-confirm-button')));
+    await tester.pumpAndSettle();
 
-      expect(bridge.createCalls, isEmpty);
-      expect(tester.widget<CupertinoDialogAction>(find.byKey(const Key('save-confirm-button'))).onPressed, isNull);
-    },
-  );
+    expect(bridge.createCalls, isEmpty);
+    expect(
+      tester
+          .widget<CupertinoDialogAction>(
+            find.byKey(const Key('save-confirm-button')),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
 
   testWidgets(
     'tapping Save twice while the first call is in flight only creates one playlist',
@@ -951,7 +974,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('playlist-name-field')), findsOneWidget);
-    expect(tester.widget<CupertinoTextField>(find.byKey(const Key('playlist-name-field'))).controller!.text, 'Test Session');
+    expect(
+      tester
+          .widget<CupertinoTextField>(
+            find.byKey(const Key('playlist-name-field')),
+          )
+          .controller!
+          .text,
+      'Test Session',
+    );
     expect(
       find.text("Couldn't save the playlist — not authorized"),
       findsOneWidget,
@@ -974,7 +1005,7 @@ void main() {
       await _pump(tester, container);
 
       expect(find.text('you loved this one last summer'), findsNothing);
-      expect(find.text('no notes from the DJ'), findsNothing);
+      expect(find.text(TrackRow.noReasonText), findsNothing);
 
       await tester.tap(find.byKey(TrackRow.rowKey('t0')));
       await tester.pumpAndSettle();
@@ -982,7 +1013,7 @@ void main() {
 
       await tester.tap(find.byKey(TrackRow.rowKey('t1')));
       await tester.pumpAndSettle();
-      expect(find.text('no notes from the DJ'), findsOneWidget);
+      expect(find.text(TrackRow.noReasonText), findsOneWidget);
     },
   );
 
@@ -1109,7 +1140,11 @@ void main() {
         throw NetworkException('offline');
       };
       final bridge = FakeBridge();
-      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
+      final container = _makeContainer(
+        api,
+        player: _appPlayerRefuses(),
+        bridge: bridge,
+      );
       await _pump(tester, container);
 
       await tester.drag(
@@ -1136,7 +1171,11 @@ void main() {
           SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
       final bridge = FakeBridge();
       bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
-      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
+      final container = _makeContainer(
+        api,
+        player: _appPlayerRefuses(),
+        bridge: bridge,
+      );
       await _pump(tester, container);
 
       await _playInMusic(tester);
@@ -1253,7 +1292,11 @@ void main() {
           SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
       final bridge = FakeBridge();
       bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
-      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
+      final container = _makeContainer(
+        api,
+        player: _appPlayerRefuses(),
+        bridge: bridge,
+      );
       await _pump(tester, container);
 
       await _playInMusic(tester);
@@ -1412,7 +1455,10 @@ void main() {
         api.onGetSession = (_) async => SessionDetail(
           session: _session(),
           messages: [],
-          queue: [_track(0, spotifyId: 'sp0'), _track(1)],
+          queue: [
+            _track(0, spotifyId: 'sp0'),
+            _track(1),
+          ],
         );
         final container = _makeContainer(
           api,
@@ -1635,7 +1681,9 @@ void main() {
           Uri.parse('https://www.tunemymusic.com/transfer/freetext-to-spotify'),
         ]);
         expect(
-          find.text('Copied 3 songs · paste them in, then rename “My Playlist”'),
+          find.text(
+            'Copied 3 songs · paste them in, then rename “My Playlist”',
+          ),
           findsOneWidget,
         );
         expect(await store.spotifyIntroSeen(), isTrue);
@@ -1797,7 +1845,11 @@ void main() {
           messages: [],
           queue: [_track(0)],
         );
-        final container = _makeContainer(api, player: _appPlayerRefuses(), listening: listening);
+        final container = _makeContainer(
+          api,
+          player: _appPlayerRefuses(),
+          listening: listening,
+        );
         await _pump(tester, container);
 
         await _playInMusic(tester);
@@ -1844,8 +1896,14 @@ void main() {
         await tester.pumpAndSettle();
         expect(navTitle().opacity, 1);
         // The bar at the bottom stays put.
-        expect(find.byKey(const Key('play-here-button')).hitTestable(), findsOneWidget);
-        expect(find.byKey(const Key('save-button')).hitTestable(), findsOneWidget);
+        expect(
+          find.byKey(const Key('play-here-button')).hitTestable(),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('save-button')).hitTestable(),
+          findsOneWidget,
+        );
       },
     );
 
@@ -1886,7 +1944,9 @@ void main() {
           SessionDetail(session: saved, messages: [], queue: [_track(0)]);
       await _pump(tester, _makeContainer(api));
       expect(
-        tester.widget<CassetteTile>(find.byKey(TapeHeader.cassetteKey)).caseColor,
+        tester
+            .widget<CassetteTile>(find.byKey(TapeHeader.cassetteKey))
+            .caseColor,
         const Color(0xFF617F9C),
       );
     });
@@ -2044,7 +2104,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Removed "Title 1"'), findsOneWidget);
-        expect(find.byType(MixtapeFeedback), findsOneWidget);
+        expect(find.byKey(MiniToast.toastKey), findsOneWidget);
         expect(ops.single.toJson(), {'op': 'remove', 'position': 1});
 
         await tester.tap(find.text('Undo'));
@@ -2499,6 +2559,227 @@ void main() {
       await sending;
       await tester.pumpAndSettle();
       expect(tester.widget<TapeButton>(tapeRemake()).onPressed, isNotNull);
+    });
+  });
+
+  // Talking to the DJ from the tape (2026-11-22): the conversation's
+  // composer is on the tape, and a right swipe quotes a song into it.
+  group('Talking from the tape', () {
+    SessionDetail mix() => SessionDetail(
+      session: _session(),
+      messages: [
+        DjMessage(
+          id: 'm1',
+          role: 'dj',
+          content: 'An old reply.',
+          queueVersion: 1,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+      queue: [_track(0), _track(1)],
+    );
+
+    Finder field() => find.descendant(
+      of: find.byKey(const Key('tape-composer')),
+      matching: find.byKey(const Key('prompt-field')),
+    );
+
+    testWidgets('the tape carries the composer and no stale reply', (
+      tester,
+    ) async {
+      final api = FakeDjApi()..onGetSession = ((_) async => mix());
+      await _pump(tester, _makeContainer(api));
+
+      expect(field(), findsOneWidget);
+      expect(find.text('An old reply.'), findsNothing);
+    });
+
+    testWidgets('a right swipe quotes the song and keeps the row', (
+      tester,
+    ) async {
+      final api = FakeDjApi()..onGetSession = ((_) async => mix());
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.drag(
+        find.byKey(const Key('dismissible-t1')),
+        const Offset(500, 0),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('dismissible-t1')), findsOneWidget);
+      expect(find.text('Title 1 · Artist 1'), findsOneWidget);
+      // A mini toast says so, and the keyboard stays down for the next one.
+      expect(find.text('Quoted "Title 1"'), findsOneWidget);
+      expect(
+        container.read(mixDraftProvider('s1')).quotes.single.trackId,
+        't1',
+      );
+
+      // Its cross takes it back off.
+      await tester.tap(
+        find.byKey(
+          QuoteChips.removeKey(
+            const QuotedSong(
+              title: 'Title 1',
+              artist: 'Artist 1',
+              trackId: 't1',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Title 1 · Artist 1'), findsNothing);
+    });
+
+    testWidgets('a part swipe rests open; tapping the capsule quotes', (
+      tester,
+    ) async {
+      final api = FakeDjApi()..onGetSession = ((_) async => mix());
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.drag(
+        find.byKey(const Key('dismissible-t1')),
+        const Offset(120, 0),
+      );
+      await tester.pumpAndSettle();
+
+      // Open and waiting: nothing quoted yet, and the lines around the
+      // lifted row have stepped aside.
+      expect(container.read(mixDraftProvider('s1')).quotes, isEmpty);
+      final capsule = find.byKey(SwipeActionRow.capsuleKey(true));
+      expect(capsule, findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(TrackRow.rowKey('t1')),
+          matching: find.byKey(TrackRow.hairlineKey),
+        ),
+        findsNothing,
+      );
+
+      await tester.tap(capsule);
+      await tester.pumpAndSettle();
+      expect(
+        container.read(mixDraftProvider('s1')).quotes.single.trackId,
+        't1',
+      );
+      expect(find.text('Quoted "Title 1"'), findsOneWidget);
+      // Closed again, lines back.
+      expect(capsule, findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(TrackRow.rowKey('t1')),
+          matching: find.byKey(TrackRow.hairlineKey),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('quotes sit on one row that scrolls sideways', (tester) async {
+      final api = FakeDjApi()..onGetSession = ((_) async => mix());
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      for (final id in ['t0', 't1']) {
+        await tester.drag(
+          find.byKey(Key('dismissible-$id')),
+          const Offset(500, 0),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      final row = tester.widget<ListView>(find.byKey(QuoteChips.rowKey));
+      expect(row.scrollDirection, Axis.horizontal);
+      expect(
+        tester.getTopLeft(find.text('Title 0 · Artist 0')).dy,
+        tester.getTopLeft(find.text('Title 1 · Artist 1')).dy,
+      );
+    });
+
+    testWidgets('VoiceOver can quote a song too', (tester) async {
+      final handle = tester.ensureSemantics();
+      final api = FakeDjApi()..onGetSession = ((_) async => mix());
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      final node = tester.getSemantics(
+        find
+            .descendant(
+              of: find.byKey(const Key('dismissible-t0')),
+              matching: find.byType(Semantics),
+            )
+            .first,
+      );
+      final quote = node.getSemanticsData().customSemanticsActionIds!;
+      expect(quote, isNotEmpty);
+      tester.binding.pipelineOwner.semanticsOwner!.performAction(
+        node.id,
+        SemanticsAction.customAction,
+        quote.first,
+      );
+      await tester.pump();
+      expect(
+        container.read(mixDraftProvider('s1')).quotes.single.trackId,
+        't0',
+      );
+      handle.dispose();
+    });
+
+    testWidgets('sending from the tape posts the quote, stays, and shows the '
+        'answer over the composer', (tester) async {
+      final sent = <String>[];
+      final reply = Completer<TurnResult>();
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => mix())
+        ..onSendMessage = (id, text) {
+          sent.add(text);
+          return reply.future;
+        };
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.drag(
+        find.byKey(const Key('dismissible-t1')),
+        const Offset(500, 0),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'feels out of place');
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('tape-composer')),
+          matching: find.byKey(const Key('start-session')),
+        ),
+      );
+      await tester.pump();
+
+      expect(sent, ['> Title 1 — Artist 1\nfeels out of place']);
+      // The draft went out with it; the DJ is at work over the composer.
+      expect(container.read(mixDraftProvider('s1')).isEmpty, isTrue);
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+      expect(find.byType(QueueScreen), findsOneWidget);
+
+      reply.complete(
+        TurnResult(
+          djMessage: DjMessage(
+            id: 'm3',
+            role: 'dj',
+            content: 'Swapped it for something mellower.',
+            queueVersion: 2,
+            createdAt: DateTime(2026, 1, 1),
+          ),
+          queue: [_track(0), _track(5)],
+          queueVersion: 2,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
+      expect(find.byKey(const Key('tape-reply')), findsOneWidget);
+      expect(find.text('Swapped it for something mellower.'), findsOneWidget);
+      expect(find.text('Title 5'), findsOneWidget);
+      expect(find.text('Title 1'), findsNothing);
     });
   });
 }
