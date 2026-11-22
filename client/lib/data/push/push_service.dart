@@ -186,8 +186,7 @@ class MethodPushChannel implements PushChannel {
   Future<String?> appVersion() => _channel.invokeMethod<String>('appVersion');
 
   @override
-  Future<String?> environment() =>
-      _channel.invokeMethod<String>('environment');
+  Future<String?> environment() => _channel.invokeMethod<String>('environment');
 
   @override
   Future<void> setVisibleSession(String? sessionId) async {
@@ -278,8 +277,17 @@ class PushService {
   /// At sign-out, before the bearer goes: the device stops receiving this
   /// listener's mixes. A registration still in flight lands first, so the
   /// DELETE is the last word.
-  Future<void> unregister() async {
+  Future<void> unregister() {
     _leaving = true;
+    return _delete();
+  }
+
+  /// You → "Mix ready notifications" off: the server forgets this phone,
+  /// and iOS's own setting is untouched. Unlike [unregister] the session
+  /// goes on, so turning it back on ([requestAndRegister]) registers again.
+  Future<void> turnOff() => _delete();
+
+  Future<void> _delete() async {
     try {
       await _registering;
       var token = _token;

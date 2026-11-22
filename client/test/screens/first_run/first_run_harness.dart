@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/background/mix_background.dart';
+import 'package:mixtape/data/push/push_ask_store.dart';
+import 'package:mixtape/data/push/push_service.dart';
+import 'package:mixtape/presentation/providers/push_provider.dart';
 import 'package:mixtape/presentation/providers/mix_background_provider.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/config/config_api.dart';
@@ -28,6 +31,7 @@ import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import '../../helpers/fake_ai_consent.dart';
 import '../../helpers/fake_import_service.dart';
 import '../../helpers/fake_listening_api.dart';
+import '../../helpers/fake_push_channel.dart';
 import '../../helpers/onboarding_harness.dart';
 
 /// Auth for the first-run pages: starts where told and counts anonymous
@@ -211,6 +215,14 @@ class FirstRunHarness {
   );
   final FakeReminderScheduler reminders = FakeReminderScheduler();
   final FakeMixReadyAlerts pings = FakeMixReadyAlerts();
+
+  /// iOS's notification permission: denied unless a test says otherwise, so
+  /// the Mix ready pop-up stays out of tests about something else.
+  final FakePushChannel push = FakePushChannel(
+    current: PushStatus.denied,
+    afterRequest: PushStatus.authorized,
+  );
+  final InMemoryPushAskStore pushAsk = InMemoryPushAskStore();
   final FakeLinkOpener links = FakeLinkOpener();
   final FakeArchivePicker picker = FakeArchivePicker();
   final ControlledSync sync = ControlledSync();
@@ -229,6 +241,8 @@ class FirstRunHarness {
     listeningApiProvider.overrideWithValue(listening),
     reminderSchedulerProvider.overrideWithValue(reminders),
     mixReadyAlertsProvider.overrideWithValue(pings),
+    pushChannelProvider.overrideWithValue(push),
+    pushAskStoreProvider.overrideWithValue(pushAsk),
     servicePreferenceStoreProvider.overrideWithValue(prefs),
     funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
     linkOpenerProvider.overrideWithValue(links.call),

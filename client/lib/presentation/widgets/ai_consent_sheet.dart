@@ -53,10 +53,20 @@ Future<bool> showAiConsentSheet(
   BuildContext context, {
   Future<void> Function()? beforeGrant,
 }) async {
-  final agreed = await showMixtapeSheet<bool>(
-    context,
-    isScrollControlled: true,
-    builder: (_) => AiConsentPanel(beforeGrant: beforeGrant),
+  ProviderContainer? container;
+  try {
+    container = ProviderScope.containerOf(context, listen: false);
+  } on StateError {
+    container = null;
+  }
+  // Counted as up, so the Mix ready pop-up never lands on top of it.
+  final agreed = await OpenAsksNotifier.around(
+    container,
+    () => showMixtapeSheet<bool>(
+      context,
+      isScrollControlled: true,
+      builder: (_) => AiConsentPanel(beforeGrant: beforeGrant),
+    ),
   );
   return agreed == true;
 }

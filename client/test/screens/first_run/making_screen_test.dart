@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/push/push_service.dart';
 import 'package:mixtape/data/dj/dj_api.dart' show TurnStep;
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/first_run_provider.dart';
@@ -18,6 +19,7 @@ import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart';
 import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/push_permission_popup.dart';
 
 import 'first_run_harness.dart';
 
@@ -74,6 +76,73 @@ void _expectMaking() {
 }
 
 void main() {
+  group('the Mix ready ask (2026-11-21)', () {
+    reduceMotion();
+
+    Future<FirstRunHarness> making(WidgetTester tester) async {
+      final h = FirstRunHarness();
+      h.push.current = PushStatus.notDetermined;
+      h.container.read(firstRunActiveProvider);
+      h.dj.gate = Completer<void>();
+      await _openArtists(tester, h);
+      await tester.tap(find.byKey(ArtistsScreen.continueKey));
+      await tester.pumpAndSettle();
+      _expectMaking();
+      return h;
+    }
+
+    Future<void> waitForAsk(WidgetTester tester) async {
+      await tester.pump(PushAskTrigger.workingDelay);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(PushAskCopy.popupKey), findsOneWidget);
+    }
+
+    testWidgets('about 3 s in it asks over Making; after Allow, the bell '
+        "line joins the step line and the phone registers", (tester) async {
+      final h = await making(tester);
+      expect(find.byKey(PushAskCopy.popupKey), findsNothing);
+      await waitForAsk(tester);
+      // Making carries on behind it.
+      expect(find.byType(MakingScreen), findsOneWidget);
+      expect(find.byKey(MakingScreen.pingKey), findsNothing);
+
+      await tester.tap(find.byKey(PushAskCopy.allowKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(PushAskCopy.popupKey), findsNothing);
+      expect(h.push.calls, containsAllInOrder(['requestAuthorization']));
+      expect(h.push.calls, contains('register'));
+      expect(find.text(MakingScreen.pingLine), findsOneWidget);
+      expect(await h.pushAsk.asked(), isTrue);
+
+      h.dj.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(MakingScreen), findsNothing);
+    });
+
+    testWidgets('a turn that lands under the pop-up waits for the answer: '
+        'Making stays behind it, then the mix opens', (tester) async {
+      final h = await making(tester);
+      await waitForAsk(tester);
+
+      h.dj.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(PushAskCopy.popupKey), findsOneWidget);
+      expect(find.byType(MakingScreen), findsOneWidget);
+      expect(h.container.read(pendingConversationProvider), isNull);
+
+      await tester.tap(find.byKey(PushAskCopy.notNowKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(PushAskCopy.popupKey), findsNothing);
+      expect(find.byType(MakingScreen), findsNothing);
+      expect(
+        h.container.read(pendingConversationProvider)?.sessionId,
+        'session-new',
+      );
+      expect(find.byKey(MakingScreen.pingKey), findsNothing);
+      expect(h.push.calls, isNot(contains('requestAuthorization')));
+    });
+  });
+
   group('with reduced motion', () {
     reduceMotion();
 
@@ -300,13 +369,21 @@ void main() {
     ) async {
       final h = await making(tester);
       expect(find.text(_line), findsOneWidget);
-      h.pings.granted = true;
+      expect(find.byKey(MakingScreen.pingKey), findsNothing);
+      h.push.current = PushStatus.authorized;
       h.container.read(mixBackgroundProvider.notifier).turnsOut(true);
       await tester.pump();
       await tester.pump();
+      // The step line stays; the bell line joins it, under it.
       expect(find.text(MakingScreen.pingLine), findsOneWidget);
-      expect(MakingScreen.pingLine, "About a minute. We'll ping you.");
-      expect(find.text(_line), findsNothing);
+      expect(MakingScreen.pingLine, 'We’ll ping you when it’s ready.');
+      expect(find.text(_line), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(MakingScreen.pingKey)).dy,
+        greaterThan(tester.getBottomLeft(find.byKey(MakingScreen.stepKey)).dy),
+      );
+      // It never asked: the pop-up is the only ask.
+      expect(h.push.calls, isNot(contains('requestAuthorization')));
     });
 
     testWidgets('under the headline and its line, it starts on listening '

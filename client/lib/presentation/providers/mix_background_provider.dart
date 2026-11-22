@@ -10,11 +10,15 @@
 /// turns off the request (a durable job + server push) is its own spec.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/background/mix_background.dart';
+import '../../data/push/push_service.dart';
+import 'push_provider.dart';
 
 bool get _onIos => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -25,7 +29,8 @@ final backgroundTaskHolderProvider = Provider<BackgroundTaskHolder>(
 );
 
 final mixReadyAlertsProvider = Provider<MixReadyAlerts>(
-  (ref) => _onIos ? LocalNotificationMixReadyAlerts() : const NoMixReadyAlerts(),
+  (ref) =>
+      _onIos ? LocalNotificationMixReadyAlerts() : const NoMixReadyAlerts(),
 );
 
 /// Whether the app is on screen right now. Without a binding (plain Dart
@@ -41,13 +46,21 @@ final appInForegroundProvider = Provider<bool Function()>(
   },
 );
 
-/// The state: whether "Your mix is ready" can be sent (permission granted),
-/// so the copy only promises a ping it can deliver.
+/// The state: whether "Your mix is ready" can be sent (permission granted,
+/// and not turned off in You), so the copy only promises a ping it can
+/// deliver.
+///
+/// It never asks: the Mix ready pop-up is the one ask
+/// (`widgets/push_permission_popup.dart`; the same OS permission covers this
+/// local ping and the server's push). It reads the permission at the first
+/// turn and again whenever the pop-up or You changes it ([refresh]).
 class MixBackgroundNotifier extends Notifier<bool> {
   bool _turnsOut = false;
   int _posting = 0;
   bool _holding = false;
-  bool _asked = false;
+
+  /// The permission read in flight (or done) since the first turn.
+  Future<void>? _reading;
 
   @override
   bool build() => false;
@@ -60,15 +73,26 @@ class MixBackgroundNotifier extends Notifier<bool> {
         _holding = true;
         ref.read(backgroundTaskHolderProvider).begin();
       }
-      if (!_asked) {
-        _asked = true;
-        // Asked at the first mix, where "We'll ping you" makes sense of it.
-        ref.read(mixReadyAlertsProvider).requestPermission().then((granted) {
-          if (ref.mounted) state = granted;
-        });
-      }
+      _reading ??= refresh();
     }
     _release();
+  }
+
+  /// Reads the permission (and You's off) again, without asking.
+  Future<void> refresh() {
+    final reading = _readAllowed();
+    _reading = reading;
+    return reading;
+  }
+
+  Future<void> _readAllowed() async {
+    var allowed = false;
+    try {
+      allowed =
+          await ref.read(pushChannelProvider).status() == PushStatus.authorized;
+      if (allowed) allowed = !await ref.read(pushAskStoreProvider).optedOut();
+    } catch (_) {}
+    if (ref.mounted) state = allowed;
   }
 
   /// A mix turn landed. Call before the turn stops counting as out, so the
@@ -76,7 +100,14 @@ class MixBackgroundNotifier extends Notifier<bool> {
   void landed() {
     if (ref.read(appInForegroundProvider)()) return;
     _posting++;
-    ref.read(mixReadyAlertsProvider).showMixReady().whenComplete(() {
+    final alerts = ref.read(mixReadyAlertsProvider);
+    final reading = _reading ?? refresh();
+    () async {
+      await reading;
+      // Not allowed, or turned off in You: no ping of any kind.
+      if (!ref.mounted || !state) return;
+      await alerts.showMixReady();
+    }().whenComplete(() {
       _posting--;
       if (ref.mounted) _release();
     });

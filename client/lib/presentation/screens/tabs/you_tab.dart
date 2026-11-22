@@ -18,6 +18,8 @@
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root.
 library;
 
+import 'dart:async';
+
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
@@ -31,7 +33,10 @@ import '../../providers/account_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/dj_providers.dart' show memoriesProvider;
 import '../../providers/library_sync_provider.dart' show accountNameProvider;
-import '../../providers/onboarding_provider.dart' show onboardingProvider;
+import '../../providers/mix_background_provider.dart';
+import '../../providers/onboarding_provider.dart'
+    show linkOpenerProvider, onboardingProvider;
+import '../../providers/push_provider.dart';
 import '../../providers/music_platform_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../theme/mixtape_theme.dart';
@@ -42,6 +47,7 @@ import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/icon_tile.dart';
 import '../../widgets/foundation/inset_group.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
+import '../../widgets/foundation/text_action.dart';
 import '../../widgets/update_status_note.dart';
 import '../../widgets/foundation/mixtape_menu.dart';
 import '../../widgets/suggestion_settings.dart';
@@ -144,6 +150,9 @@ class YouTab extends ConsumerWidget {
                         const _LearningRow(),
                         const SuggestionSettings(),
                         const _PlaysOnRow(),
+                        // iOS only: nothing else can receive a push yet.
+                        if (ref.watch(pushAvailableProvider))
+                          const MixReadyRow(),
                       ],
                     ),
                     // A block of its own: the ghost is not one of the live
@@ -337,6 +346,93 @@ class _PlaysOnRow extends ConsumerWidget {
           await ref.read(musicPlatformProvider.notifier).choose(picked);
         },
       ),
+    );
+  }
+}
+
+/// "Mix ready notifications" (`docs/mockups/approved/2026-11-21-push-permission-modal.md`
+/// → Locked behaviour): on, a switch on; off after Not now or turned off
+/// here, a switch off whose on brings up iOS's prompt; denied, no switch,
+/// "Off in iOS Settings" and a link to Mixtape's page there. Turning it off
+/// unregisters this phone and leaves iOS's own setting alone.
+class MixReadyRow extends ConsumerStatefulWidget {
+  const MixReadyRow({super.key});
+
+  static const String title = 'Mix ready notifications';
+  static const String onLine = 'A ping when a mix lands';
+  static const String deniedLine = 'Off in iOS Settings';
+  static const String settingsLabel = 'Settings';
+
+  /// UIApplication.openSettingsURLString: Mixtape's own page in Settings.
+  static final Uri settingsUri = Uri.parse('app-settings:');
+
+  static const Key rowKey = Key('you-mix-ready');
+  static const Key switchKey = Key('you-mix-ready-switch');
+  static const Key settingsKey = Key('you-mix-ready-settings');
+
+  @override
+  ConsumerState<MixReadyRow> createState() => _MixReadyRowState();
+}
+
+class _MixReadyRowState extends ConsumerState<MixReadyRow> {
+  late final AppLifecycleListener _lifecycle;
+  bool _writing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // iOS Settings may have changed it while the app was away.
+    _lifecycle = AppLifecycleListener(
+      onResume: () => ref.read(pushSettingProvider.notifier).refresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggle(bool on) async {
+    if (_writing) return;
+    setState(() => _writing = true);
+    final setting = ref.read(pushSettingProvider.notifier);
+    try {
+      await (on ? setting.turnOn() : setting.turnOff());
+    } finally {
+      if (mounted) setState(() => _writing = false);
+    }
+    // Making's line and the local ping follow the same answer.
+    if (mounted) {
+      unawaited(ref.read(mixBackgroundProvider.notifier).refresh());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final setting = ref.watch(pushSettingProvider).value;
+    final denied = setting == PushSetting.deniedInSettings;
+    return InsetRow(
+      key: MixReadyRow.rowKey,
+      leading: const IconTile(
+        icon: CupertinoIcons.bell_fill,
+        color: IconTile.red,
+      ),
+      title: MixReadyRow.title,
+      subtitle: denied ? MixReadyRow.deniedLine : MixReadyRow.onLine,
+      trailing: denied
+          ? TextAction(
+              key: MixReadyRow.settingsKey,
+              label: MixReadyRow.settingsLabel,
+              underline: true,
+              onPressed: () =>
+                  ref.read(linkOpenerProvider)(MixReadyRow.settingsUri),
+            )
+          : GlassSwitch(
+              key: MixReadyRow.switchKey,
+              value: setting == PushSetting.on,
+              onChanged: setting == null || _writing ? null : _toggle,
+            ),
     );
   }
 }

@@ -314,10 +314,17 @@ class FirstRunPill extends StatelessWidget {
     this.semanticsHint,
     this.disabledHint,
     this.compact = false,
+    this.minHeight,
+    this.fontSize,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// A full-width pill shorter than [height], and its type (the Mix ready
+  /// pop-up's 50 pt pill at 15 pt).
+  final double? minHeight;
+  final double? fontSize;
 
   /// The secondary pill: [compactHeight] tall at [compactFontSize], as wide
   /// as its label and centred, so it reads under the composer rather than
@@ -354,7 +361,7 @@ class FirstRunPill extends StatelessWidget {
     final style = FirstRunType.pill(tokens).copyWith(
       color: ink,
       fontWeight: weight,
-      fontSize: compact ? compactFontSize : null,
+      fontSize: compact ? compactFontSize : fontSize,
     );
     // Merged, so the hint is read on the button rather than beside it.
     final pill = MergeSemantics(
@@ -364,7 +371,9 @@ class FirstRunPill extends StatelessWidget {
           onPressed: onPressed,
           style: ButtonStyle(
             minimumSize: WidgetStatePropertyAll(
-              compact ? const Size(0, compactHeight) : Size.fromHeight(height),
+              compact
+                  ? const Size(0, compactHeight)
+                  : Size.fromHeight(minHeight ?? height),
             ),
             padding: WidgetStatePropertyAll(
               EdgeInsets.symmetric(

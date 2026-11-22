@@ -29,6 +29,7 @@ import '../../providers/first_run_flags_provider.dart';
 import '../../providers/first_run_funnel_provider.dart';
 import '../../providers/first_run_provider.dart';
 import '../../providers/onboarding_provider.dart';
+import '../../providers/push_provider.dart';
 import '../../widgets/ai_consent_sheet.dart';
 import '../../widgets/shared_mix_link_listener.dart';
 import 'artists_screen.dart';
@@ -286,7 +287,11 @@ Future<Object?> _sendFirstMix(
     settings: const RouteSettings(name: MakingScreen.routeName),
   );
   unawaited(navigator.push(making));
-  void leaveMaking() {
+  // The Mix ready pop-up may be up over Making: it stays until the listener
+  // answers, with Making behind it, and only then does the flow move on.
+  final pushAsk = ref.read(pushAskProvider.notifier);
+  Future<void> leaveMaking() async {
+    if (pushAsk.isOpen) await pushAsk.closed;
     if (making.isCurrent) {
       navigator.pop();
     } else if (making.isActive) {
@@ -297,25 +302,25 @@ Future<Object?> _sendFirstMix(
   try {
     await ensureAnonymousSession(ref);
     final sessionId = await ref.read(sessionStarterProvider)(prompt);
-    leaveMaking();
+    await leaveMaking();
     ref
         .read(firstRunActiveProvider.notifier)
         .handOff(PendingConversation(sessionId));
     return null;
   } on AiConsentRequiredException {
-    leaveMaking();
+    await leaveMaking();
     return const _ConsentRefused();
   } on DjPausedException {
     // Paused server-wide: the starter has paused the app. No sentence; the
     // caller's page shows the paused composer with the prompt still there.
-    leaveMaking();
+    await leaveMaking();
     return null;
   } on AnonymousCapException {
-    leaveMaking();
+    await leaveMaking();
     onCap?.call();
     return null;
   } on DjApiException catch (e) {
-    leaveMaking();
+    await leaveMaking();
     final sessionId = e.sessionId;
     if (sessionId == null) return e.message;
     ref
@@ -323,7 +328,7 @@ Future<Object?> _sendFirstMix(
         .handOff(PendingConversation(sessionId, initialError: e.message));
     return null;
   } catch (e) {
-    leaveMaking();
+    await leaveMaking();
     return firstRunErrorFor(e);
   }
 }

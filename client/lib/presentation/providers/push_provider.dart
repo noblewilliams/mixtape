@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/push/push_ask_store.dart';
 import '../../data/push/push_service.dart';
 import 'auth_provider.dart';
 
@@ -33,9 +34,156 @@ final pushServiceProvider = Provider<PushService>((ref) {
     service.dispose();
     if (identical(slot._current, service)) slot._current = null;
   });
-  if (auth == AuthStatus.session) unawaited(service.registerIfAuthorized());
+  if (auth == AuthStatus.session) {
+    // Not when the listener turned "Mix ready notifications" off in You.
+    final store = ref.watch(pushAskStoreProvider);
+    unawaited(() async {
+      var optedOut = false;
+      try {
+        optedOut = await store.optedOut();
+      } catch (_) {}
+      if (!optedOut) await service.registerIfAuthorized();
+    }());
+  }
   return service;
 });
+
+/// The device's notification flags: the pop-up's once, and You's off.
+final pushAskStoreProvider = Provider<PushAskStore>(
+  (ref) => SecurePushAskStore(),
+);
+
+/// Whether this build can receive pushes at all (iOS). Off it, You shows no
+/// row and nothing ever asks.
+final pushAvailableProvider = Provider<bool>(
+  (ref) => ref.watch(pushChannelProvider) is! NoPushChannel,
+);
+
+/// What You's "Mix ready notifications" row shows.
+enum PushSetting {
+  /// Allowed and registered.
+  on,
+
+  /// Not asked yet (Not now), or turned off here: the switch is the way in.
+  off,
+
+  /// Denied in iOS: only iOS Settings can undo it.
+  deniedInSettings,
+}
+
+/// The row's state: the OS permission and the listener's own off. Read
+/// again on [refresh] (You does at every return to the foreground, since
+/// iOS Settings may have changed it).
+class PushSettingNotifier extends AsyncNotifier<PushSetting> {
+  @override
+  Future<PushSetting> build() async {
+    ref.watch(authProvider);
+    return _read();
+  }
+
+  Future<PushSetting> _read() async {
+    final status = await ref.read(pushServiceProvider).status();
+    if (status == PushStatus.denied) return PushSetting.deniedInSettings;
+    if (status == PushStatus.notDetermined) return PushSetting.off;
+    var optedOut = false;
+    try {
+      optedOut = await ref.read(pushAskStoreProvider).optedOut();
+    } catch (_) {}
+    return optedOut ? PushSetting.off : PushSetting.on;
+  }
+
+  Future<void> refresh() async {
+    final next = await _read();
+    if (ref.mounted) state = AsyncData(next);
+  }
+
+  /// The switch turned on: the system prompt if iOS has not asked yet, then
+  /// the registration.
+  Future<void> turnOn() async {
+    state = const AsyncData(PushSetting.on);
+    try {
+      await ref.read(pushAskStoreProvider).setOptedOut(false);
+    } catch (_) {}
+    if (!ref.mounted) return;
+    final status = await ref.read(pushServiceProvider).requestAndRegister();
+    if (!ref.mounted) return;
+    state = AsyncData(switch (status) {
+      PushStatus.authorized => PushSetting.on,
+      PushStatus.denied => PushSetting.deniedInSettings,
+      PushStatus.notDetermined => PushSetting.off,
+    });
+  }
+
+  /// The switch turned off: this phone is unregistered, and stays so at the
+  /// next launch.
+  Future<void> turnOff() async {
+    state = const AsyncData(PushSetting.off);
+    try {
+      await ref.read(pushAskStoreProvider).setOptedOut(true);
+    } catch (_) {}
+    if (!ref.mounted) return;
+    await ref.read(pushServiceProvider).turnOff();
+  }
+}
+
+final pushSettingProvider =
+    AsyncNotifierProvider<PushSettingNotifier, PushSetting>(
+      PushSettingNotifier.new,
+    );
+
+/// The pop-up's once rule (`push_ask_shown`). Device-scoped: not watching
+/// auth, so a sign-up mid-launch does not ask a second time.
+class PushAskNotifier extends Notifier<bool> {
+  Completer<void>? _open;
+
+  /// True once the pop-up has appeared on this device this launch (the
+  /// store remembers it across launches).
+  @override
+  bool build() => false;
+
+  /// Whether the pop-up may appear: iOS has not decided yet and it never
+  /// has. Already allowed means nothing to ask (the registration follows the
+  /// session, [pushServiceProvider]); denied means never.
+  Future<bool> eligible() async {
+    if (state || !ref.read(pushAvailableProvider)) return false;
+    final status = await ref.read(pushServiceProvider).status();
+    if (!ref.mounted || state || status != PushStatus.notDetermined) {
+      return false;
+    }
+    bool asked;
+    try {
+      asked = await ref.read(pushAskStoreProvider).asked();
+    } catch (_) {
+      // A keychain that cannot be read is never a reason to nag.
+      asked = true;
+    }
+    return ref.mounted && !state && !asked;
+  }
+
+  /// The pop-up is appearing: it never appears again, however it closes.
+  void markShown() {
+    state = true;
+    _open = Completer<void>();
+    final store = ref.read(pushAskStoreProvider);
+    unawaited(Future.sync(store.markAsked).catchError((Object _) {}));
+  }
+
+  void markClosed() {
+    final open = _open;
+    _open = null;
+    if (open != null && !open.isCompleted) open.complete();
+  }
+
+  bool get isOpen => _open != null;
+
+  /// Completes once no pop-up is up: the first run waits on it before it
+  /// hands off, so a turn that lands under the pop-up does not tear it down.
+  Future<void> get closed => _open?.future ?? Future.value();
+}
+
+final pushAskProvider = NotifierProvider<PushAskNotifier, bool>(
+  PushAskNotifier.new,
+);
 
 /// The live [PushService], for [AuthNotifier.signOut], which unregisters it
 /// before the bearer is dropped. A slot rather than [pushServiceProvider]

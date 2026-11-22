@@ -108,3 +108,37 @@ final aiConsentSettledProvider = Provider<bool>((ref) {
   final me = ref.watch(meProvider).unwrapPrevious();
   return me.hasValue || me.hasError;
 });
+
+/// How many one-time asks are up right now: the AI-consent sheet (from any
+/// of its three places) and "Where do you listen?". The Mix ready pop-up is
+/// never stacked on one: it waits until this is back to zero.
+class OpenAsksNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void opened() => state = state + 1;
+
+  void closed() => state = state > 0 ? state - 1 : 0;
+
+  /// Runs [show] counted as open, whatever it returns or throws.
+  static Future<T> around<T>(
+    ProviderContainer? container,
+    Future<T> Function() show,
+  ) async {
+    final asks = container?.read(openAsksProvider.notifier);
+    asks?.opened();
+    try {
+      return await show();
+    } finally {
+      try {
+        asks?.closed();
+      } catch (_) {
+        // The container went with the sheet.
+      }
+    }
+  }
+}
+
+final openAsksProvider = NotifierProvider<OpenAsksNotifier, int>(
+  OpenAsksNotifier.new,
+);

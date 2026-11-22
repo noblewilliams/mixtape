@@ -138,6 +138,7 @@ class MixtapeApp extends ConsumerWidget {
           ? const FoundationGalleryScreen()
           : (debugPreview == 'mixes' ||
                     debugPreview == 'shell' ||
+                    debugPreview == 'push-ask' ||
                     debugPreview == 'shell-update' ||
                     debugPreview == 'shell-update-applied') &&
                 kDebugMode

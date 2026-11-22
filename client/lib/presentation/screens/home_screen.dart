@@ -53,6 +53,7 @@ import 'interview_screen.dart';
 import 'spotify_request_screen.dart';
 import '../format/network_copy.dart';
 import '../widgets/foundation/haptics.dart';
+import '../widgets/push_permission_popup.dart';
 
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
 
@@ -733,134 +734,143 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
 
     _measurePanel();
 
-    return GradientBackground(
-      // No app bar: the large title is Home's only chrome, and the panel is
-      // laid over the scroll view rather than inside it, so the keyboard
-      // carries it while the open space stays put.
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        resizeToAvoidBottomInset: false,
-        body: Stack(
-          children: [
-            // The dock's inset is the panel's business, not the scroll
-            // view's: left in, the title's scaffold would pad a dock the
-            // panel already clears.
-            MediaQuery.removePadding(
-              context: context,
-              removeBottom: true,
-              child: LargeTitleScaffold(
-                title: 'Home',
-                // Over-the-air updates: "Update available" at the title's end.
-                titleNote: UpdateStatusNote.inTitle,
-                titleNoteWidth: UpdateStatusNote.widestWidth,
-                // No pull-to-refresh on Home: there is no list to refresh.
-                slivers: [
-                  SliverLayoutBuilder(
-                    builder: (context, constraints) {
-                      final open =
-                          constraints.viewportMainAxisExtent -
-                          constraints.precedingScrollExtent -
-                          _panelHeight;
-                      return SliverToBoxAdapter(
-                        child: ConstrainedBox(
-                          // The open space is whatever the title and the
-                          // panel leave; content taller than it scrolls, and
-                          // nothing else on Home ever does.
-                          constraints: BoxConstraints(
-                            minHeight: open < 0 ? 0 : open,
+    // On arrival, or about 3 s into a mix started here, the Mix ready pop-up
+    // may ask once.
+    return PushAskTrigger(
+      onArrival: true,
+      working: _starting,
+      child: GradientBackground(
+        // No app bar: the large title is Home's only chrome, and the panel is
+        // laid over the scroll view rather than inside it, so the keyboard
+        // carries it while the open space stays put.
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          resizeToAvoidBottomInset: false,
+          body: Stack(
+            children: [
+              // The dock's inset is the panel's business, not the scroll
+              // view's: left in, the title's scaffold would pad a dock the
+              // panel already clears.
+              MediaQuery.removePadding(
+                context: context,
+                removeBottom: true,
+                child: LargeTitleScaffold(
+                  title: 'Home',
+                  // Over-the-air updates: "Update available" at the title's end.
+                  titleNote: UpdateStatusNote.inTitle,
+                  titleNoteWidth: UpdateStatusNote.widestWidth,
+                  // No pull-to-refresh on Home: there is no list to refresh.
+                  slivers: [
+                    SliverLayoutBuilder(
+                      builder: (context, constraints) {
+                        final open =
+                            constraints.viewportMainAxisExtent -
+                            constraints.precedingScrollExtent -
+                            _panelHeight;
+                        return SliverToBoxAdapter(
+                          child: ConstrainedBox(
+                            // The open space is whatever the title and the
+                            // panel leave; content taller than it scrolls, and
+                            // nothing else on Home ever does.
+                            constraints: BoxConstraints(
+                              minHeight: open < 0 ? 0 : open,
+                            ),
+                            child: _openSpace(
+                              context,
+                              open: open,
+                              waiting: waiting,
+                              onboarding: onboarding,
+                            ),
                           ),
-                          child: _openSpace(
-                            context,
-                            open: open,
-                            waiting: waiting,
-                            onboarding: onboarding,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              // Measured again whenever it changes size on its own (a draft
-              // growing a line), not only when Home builds.
-              child: NotificationListener<SizeChangedLayoutNotification>(
-                onNotification: (_) {
-                  _measurePanel();
-                  return true;
-                },
-                child: SizeChangedLayoutNotifier(
-                  child: KeyedSubtree(
-                    key: _panelKey,
-                    child: HomePanel(
-                      composerKey: _composerKey,
-                      obscured: _obscured,
-                      controller: _promptController,
-                      focusNode: _promptFocus,
-                      busy: _starting,
-                      paused: paused,
-                      onStop: _newMixStop == null ? null : _stopStart,
-                      error: _error,
-                      onSubmit: _submit,
-                      leading: ComposerPlusButton(
-                        key: HomeScreen.plusKey,
-                        onPressed: _starting ? null : _plusMenu,
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                // Measured again whenever it changes size on its own (a draft
+                // growing a line), not only when Home builds.
+                child: NotificationListener<SizeChangedLayoutNotification>(
+                  onNotification: (_) {
+                    _measurePanel();
+                    return true;
+                  },
+                  child: SizeChangedLayoutNotifier(
+                    child: KeyedSubtree(
+                      key: _panelKey,
+                      child: HomePanel(
+                        composerKey: _composerKey,
+                        obscured: _obscured,
+                        controller: _promptController,
+                        focusNode: _promptFocus,
+                        busy: _starting,
+                        paused: paused,
+                        onStop: _newMixStop == null ? null : _stopStart,
+                        error: _error,
+                        onSubmit: _submit,
+                        leading: ComposerPlusButton(
+                          key: HomeScreen.plusKey,
+                          onPressed: _starting ? null : _plusMenu,
+                        ),
+                        modeControl: albumsOffered ? _modeControl() : null,
+                        // Absent under Album, not hidden: no shape is sent there.
+                        shapeControl: album
+                            ? null
+                            // Changeable while a mix is starting too: a pick
+                            // then goes on to the new mix (see _carryShape).
+                            : EnergyControl(
+                                compact: true,
+                                selectedArc: _arc,
+                                onArcChanged: (arc) =>
+                                    setState(() => _arc = arc),
+                              ),
+                        switched: _switched && album,
+                        onKeepMix: _keepMix,
+                        sendLabel: album
+                            ? HomeScreen.albumSendLabel
+                            : MixPromptInput.defaultSendLabel,
+                        starterPrompts: album
+                            ? HomeScreen.albumStarters
+                            : MixPromptInput.examples,
+                        routineSuggestion: !album,
+                        // Under Album the record placeholder holds even with a
+                        // playlist attached; the attachment chip says which one.
+                        placeholder: album
+                            ? HomeScreen.albumPlaceholder
+                            : _inspiration == null
+                            ? null
+                            : 'Something like ${_inspiration!.name}, but…',
+                        refinements: _inspiration == null
+                            ? null
+                            : _refinements(),
+                        attachment: _inspiration == null
+                            ? null
+                            : InspirationChip(
+                                name: _inspiration!.name,
+                                excludeSourceTracks: _excludeSourceTracks,
+                                onPick: _starting ? null : _pickInspiration,
+                                onToggleExclude: _starting
+                                    ? null
+                                    : _toggleExclude,
+                                onDetach: _starting
+                                    ? null
+                                    : () => ref
+                                          .read(
+                                            newMixInspirationProvider.notifier,
+                                          )
+                                          .clear(),
+                              ),
                       ),
-                      modeControl: albumsOffered ? _modeControl() : null,
-                      // Absent under Album, not hidden: no shape is sent there.
-                      shapeControl: album
-                          ? null
-                          // Changeable while a mix is starting too: a pick
-                          // then goes on to the new mix (see _carryShape).
-                          : EnergyControl(
-                              compact: true,
-                              selectedArc: _arc,
-                              onArcChanged: (arc) => setState(() => _arc = arc),
-                            ),
-                      switched: _switched && album,
-                      onKeepMix: _keepMix,
-                      sendLabel: album
-                          ? HomeScreen.albumSendLabel
-                          : MixPromptInput.defaultSendLabel,
-                      starterPrompts: album
-                          ? HomeScreen.albumStarters
-                          : MixPromptInput.examples,
-                      routineSuggestion: !album,
-                      // Under Album the record placeholder holds even with a
-                      // playlist attached; the attachment chip says which one.
-                      placeholder: album
-                          ? HomeScreen.albumPlaceholder
-                          : _inspiration == null
-                          ? null
-                          : 'Something like ${_inspiration!.name}, but…',
-                      refinements: _inspiration == null ? null : _refinements(),
-                      attachment: _inspiration == null
-                          ? null
-                          : InspirationChip(
-                              name: _inspiration!.name,
-                              excludeSourceTracks: _excludeSourceTracks,
-                              onPick: _starting ? null : _pickInspiration,
-                              onToggleExclude: _starting
-                                  ? null
-                                  : _toggleExclude,
-                              onDetach: _starting
-                                  ? null
-                                  : () => ref
-                                        .read(
-                                          newMixInspirationProvider.notifier,
-                                        )
-                                        .clear(),
-                            ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

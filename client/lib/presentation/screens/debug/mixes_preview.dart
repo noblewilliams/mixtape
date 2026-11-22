@@ -32,6 +32,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/dj/dj_api.dart';
+import '../../../data/push/push_ask_store.dart';
+import '../../../data/push/push_service.dart';
 import '../../../data/dj/dj_models.dart';
 import '../../../data/playlists/playlist_context_api.dart';
 import '../../../data/playlists/playlist_context_models.dart';
@@ -44,6 +46,7 @@ import '../../providers/mix_activity_provider.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../../data/listening/listening_models.dart';
 import '../../providers/playlist_context_provider.dart';
+import '../../providers/push_provider.dart';
 import '../mixes_screen.dart';
 import '../shell/shell_screen.dart';
 import 'update_preview.dart';
@@ -64,8 +67,18 @@ class MixesPreview extends StatefulWidget {
   /// checked on any screen size without signing in.
   static const bool shell =
       String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell' ||
+      String.fromEnvironment('MIXTAPE_PREVIEW') == 'push-ask' ||
       String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell-update' ||
       String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell-update-applied';
+
+  /// `--dart-define=MIXTAPE_PREVIEW=push-ask`: the shell with nothing in
+  /// flight and a phone iOS has not asked yet, so the Mix ready pop-up
+  /// comes up over Home once it settles (after "Where do you listen?" if
+  /// this simulator has no platform stored). Its pill brings up a made-up
+  /// Allow; You's row then reads on. The once rule is kept in memory, so
+  /// every launch asks again.
+  static const bool pushAsk =
+      String.fromEnvironment('MIXTAPE_PREVIEW') == 'push-ask';
 
   /// A made-up share its sender stopped.
   static const String goneToken = 'PreviewShareStoppedXyz';
@@ -97,6 +110,10 @@ class _MixesPreviewState extends State<MixesPreview> {
       // Library and Add your music on made-up sources.
       if (_previewSources.isNotEmpty)
         onboardingProvider.overrideWith(_PreviewOnboarding.new),
+      if (MixesPreview.pushAsk) ...[
+        pushChannelProvider.overrideWithValue(_PreviewPushChannel()),
+        pushAskStoreProvider.overrideWithValue(InMemoryPushAskStore()),
+      ],
     ],
   );
 
@@ -107,7 +124,8 @@ class _MixesPreviewState extends State<MixesPreview> {
     // After the first frame: a provider must not change while the tree is
     // being built.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      // The pop-up asks on Home only with no turn out.
+      if (!mounted || MixesPreview.pushAsk) return;
       final activity = _container.read(mixActivityProvider.notifier);
       activity.beginNewMix('Sunrise run, steady 170 bpm');
       activity.beginTurn('a1');
@@ -677,4 +695,38 @@ class _PreviewOnboarding extends OnboardingNotifier {
 
   @override
   Future<bool> refresh() async => true;
+}
+
+/// `mixtape/push` for the `push-ask` preview: not asked yet, a made-up
+/// Allow after a beat, and no token, so nothing is sent to a server.
+class _PreviewPushChannel implements PushChannel {
+  PushStatus _status = PushStatus.notDetermined;
+
+  @override
+  Future<PushStatus> status() async => _status;
+
+  @override
+  Future<PushStatus> requestAuthorization() async {
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    return _status = PushStatus.authorized;
+  }
+
+  @override
+  Future<String> register() async =>
+      throw UnsupportedError('no registration in the preview');
+
+  @override
+  Future<String?> appVersion() async => null;
+
+  @override
+  Future<String?> environment() async => null;
+
+  @override
+  Future<void> setVisibleSession(String? sessionId) async {}
+
+  @override
+  Future<PushTap?> initialTap() async => null;
+
+  @override
+  Stream<PushTap> get taps => const Stream.empty();
 }

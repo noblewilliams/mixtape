@@ -41,6 +41,7 @@ import '../providers/mix_operation_gate.dart';
 import '../providers/push_provider.dart';
 import '../../data/push/push_service.dart';
 import '../providers/working_step.dart';
+import '../widgets/push_permission_popup.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/composer_plus_button.dart';
@@ -900,6 +901,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       onMore: _changingStatus ? null : _actions,
       body: _transcript(state, busy: busy),
       panel: _panel(state: state, inspiration: inspiration, busy: busy),
+      working: state.sending || _workingSince() != null,
     );
   }
 
@@ -912,48 +914,53 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     bool notPersonal = false,
     Future<void> Function(BuildContext anchor)? onMore,
     Widget? panel,
+    bool working = false,
   }) {
-    return GradientBackground(
-      child: Builder(
-        builder: (context) => Scaffold(
-          backgroundColor: Colors.transparent,
-          // The panel rides the keyboard itself, as Home's does.
-          resizeToAvoidBottomInset: false,
-          body: Stack(
-            children: [
-              SafeArea(
-                bottom: false,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _TopBar(
-                      title: title,
-                      notPersonal: notPersonal,
-                      onBack: () => Navigator.of(context).maybePop(),
-                      onMore: onMore,
-                    ),
-                    Expanded(child: body),
-                  ],
-                ),
-              ),
-              if (panel != null)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  // Measured again whenever it changes size on its own (a
-                  // draft growing a line), not only when this screen builds.
-                  child: NotificationListener<SizeChangedLayoutNotification>(
-                    onNotification: (_) {
-                      _measurePanel();
-                      return true;
-                    },
-                    child: SizeChangedLayoutNotifier(
-                      child: KeyedSubtree(key: _panelKey, child: panel),
-                    ),
+    // About 3 s into the working state, the Mix ready pop-up may ask once.
+    return PushAskTrigger(
+      working: working,
+      child: GradientBackground(
+        child: Builder(
+          builder: (context) => Scaffold(
+            backgroundColor: Colors.transparent,
+            // The panel rides the keyboard itself, as Home's does.
+            resizeToAvoidBottomInset: false,
+            body: Stack(
+              children: [
+                SafeArea(
+                  bottom: false,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _TopBar(
+                        title: title,
+                        notPersonal: notPersonal,
+                        onBack: () => Navigator.of(context).maybePop(),
+                        onMore: onMore,
+                      ),
+                      Expanded(child: body),
+                    ],
                   ),
                 ),
-            ],
+                if (panel != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    // Measured again whenever it changes size on its own (a
+                    // draft growing a line), not only when this screen builds.
+                    child: NotificationListener<SizeChangedLayoutNotification>(
+                      onNotification: (_) {
+                        _measurePanel();
+                        return true;
+                      },
+                      child: SizeChangedLayoutNotifier(
+                        child: KeyedSubtree(key: _panelKey, child: panel),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

@@ -66,6 +66,8 @@ class _ListenOnPromptState extends ConsumerState<ListenOnPrompt> {
     ref.listenManual(aiConsentProvider, (_, _) => _schedule());
     ref.listenManual(aiConsentSettledProvider, (_, _) => _schedule());
     ref.listenManual(listenOnAskedProvider, (_, _) => _schedule());
+    // Another ask (the Mix ready pop-up) closing.
+    ref.listenManual(openAsksProvider, (_, _) => _schedule());
     _schedule();
   }
 
@@ -87,10 +89,15 @@ class _ListenOnPromptState extends ConsumerState<ListenOnPrompt> {
           !ref.read(aiConsentProvider).dismissed) {
         return;
       }
+      // Never stacked on another ask that is up.
+      if (ref.read(openAsksProvider) > 0) return;
       final asked = ref.read(listenOnAskedProvider.notifier);
       asked.markAsked();
       widget.onShowingChanged?.call(true);
-      final answer = await askWhereYouListen(context);
+      final answer = await OpenAsksNotifier.around(
+        ProviderScope.containerOf(context, listen: false),
+        () => askWhereYouListen(context),
+      );
       if (mounted) widget.onShowingChanged?.call(false);
       // The notifiers outlive this widget: an answer given as the shell was
       // replaced still counts, and a sheet closed without one is asked again.
