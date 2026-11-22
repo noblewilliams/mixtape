@@ -174,44 +174,26 @@ class MusicKitBridge: NSObject {
       return
     }
     Task { @MainActor in
-      do {
-        // Resolve exact songs before creating anything. Do not guess a
-        // MusicKit ID from a MediaPlayer persistent ID or playlist metadata.
-        var songs: [String: Song] = [:]
-        let validIds = Array(Set(appleIds.filter { isSupportedAppleSongID($0) })).sorted()
-        for offset in stride(from: 0, to: validIds.count, by: 25) {
-          let ids = Array(validIds[offset..<min(offset + 25, validIds.count)])
+      let writer = MixPlaylistWriter<Song, Playlist>(
+        resolveBatch: { ids in
           let request = MusicCatalogResourceRequest<Song>(matching: \.id,
             memberOf: ids.map { MusicItemID($0) })
           let response = try await request.response()
+          var songs: [String: Song] = [:]
           for song in response.items where ids.contains(song.id.rawValue) {
             songs[song.id.rawValue] = song
           }
-        }
-        guard !songs.isEmpty else {
-          result(FlutterError(code: "playlist_failed", message: "No songs could be resolved.", details: nil))
-          return
-        }
-        var playlist = try await MusicLibrary.shared.createPlaylist(
-          name: name, description: description, authorDisplayName: author)
-        let libraryId = playlist.id.rawValue
-        var added = 0
-        var failed = 0
-        // Sequential additions preserve requested order and duplicate entries.
-        // Once creation succeeds, always report its ID, including partial saves.
-        for id in appleIds {
-          guard let song = songs[id] else { failed += 1; continue }
-          do {
-            playlist = try await MusicLibrary.shared.add(song, to: playlist)
-            added += 1
-          } catch {
-            failed += 1
-          }
-        }
-        result(["added": added, "failed": failed, "appleLibraryId": libraryId])
-      } catch {
-        result(FlutterError(code: "playlist_failed", message: "Could not create playlist.", details: nil))
-      }
+          return songs
+        },
+        create: {
+          try await MusicLibrary.shared.createPlaylist(
+            name: name, description: description, authorDisplayName: author)
+        },
+        add: { song, playlist in try await MusicLibrary.shared.add(song, to: playlist) },
+        libraryId: { $0.id.rawValue }
+      )
+      result(MixPlaylistWriter<Song, Playlist>.flutterResult(
+        await writer.write(appleIds: appleIds)))
     }
   }
 
@@ -517,6 +499,79 @@ class MusicKitBridge: NSObject {
 }
 
 @MainActor
+/// The mix → playlist write, apart from MusicKit so it can be tested. Each
+/// failure names the stage that failed and carries Apple's own reason in
+/// `detail`: a catch-all with `details: nil` once turned every device failure
+/// into "Could not create playlist." with nothing to go on (2026-11-22).
+struct MixPlaylistWriter<SongValue, PlaylistValue> {
+  enum Outcome {
+    case saved(added: Int, failed: Int, libraryId: String)
+    case failed(message: String, detail: String?)
+  }
+
+  let resolveBatch: ([String]) async throws -> [String: SongValue]
+  let create: () async throws -> PlaylistValue
+  let add: (SongValue, PlaylistValue) async throws -> PlaylistValue
+  let libraryId: (PlaylistValue) -> String
+
+  func write(appleIds: [String]) async -> Outcome {
+    // Resolve exact songs before creating anything. Do not guess a MusicKit
+    // ID from a MediaPlayer persistent ID or playlist metadata.
+    var songs: [String: SongValue] = [:]
+    let validIds = Array(Set(appleIds.filter { MusicKitBridge.isSupportedAppleSongID($0) })).sorted()
+    do {
+      for offset in stride(from: 0, to: validIds.count, by: 25) {
+        let ids = Array(validIds[offset..<min(offset + 25, validIds.count)])
+        for (id, song) in try await resolveBatch(ids) where ids.contains(id) {
+          songs[id] = song
+        }
+      }
+    } catch {
+      return .failed(message: "Could not find the songs in Apple Music.", detail: Self.reason(error))
+    }
+    guard !songs.isEmpty else {
+      return .failed(message: "No songs could be resolved.", detail: nil)
+    }
+    var playlist: PlaylistValue
+    do {
+      playlist = try await create()
+    } catch {
+      return .failed(message: "Could not create playlist.", detail: Self.reason(error))
+    }
+    var added = 0
+    var failed = 0
+    // Sequential additions preserve requested order and duplicate entries.
+    // Once creation succeeds, always report its ID, including partial saves.
+    for id in appleIds {
+      guard let song = songs[id] else { failed += 1; continue }
+      do {
+        playlist = try await add(song, playlist)
+        added += 1
+      } catch {
+        failed += 1
+      }
+    }
+    return .saved(added: added, failed: failed, libraryId: libraryId(playlist))
+  }
+
+  static func flutterResult(_ outcome: Outcome) -> Any {
+    switch outcome {
+    case let .saved(added, failed, libraryId):
+      return ["added": added, "failed": failed, "appleLibraryId": libraryId]
+    case let .failed(message, detail):
+      return FlutterError(code: "playlist_failed", message: message, details: detail)
+    }
+  }
+
+  /// Apple's localized text plus the typed error ("permissionDenied",
+  /// "developerTokenRequestFailed"), which is the part that diagnoses.
+  private static func reason(_ error: Error) -> String {
+    let text = error.localizedDescription
+    let typed = String(describing: error)
+    return text.contains(typed) ? text : "\(text) [\(typed)]"
+  }
+}
+
 private final class PlaylistApplyCoordinator {
   enum ApplyError: String, Error {
     case unresolvedCatalog = "unresolved_catalog"

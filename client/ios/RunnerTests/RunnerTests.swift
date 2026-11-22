@@ -95,6 +95,102 @@ class RunnerTests: XCTestCase {
   }
 }
 
+private struct ProbeError: LocalizedError {
+  let reason: String
+  var errorDescription: String? { reason }
+}
+
+private final class FakePlaylist: @unchecked Sendable {
+  var songs: [String] = []
+}
+
+extension RunnerTests {
+  private func writer(
+    resolve: @escaping ([String]) async throws -> [String: String] = { ids in
+      Dictionary(uniqueKeysWithValues: ids.map { ($0, $0) })
+    },
+    create: @escaping () async throws -> FakePlaylist = { FakePlaylist() },
+    add: @escaping (String, FakePlaylist) async throws -> FakePlaylist = { song, playlist in
+      playlist.songs.append(song)
+      return playlist
+    }
+  ) -> MixPlaylistWriter<String, FakePlaylist> {
+    MixPlaylistWriter(
+      resolveBatch: resolve, create: create, add: add, libraryId: { _ in "p.new" })
+  }
+
+  // The founder's 2026-11-22 report: "Couldn't save the playlist — Could not
+  // create playlist." with no reason, because the bridge discarded Apple's
+  // error. A catalogue lookup failure must say so and carry Apple's reason.
+  func testMixPlaylistCatalogLookupFailureCarriesStageAndAppleReason() async {
+    let outcome = await writer(resolve: { _ in
+      throw ProbeError(reason: "developer token request failed")
+    }).write(appleIds: ["1440903547"])
+
+    guard case let .failed(message, detail) = outcome else {
+      return XCTFail("expected a failure, got \(outcome)")
+    }
+    XCTAssertEqual(message, "Could not find the songs in Apple Music.")
+    XCTAssertEqual(detail?.contains("developer token request failed"), true)
+  }
+
+  func testMixPlaylistCreationFailureCarriesStageAndAppleReason() async {
+    let outcome = await writer(create: {
+      throw ProbeError(reason: "permission denied")
+    }).write(appleIds: ["1440903547"])
+
+    guard case let .failed(message, detail) = outcome else {
+      return XCTFail("expected a failure, got \(outcome)")
+    }
+    XCTAssertEqual(message, "Could not create playlist.")
+    XCTAssertEqual(detail?.contains("permission denied"), true)
+  }
+
+  @MainActor func testMixPlaylistFailureBecomesFlutterErrorWithDetails() {
+    let error = MixPlaylistWriter<String, FakePlaylist>.flutterResult(
+      .failed(message: "Could not create playlist.", detail: "permission denied")
+    ) as? FlutterError
+
+    XCTAssertEqual(error?.code, "playlist_failed")
+    XCTAssertEqual(error?.message, "Could not create playlist.")
+    XCTAssertEqual(error?.details as? String, "permission denied")
+  }
+
+  func testMixPlaylistAddsInOrderAndCountsUnresolvedAndFailedAdds() async {
+    let outcome = await writer(
+      resolve: { ids in
+        Dictionary(uniqueKeysWithValues: ids.filter { $0 != "missing" }.map { ($0, $0) })
+      },
+      add: { song, playlist in
+        if song == "refused" { throw ProbeError(reason: "not addable") }
+        playlist.songs.append(song)
+        return playlist
+      }
+    ).write(appleIds: ["b", "missing", "a", "refused", "b"])
+
+    guard case let .saved(added, failed, libraryId) = outcome else {
+      return XCTFail("expected a save, got \(outcome)")
+    }
+    XCTAssertEqual(added, 3)
+    XCTAssertEqual(failed, 2)
+    XCTAssertEqual(libraryId, "p.new")
+  }
+
+  func testMixPlaylistWithNoResolvableSongsCreatesNothing() async {
+    let created = FakePlaylist()
+    let outcome = await writer(
+      resolve: { _ in [:] },
+      create: { created.songs.append("created"); return created }
+    ).write(appleIds: ["1"])
+
+    XCTAssertTrue(created.songs.isEmpty)
+    guard case let .failed(message, _) = outcome else {
+      return XCTFail("expected a failure, got \(outcome)")
+    }
+    XCTAssertEqual(message, "No songs could be resolved.")
+  }
+}
+
 private actor LibrarySongRequestRecorder {
   private(set) var values: [[String]] = []
 
