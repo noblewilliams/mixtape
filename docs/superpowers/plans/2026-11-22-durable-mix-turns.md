@@ -16,7 +16,7 @@ not deployed. G (rollout) is the founder's.
 | C3 approved pop-up | `da9ad3f` |
 | W1 data and resume | `716f845` |
 | W2 web push | `2fb81a8` |
-| Final review fixes (below) | uncommitted at the time of writing |
+| Final review fixes (below) | `e3f491f` |
 
 Final review fixes: CORS allows `Idempotency-Key` (the web's turn
 preflight failed without it); the web sends the key only once the server
