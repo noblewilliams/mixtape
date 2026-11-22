@@ -229,7 +229,12 @@ export function persistTurnWrites(claim: TurnClaim | null, startingVersion: numb
 // it. 'rerun': an attempt died mid turn and the turn runs again; the
 // listener's message (the first seq) stays, since the re-run answers it,
 // and the session always stays.
-export type RollbackMode = { mode: 'stop'; firstTurn?: boolean } | { mode: 'rerun' }
+// orphans (rerun only): also deletes every DJ message after the listener's,
+// for a caller that knows no other turn has written to the session since
+// (the durable job, whose object holds the session's turn): a reply whose
+// write landed just before the attempt died, ahead of its record, goes too,
+// so the re-run's reply is the only one.
+export type RollbackMode = { mode: 'stop'; firstTurn?: boolean } | { mode: 'rerun'; orphans?: boolean }
 
 // Undoes a turn's writes and lets go of its claim. When a later turn already
 // holds the claim, only this turn's own messages go: the queue and title are
@@ -255,6 +260,11 @@ export async function rollbackTurn(
   }
   const superseded = row.activeTurnId !== null && row.activeTurnId !== writes.claimTurnId
   if (superseded) return
+  if (options.mode === 'rerun' && options.orphans && writes.messageSeqs.length > 0) {
+    await db
+      .delete(djMessages)
+      .where(and(eq(djMessages.sessionId, session.id), eq(djMessages.role, 'dj'), gt(djMessages.seq, writes.messageSeqs[0])))
+  }
 
   const { startingVersion } = writes
   if (row.queueVersion !== startingVersion) {

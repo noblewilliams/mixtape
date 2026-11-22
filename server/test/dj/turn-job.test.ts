@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { createTestDb, forkTestDb, type TestDb } from '../helpers/db'
 import { embed, FAST, generate, messages, mixSession, normalized, post, queueCreateTurn, queueMessageTurn, scriptedLlm, seedLibrary, seedUser, turnRow, curateReply } from '../helpers/turn-job'
 import { LlmError, type LlmClient, type LlmComplete, type LlmRequest } from '../../src/dj/llm'
-import { djSessions, djTurns } from '../../src/db/schema'
+import { djMessages, djSessions, djTurns } from '../../src/db/schema'
 import { getActiveQueue } from '../../src/dj/queue-store'
 import { MAX_ATTEMPTS, runTurnJob, TURN_HEARTBEAT_MS, type TurnJobIo } from '../../src/dj/turn-job'
 import type { TurnStepEvent } from '../../src/dj/turn-steps'
@@ -261,6 +261,75 @@ describe('runTurnJob', () => {
     expect(transcript.slice(-2)).toEqual([['user', 'change it'], ['dj', 'here you go.']])
     expect((await getActiveQueue(db, sessionId)).length).toBe(3)
     expect(await turnRow(db, job.turnId)).toMatchObject({ status: 'done', attempt: 2 })
+  })
+
+  it("attempt 2 also undoes a DJ reply attempt 1 wrote but died before recording", async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 'u1', 4)
+    const sessionId = await mixSession(db)
+    const job = await queueMessageTurn(db, sessionId, 'change it')
+    // Attempt 1 recorded only the listener's message, then its reply landed
+    // and the isolate died before the record that names it.
+    await db.insert(djMessages).values({ sessionId, role: 'dj', content: 'orphan reply' })
+    await db.update(djTurns).set({
+      status: 'running',
+      attempt: 1,
+      writes: { messageSeqs: [job.userMessageSeq], renamed: false, historyOffered: false, startingVersion: 0, claimTitle: 'start', claimNotPersonal: false, claimTurnId: null },
+    }).where(eq(djTurns.id, job.turnId))
+
+    const result = await runTurnJob(job, { db, deps: { embed, llm: scriptedLlm([{ text: 'fresh reply.' }]) }, watchers: watchers(), stopTiming: FAST })
+
+    expect(result).toMatchObject({ outcome: 'done' })
+    const transcript = (await messages(db, sessionId)).map((m) => [m.role, m.content])
+    expect(transcript).toEqual([['user', 'start'], ['dj', 'ready.'], ['user', 'change it'], ['dj', 'fresh reply.']])
+  })
+
+  it('a stop raised while attempt 1 held the claim is honoured: attempt 2 undoes it as a stop, never re-runs', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 'u1', 4)
+    const sessionId = await mixSession(db)
+    const job = await queueMessageTurn(db, sessionId, 'change it')
+    const deadClaim = '11111111-2222-4333-8444-555555555555'
+    await db.update(djSessions).set({ activeTurnId: deadClaim, activeTurnAt: new Date(), turnStopRequested: true, title: 'Renamed' }).where(eq(djSessions.id, sessionId))
+    await db.update(djTurns).set({
+      status: 'running',
+      attempt: 1,
+      writes: { messageSeqs: [job.userMessageSeq], renamed: true, historyOffered: false, startingVersion: 0, claimTitle: 'start', claimNotPersonal: false, claimTurnId: deadClaim },
+    }).where(eq(djTurns.id, job.turnId))
+    let called = false
+
+    const w = watchers()
+    const result = await runTurnJob(job, { db, deps: { embed, llm: async () => ((called = true), curateReply({} as LlmRequest)) }, watchers: w, stopTiming: FAST })
+
+    expect(called).toBe(false)
+    expect(result).toMatchObject({ outcome: 'stopped', status: 409, body: { error: 'turn_stopped' }, errorKind: null })
+    expect(w.ends).toEqual([{ status: 409, body: { error: 'turn_stopped' } }])
+    expect(await turnRow(db, job.turnId)).toMatchObject({ status: 'stopped', attempt: 2 })
+    const [row] = await db.select().from(djSessions).where(eq(djSessions.id, sessionId))
+    expect(row).toMatchObject({ title: 'start', activeTurnId: null, turnStopRequested: false })
+    expect((await messages(db, sessionId)).map((m) => m.content)).toEqual(['start', 'ready.'])
+  })
+
+  it('a stop raised while a dead first turn held the claim takes its session, as a live stop does', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 'u1', 4)
+    const job = await queueCreateTurn(db, 'a rainy drive')
+    const deadClaim = '11111111-2222-4333-8444-555555555556'
+    await db.update(djSessions).set({ activeTurnId: deadClaim, activeTurnAt: new Date(), turnStopRequested: true }).where(eq(djSessions.id, job.sessionId))
+    await db.update(djTurns).set({
+      status: 'running',
+      attempt: 1,
+      writes: { messageSeqs: [job.userMessageSeq], renamed: false, historyOffered: false, startingVersion: 0, claimTitle: 'a rainy drive', claimNotPersonal: false, claimTurnId: deadClaim },
+    }).where(eq(djTurns.id, job.turnId))
+
+    const result = await runTurnJob(job, { db, deps: { embed, llm: scriptedLlm(generate(3)) }, watchers: watchers(), stopTiming: FAST })
+
+    expect(result).toMatchObject({ outcome: 'stopped', status: 409 })
+    expect((await db.select().from(djSessions).where(eq(djSessions.id, job.sessionId))).length).toBe(0)
+    expect(await turnRow(db, job.turnId)).toBeUndefined()
   })
 
   it('a rollback that fails leaves the writes standing and fails the turn rather than run on top', async () => {

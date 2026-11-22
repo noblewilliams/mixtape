@@ -1,14 +1,14 @@
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { and, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djSessions, djTurns } from '../db/schema'
 import { CONFLICT_APOLOGY, DjError } from '../dj/loop'
 import { abandonTurn, TURN_LOST_MS, type TurnJob } from '../dj/turn-job'
 import type { TurnRunnerNamespace, TurnRunnerStub } from '../dj/turn-runner'
-import { djErrorBody, sessionListColumns } from './turn-bodies'
-import { INTERNAL_TURN_REPLY, sessionFrame, wantsTurnStream, type TurnReply } from './turn-stream'
+import { djErrorBody, finishedTurnReply, sessionListColumns } from './turn-bodies'
+import { INTERNAL_TURN_REPLY, sessionFrame, TurnStreamWriter, turnStreamResponse, wantsTurnStream, type TurnReply } from './turn-stream'
 
 // Mix turns off the request (spec 2026-11-21 durable-mix-turns, "Start
 // (Worker side)" and "Session reads"), behind DURABLE_TURNS. The session
@@ -131,10 +131,22 @@ export async function startDurableTurn(
     throw e
   }
   if (answer === 'busy') {
-    await abandonTurn(db, turn.id, 'internal')
+    // Failed as the conflict it answers, so a replay of its key rebuilds
+    // the same 409 (finishedTurnReply).
+    await abandonTurn(db, turn.id, 'conflict')
+    // The pointer goes back to the turn that holds the object: the newest
+    // other live turn of the session. previousTurnId alone is not enough,
+    // since two sends can read the same previous pointer and the busy one
+    // may have committed last.
+    const [holder] = await db
+      .select({ id: djTurns.id })
+      .from(djTurns)
+      .where(and(eq(djTurns.sessionId, turn.sessionId), inArray(djTurns.status, ['queued', 'running']), ne(djTurns.id, turn.id)))
+      .orderBy(desc(djTurns.createdAt))
+      .limit(1)
     await db
       .update(djSessions)
-      .set({ currentTurnId: turn.previousTurnId, updatedAt: sql`${djSessions.updatedAt}` })
+      .set({ currentTurnId: holder?.id ?? turn.previousTurnId, updatedAt: sql`${djSessions.updatedAt}` })
       .where(and(eq(djSessions.id, turn.sessionId), eq(djSessions.currentTurnId, turn.id)))
     const extra = turn.kind === 'create' ? { sessionId: turn.sessionId } : {}
     return c.json(djErrorBody(new DjError('conflict', CONFLICT_APOLOGY), extra), 409)
@@ -155,8 +167,9 @@ async function createSessionEvent(db: Db, sessionId: string): Promise<unknown> {
  * stream (with `replay=1`, so a turn that already finished still sends its
  * last event), headed by the create's `session` event; a JSON request gets
  * that stream read here to its last event, as the same body and status the
- * in-request path answers. A turn whose last event is no longer kept
- * answers 204, and the client re-reads the session.
+ * in-request path answers. A finished turn whose last event the object no
+ * longer keeps is answered from the database (finishedTurnReply) the same
+ * two ways; only an unfinished turn the object does not hold answers 204.
  */
 // A replay can land between the first request's commit and its start: the
 // object then does not know the turn yet (404). It is asked again, briefly.
@@ -173,7 +186,16 @@ export async function answerTurn(
 ): Promise<Response> {
   const stub = stubFor(durable, turn.sessionId)
   let res = await stub.fetch(watchRequest(turn.id, true))
-  for (let i = 0; options.replay && res.status === 404 && i < UNSTARTED_RETRIES; i += 1) {
+  for (let i = 0; ; i += 1) {
+    // The object no longer has the last event (a late replay: 204; or its
+    // last event is a later turn's: 404). A finished turn's answer is
+    // rebuilt from the database, so a replayed create still learns its
+    // session and how the turn ended.
+    if (res.status === 204 || res.status === 404) {
+      const finished = await finishedTurnReply(db, turn.id)
+      if (finished) return answerFinished(c, db, turn, finished)
+    }
+    if (!(options.replay && res.status === 404 && i < UNSTARTED_RETRIES)) break
     await new Promise((resolve) => setTimeout(resolve, UNSTARTED_WAIT_MS))
     res = await stub.fetch(watchRequest(turn.id, true))
   }
@@ -184,8 +206,22 @@ export async function answerTurn(
     const row = session ?? (await createSessionEvent(db, turn.sessionId))
     return passThrough(res, withLeadingFrame(sessionFrame(row), res.body))
   }
-  const reply = lastEvent(await res.text()) ?? INTERNAL_TURN_REPLY
+  // A stream that closed with no last event (a duplicate alarm's) still
+  // answers the turn's end when the database has it.
+  const reply = lastEvent(await res.text()) ?? (await finishedTurnReply(db, turn.id)) ?? INTERNAL_TURN_REPLY
   return c.json(reply.body as object, reply.status)
+}
+
+// A finished turn's rebuilt answer, sent as the live one would be: the
+// stream's `session` (create), `turn`, then `result` or `error`; JSON as
+// the body and status.
+async function answerFinished(c: Context<{ Variables: AppVars }>, db: Db, turn: TurnRow, reply: TurnReply): Promise<Response> {
+  if (!wantsTurnStream(c)) return c.json(reply.body as object, reply.status)
+  const writer = new TurnStreamWriter()
+  if (turn.kind === 'create') writer.session(await createSessionEvent(db, turn.sessionId))
+  writer.turn({ turnId: turn.id, push: false })
+  void writer.end(reply)
+  return turnStreamResponse(writer.readable)
 }
 
 function watchRequest(turnId: string, replay: boolean): Request {

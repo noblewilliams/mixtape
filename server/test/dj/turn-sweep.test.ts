@@ -29,11 +29,13 @@ describe('sweepLostTurns', () => {
     // Queued 91 s ago and never claimed.
     const queued = await queueMessageTurn(db, sessionId, 'never ran')
     await db.update(djTurns).set({ createdAt: ago(91_000) }).where(eq(djTurns.id, queued.turnId))
-    // Running, heartbeat 91 s old, its attempt had renamed the mix and
-    // written a DJ message before it died.
-    const running = await queueMessageTurn(db, sessionId, 'died mid turn')
-    const djSeq = (await db.insert(djMessages).values({ sessionId, role: 'dj', content: 'half a reply' }).returning())[0].seq
-    await db.update(djSessions).set({ title: 'Renamed Mid Turn' }).where(eq(djSessions.id, sessionId))
+    // Running, heartbeat 91 s old, its attempt had renamed its mix and
+    // written a DJ message before it died. Its own session: nothing has
+    // happened there since.
+    const deadSession = await mixSession(db)
+    const running = await queueMessageTurn(db, deadSession, 'died mid turn')
+    const djSeq = (await db.insert(djMessages).values({ sessionId: deadSession, role: 'dj', content: 'half a reply' }).returning())[0].seq
+    await db.update(djSessions).set({ title: 'Renamed Mid Turn' }).where(eq(djSessions.id, deadSession))
     await db.update(djTurns).set({
       status: 'running',
       attempt: 1,
@@ -63,15 +65,48 @@ describe('sweepLostTurns', () => {
 
     // Rolled back in re-run mode: the rename and the DJ's half reply go,
     // every listener message stays.
-    const [row] = await db.select().from(djSessions).where(eq(djSessions.id, sessionId))
+    const [row] = await db.select().from(djSessions).where(eq(djSessions.id, deadSession))
     expect(row.title).toBe('start')
-    const contents = (await messages(db, sessionId)).map((m) => m.content)
+    const contents = (await messages(db, deadSession)).map((m) => m.content)
     expect(contents).not.toContain('half a reply')
-    expect(contents).toEqual(expect.arrayContaining(['never ran', 'died mid turn', 'just asked', 'still going']))
+    expect(contents).toContain('died mid turn')
+    expect((await messages(db, sessionId)).map((m) => m.content)).toEqual(expect.arrayContaining(['never ran', 'just asked', 'still going']))
 
     // A second run finds nothing.
     expect(await sweepLostTurns(db, { notify: async (_db, turn) => void told.push(turn) })).toBe(0)
     expect(told).toHaveLength(2)
+  })
+
+  it('leaves the session alone once it has gone on: a later turn is current, or wrote after this one', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const writesFor = (seq: number) => ({ messageSeqs: [seq], renamed: true, historyOffered: false, startingVersion: 0, claimTitle: 'start', claimNotPersonal: false, claimTurnId: null })
+
+    // A dead turn whose object let go (its finish write failed), then a
+    // later turn that renamed the mix and is now the current one.
+    const pointed = await mixSession(db)
+    const lostA = await queueMessageTurn(db, pointed, 'lost one')
+    await db.update(djTurns).set({ status: 'running', attempt: 1, heartbeatAt: ago(91_000), writes: writesFor(lostA.userMessageSeq) }).where(eq(djTurns.id, lostA.turnId))
+    const later = await queueMessageTurn(db, pointed, 'later turn')
+    await db.update(djTurns).set({ status: 'done' }).where(eq(djTurns.id, later.turnId))
+    await db.update(djSessions).set({ title: 'Later Title' }).where(eq(djSessions.id, pointed))
+
+    // The same, but the later writes came from outside durable turns (the
+    // flag flipped off): the pointer still names the lost turn.
+    const written = await mixSession(db)
+    const lostB = await queueMessageTurn(db, written, 'lost two')
+    await db.update(djTurns).set({ status: 'running', attempt: 1, heartbeatAt: ago(91_000), writes: writesFor(lostB.userMessageSeq) }).where(eq(djTurns.id, lostB.turnId))
+    await insertUserMessage(db, written, 'in-request turn')
+    await db.insert(djMessages).values({ sessionId: written, role: 'dj', content: 'in-request reply' })
+    await db.update(djSessions).set({ title: 'Later Title' }).where(eq(djSessions.id, written))
+
+    expect(await sweepLostTurns(db, { notify: async () => {} })).toBe(2)
+    for (const id of [pointed, written]) {
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, id))
+      expect(row.title).toBe('Later Title')
+    }
+    expect((await messages(db, written)).map((m) => m.content)).toContain('in-request reply')
+    expect(await turnRow(db, lostA.turnId)).toMatchObject({ status: 'failed', errorKind: 'lost' })
   })
 
   it('a rollback that fails still fails the turn, and a notify that throws does not stop the sweep', async () => {

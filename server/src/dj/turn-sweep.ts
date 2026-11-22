@@ -1,6 +1,6 @@
-import { and, inArray, lt, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
-import { djTurns } from '../db/schema'
+import { djMessages, djSessions, djTurns } from '../db/schema'
 import type { PersistedTurnWrites } from './loop'
 import { rollbackTurn } from './turn-stop'
 import { abandonTurn, TURN_LOST_MS } from './turn-job'
@@ -44,7 +44,13 @@ export async function sweepLostTurns(db: Db, deps: LostTurnSweepDeps = {}): Prom
     count += 1
     if (turn.writes) {
       try {
-        await rollbackTurn(db, { id: turn.sessionId, userId: turn.userId }, turn.writes as PersistedTurnWrites, { mode: 'rerun' })
+        const writes = turn.writes as PersistedTurnWrites
+        // Only while nothing has happened in the session since: a turn whose
+        // object let go of it (its finish write failed) leaves the session
+        // free for later turns, and their mix is not this turn's to undo.
+        if (!(await movedOn(db, turn.id, turn.sessionId, writes))) {
+          await rollbackTurn(db, { id: turn.sessionId, userId: turn.userId }, writes, { mode: 'rerun' })
+        }
       } catch {
         // Its writes stand; the turn reads as failed with the message intact.
         console.error('lost turn rollback failed')
@@ -59,3 +65,17 @@ export async function sweepLostTurns(db: Db, deps: LostTurnSweepDeps = {}): Prom
   return count
 }
 
+
+// True when the session has gone on past this turn: another turn is its
+// current one, or a message was written after the last of this turn's.
+async function movedOn(db: Db, turnId: string, sessionId: string, writes: PersistedTurnWrites): Promise<boolean> {
+  const [session] = await db.select({ currentTurnId: djSessions.currentTurnId }).from(djSessions).where(eq(djSessions.id, sessionId))
+  if (!session || session.currentTurnId !== turnId) return true
+  const last = Math.max(...writes.messageSeqs, 0)
+  const [later] = await db
+    .select({ seq: djMessages.seq })
+    .from(djMessages)
+    .where(and(eq(djMessages.sessionId, sessionId), gt(djMessages.seq, last)))
+    .limit(1)
+  return later !== undefined
+}

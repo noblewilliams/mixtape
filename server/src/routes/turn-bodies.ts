@@ -1,7 +1,19 @@
-import { asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import type { Db } from '../db/types'
-import { djMessages, djSessions, tracks } from '../db/schema'
-import { runDjTurn, DjError, type DjDeps, type DjSessionRef, type DjTurnOptions } from '../dj/loop'
+import { djMessages, djSessions, djTurns, tracks } from '../db/schema'
+import {
+  runDjTurn,
+  CONFLICT_APOLOGY,
+  CURATION_APOLOGY,
+  DjError,
+  INTERNAL_APOLOGY,
+  LLM_APOLOGY,
+  type DjDeps,
+  type DjSessionRef,
+  type DjTurnOptions,
+  type PersistedTurnWrites,
+} from '../dj/loop'
+import { getActiveQueue } from '../dj/queue-store'
 import { TurnStopped } from '../dj/turn-stop'
 import { generateMixTitle, generateSessionTitle, type MixTitleSong } from '../dj/title'
 import { readPlaylistSeed } from '../playlists/seed'
@@ -256,4 +268,79 @@ export async function mixMessageTurn(db: Db, deps: DjDeps, sessionRef: DjSession
     if (e instanceof TurnStopped) return { status: 409, body: TURN_STOPPED_BODY, end: { kind: 'stopped' } }
     throw e
   }
+}
+
+// The fixed apology each DjError kind answers with (dj/loop.ts
+// normalizeError), for a body rebuilt from the database.
+const APOLOGY: Record<DjError['kind'], string> = {
+  llm: LLM_APOLOGY,
+  curation: CURATION_APOLOGY,
+  conflict: CONFLICT_APOLOGY,
+  validation: INTERNAL_APOLOGY,
+  internal: INTERNAL_APOLOGY,
+}
+
+function djErrorKind(code: string | null): DjError['kind'] {
+  return code !== null && code in APOLOGY ? (code as DjError['kind']) : 'internal'
+}
+
+/**
+ * The answer of a durable turn that has finished, rebuilt from the database
+ * (spec 2026-11-21 durable-mix-turns, "Start", 1): for a request replayed
+ * with its Idempotency-Key after the session's object let go of the last
+ * event. A done turn answers the body its route sent, from the rows it left
+ * (the session, the transcript, the queue, its recorded writes for the
+ * rename and the pill); a stopped one 409 turn_stopped; a failed or lost one
+ * its kind's error body, 'internal' and 'lost' as the 502 internal apology,
+ * a create's carrying its session id. Null while the turn is unfinished, or
+ * when its row (or session) is gone.
+ */
+export async function finishedTurnReply(db: Db, turnId: string): Promise<TurnReply | null> {
+  const [turn] = await db
+    .select({ sessionId: djTurns.sessionId, userId: djTurns.userId, kind: djTurns.kind, status: djTurns.status, errorKind: djTurns.errorKind, writes: djTurns.writes })
+    .from(djTurns)
+    .where(eq(djTurns.id, turnId))
+  if (!turn || turn.status === 'queued' || turn.status === 'running') return null
+  if (turn.status === 'stopped') return { status: 409, body: TURN_STOPPED_BODY }
+
+  const [session] = await db.select(sessionListColumns).from(djSessions).where(eq(djSessions.id, turn.sessionId))
+  if (!session) return null
+  const writes = turn.writes as PersistedTurnWrites | null
+  const sessionTitle = writes?.renamed ? session.title : undefined
+  const isCreate = turn.kind === 'create'
+
+  if (turn.status === 'failed') {
+    const e = new DjError(djErrorKind(turn.errorKind), APOLOGY[djErrorKind(turn.errorKind)])
+    // As runDjTurn's catch sets them: the queue only when this turn moved it
+    // and the move stands, the title only when this turn renamed.
+    if (writes && session.queueVersion !== writes.startingVersion) {
+      e.queue = await getActiveQueue(db, turn.sessionId)
+      e.queueVersion = session.queueVersion
+    }
+    if (sessionTitle) e.sessionTitle = sessionTitle
+    return { status: djErrorStatus(e.kind), body: djErrorBody(e, isCreate ? { sessionId: turn.sessionId } : {}) }
+  }
+
+  const queue = await getActiveQueue(db, turn.sessionId)
+  const extras = {
+    ...(sessionTitle ? { sessionTitle } : {}),
+    ...(writes?.historyOffered ? { addMusic: 'history' as const } : {}),
+  }
+  if (isCreate) {
+    const messages = await db.select().from(djMessages).where(eq(djMessages.sessionId, turn.sessionId)).orderBy(asc(djMessages.seq))
+    return {
+      status: 200,
+      body: { session, messages, queue, supportsInsert: true, playlistSeed: await readPlaylistSeed(db, turn.sessionId, turn.userId), ...extras },
+    }
+  }
+  // The turn's DJ reply: the last of its recorded messages (the listener's
+  // comes first), else the session's latest DJ message.
+  const replySeq = writes && writes.messageSeqs.length > 1 ? writes.messageSeqs[writes.messageSeqs.length - 1] : null
+  const [djMessage] = await db
+    .select()
+    .from(djMessages)
+    .where(and(eq(djMessages.sessionId, turn.sessionId), eq(djMessages.role, 'dj'), ...(replySeq !== null ? [eq(djMessages.seq, replySeq)] : [])))
+    .orderBy(desc(djMessages.seq))
+    .limit(1)
+  return { status: 200, body: { djMessage: djMessage ?? null, queue, queueVersion: session.queueVersion, ...extras } }
 }

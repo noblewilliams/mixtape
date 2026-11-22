@@ -2345,8 +2345,24 @@ report on 2026-11-21 met the turn-steps spec's reopen clause). Spec
   object's job holds ids and switches only, and the job reads the words from
   `dj_messages` by seq; `watched_result` means a watcher read the final
   event within 2 s; a busy object answers today's 409 conflict body and
-  fails the queued row. Session reads carry `turn: { id, status, step }`
-  while a turn is queued or running and not lost, and omit it otherwise.
+  fails the queued row (`error_kind = 'conflict'`), pointing the session
+  back at the turn that holds the object. Session reads carry `turn: { id,
+  status, step }` while a turn is queued or running and not lost, and omit
+  it otherwise.
+- **Review fixes (S2–S5):** a replay whose turn the object no longer holds
+  (its last event expired or replaced: 204/404) is answered from the
+  database (`finishedTurnReply`): done rebuilds the route's own body
+  (create: session, messages, queue, playlistSeed; message: djMessage,
+  queue, queueVersion; `sessionTitle`/`addMusic` from the recorded writes),
+  stopped is 409 `turn_stopped`, failed is its kind's error body
+  (`internal`/`lost` as the 502 internal apology), a create's with its
+  session id, and a stream gets `session`, `turn`, then that `result` or
+  `error`. A re-run first honours a stop raised on the dead attempt's claim
+  (undone as a stop, answered `turn_stopped`) and also deletes a DJ reply
+  written after the listener's message but before its record. The sweep
+  rolls back only while the session has not moved on (still its current
+  turn, no later message). A start that finds a job held with no alarm
+  running sets the alarm again, so a session is never busy for good.
 
 **Reopens if:** turn logs show `attempt > 1` or `lost` often enough that one
 re-run is the wrong number; a turn ever needs more than the alarm's 15

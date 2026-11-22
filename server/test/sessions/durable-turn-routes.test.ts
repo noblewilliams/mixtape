@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { createTestDb, forkTestDb, type TestDb } from '../helpers/db'
 import { createApp } from '../../src/app'
-import { CONFLICT_APOLOGY, type DjDeps } from '../../src/dj/loop'
+import { CONFLICT_APOLOGY, INTERNAL_APOLOGY, type DjDeps } from '../../src/dj/loop'
 import { LlmError, type LlmClient, type LlmComplete } from '../../src/dj/llm'
 import { djMessages, djSessions, djTurns, user } from '../../src/db/schema'
 import { eventsOnly, readEvents, readSse } from '../helpers/sse'
@@ -261,6 +261,121 @@ describe('Idempotency-Key', () => {
     expect(userMessages.map((m) => m.content)).toEqual(['start', 'play something'])
   })
 
+  // The object keeps a finished turn's last event only for a while; after
+  // that a replay is answered from the database.
+  function forgetLastEvent(runners: FakeRunners, sessionId: string, how: 'expired' | 'replaced') {
+    const storage = runners.runners.get(sessionId)!.storage
+    const final = storage.map.get('final') as { turnId: string; at: number }
+    if (how === 'expired') storage.map.set('final', { turnId: final.turnId, at: final.at })
+    else storage.map.set('final', { turnId: '00000000-0000-4000-8000-0000000000aa', at: final.at })
+  }
+
+  it('a create replayed after the object let go of it still gets its session, turn and result, on both paths', async () => {
+    const db = await listener()
+    const titleComplete: LlmComplete = async () => 'Rainy Drive'
+    const deps = { embed, llm: scriptedLlm(generate(3)), titleComplete }
+    const runners = fakeTurnRunners(db, deps)
+    const app = durableApp(db, deps, runners)
+
+    const first = await post(app, '/sessions', { prompt: 'a rainy drive' }, { ...STREAM, 'idempotency-key': KEY })
+    const firstEvents = eventsOnly(await readSse(first))
+    await runners.settled()
+    const sessionId = (firstEvents[0].data as { session: { id: string } }).session.id
+
+    for (const how of ['expired', 'replaced'] as const) {
+      forgetLastEvent(runners, sessionId, how)
+      const stream = await post(app, '/sessions', { prompt: 'a rainy drive' }, { ...STREAM, 'idempotency-key': KEY })
+      expect(stream.status).toBe(200)
+      expect(stream.headers.get('content-type')).toBe('text/event-stream; charset=utf-8')
+      const replay = eventsOnly(await readSse(stream))
+      expect(replay.map((e) => e.event)).toEqual(['session', 'turn', 'result'])
+      expect((replay[0].data as { session: { id: string } }).session.id).toBe(sessionId)
+      expect(replay[1].data).toEqual({ turnId: KEY, push: false })
+      expect(replay[2].raw).toBe(firstEvents.at(-1)!.raw)
+
+      const json = await post(app, '/sessions', { prompt: 'a rainy drive' }, { 'idempotency-key': KEY })
+      expect(json.status).toBe(200)
+      expect(await json.text()).toBe(firstEvents.at(-1)!.raw)
+    }
+    expect(await count(db, djSessions)).toBe(1)
+    expect([...runners.runners.values()].reduce((n, r) => n + r.starts, 0)).toBe(1)
+  })
+
+  it('a failed create replayed late answers its error with the session id', async () => {
+    const db = await listener()
+    const llm: LlmClient = async () => {
+      throw new LlmError('boom', 500)
+    }
+    const runners = fakeTurnRunners(db, { embed, llm })
+    const app = durableApp(db, { embed, llm }, runners)
+
+    const first = await post(app, '/sessions', { prompt: 'a rainy drive' }, { 'idempotency-key': KEY })
+    expect(first.status).toBe(502)
+    const firstText = await first.text()
+    await runners.settled()
+    const sessionId = (JSON.parse(firstText) as { sessionId: string }).sessionId
+    expect(sessionId).toBeTruthy()
+    forgetLastEvent(runners, sessionId, 'expired')
+
+    const json = await post(app, '/sessions', { prompt: 'a rainy drive' }, { 'idempotency-key': KEY })
+    expect(json.status).toBe(502)
+    expect(await json.text()).toBe(firstText)
+    const stream = await post(app, '/sessions', { prompt: 'a rainy drive' }, { ...STREAM, 'idempotency-key': KEY })
+    const events = eventsOnly(await readSse(stream))
+    expect(events.map((e) => e.event)).toEqual(['session', 'turn', 'error'])
+    expect((events[0].data as { session: { id: string } }).session.id).toBe(sessionId)
+    expect(events[2].data).toEqual({ status: 502, body: JSON.parse(firstText) })
+
+    // A lost turn reads as the internal apology, still with its session.
+    await db.update(djTurns).set({ errorKind: 'lost' }).where(eq(djTurns.id, KEY))
+    const lost = await post(app, '/sessions', { prompt: 'a rainy drive' }, { 'idempotency-key': KEY })
+    expect(lost.status).toBe(502)
+    expect(await lost.json()).toEqual({ error: 'internal', message: INTERNAL_APOLOGY, sessionId })
+  })
+
+  it('a message replayed late answers its result, or its error, from the database', async () => {
+    const db = await listener(3)
+    const sessionId = await mixSession(db)
+    const deps = { embed, llm: scriptedLlm(generate(3)) }
+    const runners = fakeTurnRunners(db, deps)
+    const app = durableApp(db, deps, runners)
+    const path = `/sessions/${sessionId}/messages`
+
+    const first = await post(app, path, { text: 'play something' }, { 'idempotency-key': KEY })
+    expect(first.status).toBe(200)
+    const firstText = await first.text()
+    await runners.settled()
+
+    for (const how of ['expired', 'replaced'] as const) {
+      forgetLastEvent(runners, sessionId, how)
+      const json = await post(app, path, { text: 'play something' }, { 'idempotency-key': KEY })
+      expect(json.status).toBe(200)
+      expect(await json.text()).toBe(firstText)
+      const events = eventsOnly(await readSse(await post(app, path, { text: 'play something' }, { ...STREAM, 'idempotency-key': KEY })))
+      expect(events.map((e) => e.event)).toEqual(['turn', 'result'])
+      expect(events[1].raw).toBe(firstText)
+    }
+
+    // A failed message turn, replayed late.
+    const otherKey = '7b1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f'
+    const failing: LlmClient = async () => {
+      throw new LlmError('boom', 500)
+    }
+    const failRunners = fakeTurnRunners(db, { embed, llm: failing })
+    const failApp = durableApp(db, { embed, llm: failing }, failRunners)
+    const failed = await post(failApp, path, { text: 'more' }, { 'idempotency-key': otherKey })
+    expect(failed.status).toBe(502)
+    const failedText = await failed.text()
+    await failRunners.settled()
+    forgetLastEvent(failRunners, sessionId, 'expired')
+    const replayed = await post(failApp, path, { text: 'more' }, { 'idempotency-key': otherKey })
+    expect(replayed.status).toBe(502)
+    expect(await replayed.text()).toBe(failedText)
+    const streamed = eventsOnly(await readSse(await post(failApp, path, { text: 'more' }, { ...STREAM, 'idempotency-key': otherKey })))
+    expect(streamed.map((e) => e.event)).toEqual(['turn', 'error'])
+    expect(streamed[1].data).toEqual({ status: 502, body: JSON.parse(failedText) })
+  })
+
   it('an invalid key, another listener\'s key, or another session\'s key is a 400', async () => {
     const db = await listener(3)
     await seedUser(db, 'u2')
@@ -302,16 +417,26 @@ describe('the object refusing and attaching', () => {
     const runners = fakeTurnRunners(db, deps, { mode: 'manual' })
     const held = await queueMessageTurn(db, sessionId, 'first')
     expect(await runners.namespace.get(runners.namespace.idFromName(sessionId)).start(held)).toBe('started')
+    // This send read the pointer before the held turn's commit landed (two
+    // sends at once): its previous pointer is not the turn that holds the
+    // object.
+    await db.update(djSessions).set({ currentTurnId: null }).where(eq(djSessions.id, sessionId))
+    const key = '8c1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f'
 
-    const res = await post(durableApp(db, deps, runners), `/sessions/${sessionId}/messages`, { text: 'second' })
+    const app = durableApp(db, deps, runners)
+    const res = await post(app, `/sessions/${sessionId}/messages`, { text: 'second' }, { 'idempotency-key': key })
 
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'conflict', message: CONFLICT_APOLOGY })
     const turns = await db.select().from(djTurns).where(eq(djTurns.sessionId, sessionId))
     const fresh = turns.find((t) => t.id !== held.turnId)!
-    expect(fresh).toMatchObject({ status: 'failed', errorKind: 'internal' })
+    expect(fresh).toMatchObject({ status: 'failed', errorKind: 'conflict' })
     const [row] = await db.select().from(djSessions).where(eq(djSessions.id, sessionId))
     expect(row.currentTurnId).toBe(held.turnId)
+    // Its key replayed answers the same conflict.
+    const replay = await post(app, `/sessions/${sessionId}/messages`, { text: 'second' }, { 'idempotency-key': key })
+    expect(replay.status).toBe(409)
+    expect(await replay.json()).toEqual({ error: 'conflict', message: CONFLICT_APOLOGY })
     // Persist-first: the listener's words stand.
     const words = await db.select().from(djMessages).where(eq(djMessages.sessionId, sessionId))
     expect(words.map((m) => m.content)).toContain('second')

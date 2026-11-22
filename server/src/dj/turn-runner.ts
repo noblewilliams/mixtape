@@ -108,7 +108,14 @@ export class TurnRunnerCore {
    */
   async start(job: TurnJob): Promise<TurnStartAnswer> {
     const held = await this.shell.storage.get<TurnJob>(JOB_KEY)
-    if (held) return held.turnId === job.turnId ? 'started' : 'busy'
+    if (held) {
+      // A held job with no alarm running it would answer busy for ever (a
+      // setAlarm that failed after the put, or a job whose delete failed).
+      // Its alarm is set for now again: the claim then runs it, or finds it
+      // over and lets it go.
+      if (!this.running) await this.shell.setAlarm(this.now()).catch(() => {})
+      return held.turnId === job.turnId ? 'started' : 'busy'
+    }
     await this.shell.storage.put(JOB_KEY, job)
     await this.shell.setAlarm(this.now())
     return 'started'
@@ -281,8 +288,12 @@ export class TurnRunnerCore {
   private async expireFinal(): Promise<void> {
     try {
       const final = await this.shell.storage.get<FinalRecord>(FINAL_KEY)
-      if (final?.reply && this.now() - final.at >= FINAL_REPLAY_MS) {
+      if (!final?.reply) return
+      if (this.now() - final.at >= FINAL_REPLAY_MS) {
         await this.shell.storage.put<FinalRecord>(FINAL_KEY, { turnId: final.turnId, at: final.at })
+      } else {
+        // Woken early: the body is not kept past its time for want of an alarm.
+        await this.shell.setAlarm(final.at + FINAL_REPLAY_MS)
       }
     } catch {
       // Overwritten by the next turn's end anyway.

@@ -130,10 +130,53 @@ describe('TurnRunnerCore', () => {
     expect(await runner.core.start(first)).toBe('started')
     expect(await runner.core.start(second)).toBe('busy')
     expect(await runner.core.start(first)).toBe('started')
-    expect(runner.alarms).toHaveLength(1)
+    // Every start that finds the job held and not running sets its alarm
+    // for now again, so a held job can never sit with no alarm.
+    expect(runner.alarms).toEqual([runner.clock.now, runner.clock.now, runner.clock.now])
 
     await runner.core.alarm()
     expect(await runner.core.start(second)).toBe('started')
+  })
+
+  it('a held job whose alarm was lost is run again by the next start, so the session is not busy for ever', async () => {
+    const { db, sessionId } = await listenerWithMix()
+    const first = await queueMessageTurn(db, sessionId, 'one')
+    const second = await queueMessageTurn(db, sessionId, 'two')
+    // The first start's setAlarm failed after the job was put.
+    let failAlarm = true
+    const runner = fakeRunner(db, { embed, llm: scriptedLlm([{ text: 'ok.' }]) }, {
+      setAlarm: async (at) => {
+        if (failAlarm) throw new Error('alarm write failed')
+        runner.alarms.push(at)
+      },
+    })
+    await expect(runner.core.start(first)).rejects.toThrow()
+    failAlarm = false
+    expect(runner.alarms).toEqual([])
+
+    expect(await runner.core.start(second)).toBe('busy')
+    expect(runner.alarms).toEqual([runner.clock.now])
+    expect(await runner.core.alarm()).toMatchObject({ outcome: 'done' })
+    expect(await runner.core.start(second)).toBe('started')
+  })
+
+  it('a cleanup alarm that wakes early sets itself again rather than keep the body for good', async () => {
+    const { db, sessionId } = await listenerWithMix()
+    const job = await queueMessageTurn(db, sessionId, 'one')
+    const runner = fakeRunner(db, { embed, llm: scriptedLlm([{ text: 'ok.' }]) })
+    await runner.core.start(job)
+    await runner.core.alarm()
+    const endedAt = runner.clock.now
+    runner.alarms.length = 0
+
+    runner.clock.now += FINAL_REPLAY_MS - 1
+    await runner.core.alarm()
+    expect((runner.storage.map.get('final') as { reply?: unknown }).reply).toBeDefined()
+    expect(runner.alarms).toEqual([endedAt + FINAL_REPLAY_MS])
+
+    runner.clock.now = endedAt + FINAL_REPLAY_MS
+    await runner.core.alarm()
+    expect(runner.storage.map.get('final')).toEqual({ turnId: job.turnId, at: endedAt })
   })
 
   it('a watcher that drops mid turn is let go, and the turn runs on for the other', async () => {

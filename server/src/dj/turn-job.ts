@@ -4,7 +4,7 @@ import { djMessages, djSessions, djTurns } from '../db/schema'
 import type { DjDeps, DjTurnOptions, PersistedTurnWrites } from './loop'
 import { rollbackTurn, type TurnStopTiming } from './turn-stop'
 import type { TurnStepEvent } from './turn-steps'
-import { createMixTurn, mixMessageTurn, titleFromPrompt, type MixTurnEnd } from '../routes/turn-bodies'
+import { createMixTurn, mixMessageTurn, titleFromPrompt, TURN_STOPPED_BODY, type MixTurnEnd } from '../routes/turn-bodies'
 import { INTERNAL_TURN_REPLY, type TurnReply } from '../routes/turn-stream'
 
 // The durable mix turn, apart from any platform (spec 2026-11-21
@@ -107,10 +107,10 @@ async function claimAttempt(db: Db, turnId: string, now: Date) {
   return row ?? null
 }
 
-// Marks a turn that will not run (its attempts are spent, or the object
-// could not wire one) failed with a code. False when the row was already
+// Marks a turn that will not run (its attempts are spent, the object could
+// not wire one, or it refused it as busy: 'conflict') failed with a code. False when the row was already
 // terminal or is gone.
-export async function abandonTurn(db: Db, turnId: string, errorKind: 'lost' | 'internal', now: Date = new Date()): Promise<boolean> {
+export async function abandonTurn(db: Db, turnId: string, errorKind: 'lost' | 'internal' | 'conflict', now: Date = new Date()): Promise<boolean> {
   const rows = await db
     .update(djTurns)
     .set({ status: 'failed', errorKind, finishedAt: now })
@@ -160,7 +160,7 @@ export async function runTurnJob(job: TurnJob, io: TurnJobIo): Promise<TurnJobRe
       // left as it was before the turn, then the row is failed('lost').
       if (row.writes) {
         try {
-          await rollbackTurn(db, session, row.writes as PersistedTurnWrites, { mode: 'rerun' })
+          await rollbackTurn(db, session, row.writes as PersistedTurnWrites, { mode: 'rerun', orphans: true })
         } catch {
           console.error('turn job rollback failed')
         }
@@ -174,15 +174,25 @@ export async function runTurnJob(job: TurnJob, io: TurnJobIo): Promise<TurnJobRe
       // again, keeping the listener's message. A rollback that fails leaves
       // those writes standing, so the turn fails rather than run on top.
       let clean = true
+      let stoppedWhileDead = false
       if (attempt > 1 && claim.writes) {
+        const writes = claim.writes as PersistedTurnWrites
         try {
-          await rollbackTurn(db, session, claim.writes as PersistedTurnWrites, { mode: 'rerun' })
+          // A stop the listener asked for while the dead attempt held the
+          // claim is honoured, never re-run over: undone as a stop (a first
+          // turn takes its session), and answered turn_stopped.
+          stoppedWhileDead = await stopOnClaim(db, job.sessionId, writes.claimTurnId)
+          if (stoppedWhileDead) await rollbackTurn(db, session, writes, { mode: 'stop', firstTurn: job.kind === 'create' })
+          else await rollbackTurn(db, session, writes, { mode: 'rerun', orphans: true })
         } catch {
           console.error('turn job rollback failed')
           clean = false
         }
       }
-      if (clean) {
+      if (clean && stoppedWhileDead) {
+        reply = { status: 409, body: TURN_STOPPED_BODY }
+        finish = { status: 'stopped', errorKind: null }
+      } else if (clean) {
         heartbeat = setTimer(() => {
           pending.push(db.update(djTurns).set({ heartbeatAt: now() }).where(thisAttempt()).catch(() => {}))
         }, TURN_HEARTBEAT_MS)
@@ -268,6 +278,16 @@ function stepper(watchers: TurnWatchers, stamp: (step: TurnStepEvent['step']) =>
     stamped = event.step
     stamp(event.step)
   }
+}
+
+// True when a stop is raised on the given claim, still held.
+async function stopOnClaim(db: Db, sessionId: string, claimTurnId: string | null): Promise<boolean> {
+  if (claimTurnId === null) return false
+  const [row] = await db
+    .select({ activeTurnId: djSessions.activeTurnId, stop: djSessions.turnStopRequested })
+    .from(djSessions)
+    .where(eq(djSessions.id, sessionId))
+  return row?.activeTurnId === claimTurnId && row.stop
 }
 
 async function sessionExists(db: Db, sessionId: string): Promise<boolean> {
