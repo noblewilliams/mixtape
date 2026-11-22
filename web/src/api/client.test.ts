@@ -900,5 +900,33 @@ describe('Mixtape API client: listening import and onboarding', () => {
         ['https://api.mixtape.test/health', 'GET'],
       ])
     })
+
+    it('reads the VAPID key from /health only when the server sends one', async () => {
+      vi.stubGlobal('fetch', fetchMock)
+      fetchMock.mockResolvedValueOnce(ok({ ok: true, vapidPublicKey: 'BPub-Key_1' }))
+      fetchMock.mockResolvedValueOnce(ok({ ok: true, vapidPublicKey: '' }))
+      const api = createMixtapeApi('https://api.mixtape.test')
+
+      expect(await api.getConfig()).toEqual({ neverRefuse: false, djPaused: false, vapidPublicKey: 'BPub-Key_1' })
+      expect((await api.getConfig()).vapidPublicKey).toBeUndefined()
+    })
+
+    it('registers and forgets a web push device', async () => {
+      vi.stubGlobal('fetch', fetchMock)
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+      const api = createMixtapeApi('https://api.mixtape.test', () => 'bearer-1')
+      const device = { provider: 'webpush' as const, platform: 'web' as const, token: 'https://push.example/a b', keys: { p256dh: 'p', auth: 'a' } }
+
+      await api.putPushDevice(device)
+      await api.deletePushDevice('https://push.example/a b')
+      const [[putUrl, put], [deleteUrl, del]] = fetchMock.mock.calls
+      expect(putUrl).toBe('https://api.mixtape.test/push/devices')
+      expect(put?.method).toBe('PUT')
+      expect(JSON.parse(String(put?.body))).toEqual(device)
+      expect(new Headers(put?.headers).get('authorization')).toBe('Bearer bearer-1')
+      expect(deleteUrl).toBe('https://api.mixtape.test/push/devices/https%3A%2F%2Fpush.example%2Fa%20b')
+      expect(del?.method).toBe('DELETE')
+    })
   })
 })

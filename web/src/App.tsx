@@ -34,6 +34,8 @@ import { nextWorkingStep, type TurnWork, type WorkingStep } from './components/d
 import { toAlbumPickState, toDjMessage, toDjSession, toListenLaterEntry, toQueueTrack } from './api/mappers'
 import { AlbumPanel } from './components/AlbumPanel'
 import { AiConsentDialog, AiConsentGate } from './components/AiConsent'
+import { PushOffer } from './components/PushPermission'
+import { forgetPushDevice, pushSupported, SW_OPEN_MIX, SW_SHOWING_MIX, takeLinkedMix, type ReadPushKey } from './lib/web-push'
 import { useMediaQuery } from './lib/use-media-query'
 import { SignInPage, signInHeadline, type AuthBridge, type AuthUser, type SignInVariant } from './components/AuthGate'
 import { BackButton } from './components/first-run/FirstRunPage'
@@ -122,6 +124,12 @@ type AppProps = {
    * tests shorten it.
    */
   landedReplyRereadMs?: number
+  /**
+   * The VAPID key for Mix ready notifications (GET /health's vapidPublicKey;
+   * none means push is off). RootApp reads it on the raw api so it never
+   * shows Refreshing…; by default it is read through `api`.
+   */
+  readPushKey?: ReadPushKey
 }
 
 type SignInPageState = Exclude<SignInVariant, 'welcome'>
@@ -294,8 +302,14 @@ function sharedFromList(rows: { id: string; shared?: boolean }[]): Record<string
 
 export function App(props: AppProps) { return <SignedInWorkspace key={props.user.id} {...props} /> }
 
-function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, onAccountDeleted, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '', landedReplyRereadMs = LANDED_REPLY_REREAD_MS }: AppProps) {
+function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, onAccountDeleted, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '', landedReplyRereadMs = LANDED_REPLY_REREAD_MS, readPushKey: readPushKeyProp }: AppProps) {
   const anonymous = user.isAnonymous === true
+  const readPushKey = useCallback<ReadPushKey>(
+    () => readPushKeyProp ? readPushKeyProp() : api.getConfig().then((config) => config.vapidPublicKey),
+    [api, readPushKeyProp],
+  )
+  // A notification that opened a new window names its mix in the address (/app/?mix=<id>).
+  const [linkedMix] = useState(takeLinkedMix)
   const restoring = useWorkspaceRestoring()
   const refreshedSessions = useRef(new Set<string>())
   const contentRevision = useRef<Record<string, number>>({})
@@ -471,8 +485,14 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   }, [importRun, syncRun, user.id])
   const signOut = useCallback(() => {
     clearLocalAccount()
-    onSignOut()
-  }, [clearLocalAccount, onSignOut])
+    // This browser's push registration goes first, while the session can
+    // still authorize the DELETE (bounded: a slow answer never holds the sign-out).
+    if (!pushSupported()) {
+      onSignOut()
+      return
+    }
+    void forgetPushDevice(api).finally(onSignOut)
+  }, [api, clearLocalAccount, onSignOut])
   const accountDeleted = useCallback(() => {
     clearLocalAccount()
     signInPreferences.forget()
@@ -1336,11 +1356,31 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       openedInitial.current = true
       adoptNewSession(initialSession)
       pendingInitialMilestone.current = initialSession
-    } else if (initialSessionId) {
+    } else if (initialSessionId ?? linkedMix) {
       openedInitial.current = true
-      openSession(initialSessionId)
+      openSession((initialSessionId ?? linkedMix)!)
     }
   }, [restoring, initialSession, initialSessionId])
+  // The service worker (public/sw.js): a notification tap opens its mix here,
+  // and before a push shows it asks whether this window already shows that mix.
+  const openSessionRef = useRef(openSession)
+  openSessionRef.current = openSession
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const container = navigator.serviceWorker
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: unknown; sessionId?: unknown } | null
+      if (!data || typeof data.sessionId !== 'string') return
+      if (data.type === SW_OPEN_MIX) openSessionRef.current(data.sessionId)
+      if (data.type === SW_SHOWING_MIX) {
+        const { activeView: view, activeSessionId: id } = navigation.current
+        event.ports[0]?.postMessage({ showing: document.visibilityState === 'visible' && view === 'session' && id === data.sessionId })
+      }
+    }
+    container.addEventListener('message', onMessage)
+    container.startMessages?.()
+    return () => container.removeEventListener('message', onMessage)
+  }, [])
   useEffect(() => {
     const pending = pendingInitialMilestone.current
     if (!pending || !onboarding) return
@@ -2267,6 +2307,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     ? () => openAddMusicFor('history')
     : undefined
 
+  // A mix being made right now: a new one from Home, or a turn on the open mix.
+  const pushWorking = creatingTape || (activeView === 'session' && activeSession !== null && turnOut(activeSession.id))
   return (
     <AiConsentGate.Provider value={consentReady}>
     <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic !== null || keepSheet || signInPage !== null || nameGate !== 'off' || shareNameFor !== null}>
@@ -2277,7 +2319,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         onOpenSettings={() => setActiveView('settings')}
       />
 
-      {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} saveName={saveName} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
+      {activeView === 'settings' ? <AppSettings api={api} readPushKey={readPushKey} playback={playback} userName={user.name} signInMethod={lastSignInProvider} saveName={saveName} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
         albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind, true)} onStop={createStoppable ? stopCreate : undefined} onShape={(next) => { homeShape.current = next }} transcribe={transcribe} draftSeed={draftSeed} modeSeed={modeSeed}
@@ -2492,6 +2534,15 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       </div>
     ) : null}
     {consentOpen ? <AiConsentDialog onAgree={grantConsent} onNotNow={() => setConsentOpen(false)} /> : null}
+    {/* Mix ready notifications (approved 2026-11-21): about 3 s into a mix being made, or a beat after Home
+        opens (just signed up, or never asked); once per browser, never over the consent or another dialog. */}
+    <PushOffer
+      api={api}
+      readKey={readPushKey}
+      when={!restoring && (pushWorking || activeView === 'home')}
+      delayMs={pushWorking ? 3000 : 1500}
+      blocked={consentOpen || nameGate !== 'off' || dialog !== null || keepSheet || signInPage !== null || shareNameFor !== null || addingMusic !== null}
+    />
     </AiConsentGate.Provider>
   )
 }

@@ -9,6 +9,7 @@ import { TapeSettings } from './components/TapeSettings'
 import { AppSettings, DeleteAccountDialog, type NameEdit } from './components/AppSettings'
 import { PlaybackController } from './playback/controller'
 import { AiConsentDialog } from './components/AiConsent'
+import { PushPermission } from './components/PushPermission'
 import { AppleMusicMark, SpotifyMark } from './components/ProviderMarks'
 import { demoAlbumMessages, demoAlbumPick, demoAlbumRefinedPick, demoAlbumRunnersUp, demoMessages, demoQueue, demoSessions, demoShelfPreviewEntries } from './data/demo'
 import { AlbumPanel } from './components/AlbumPanel'
@@ -300,7 +301,7 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-paused', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'making-working', 'conversation-blank', 'conversation-paused', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked', 'shared-play-modal', 'shared-play-connect', 'mixes-shared', 'mixes-shared-open', 'mixes-shared-gone', 'conversation-shared', 'share-name-page', 'link-copied']
+  const options = ['home', 'home-paused', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'push-ask', 'making-working', 'conversation-blank', 'conversation-paused', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked', 'shared-play-modal', 'shared-play-connect', 'mixes-shared', 'mixes-shared-open', 'mixes-shared-gone', 'conversation-shared', 'share-name-page', 'link-copied']
   // *-paused: the DJ pause switch on (credits out, model down).
   return <DjStatusFixed paused={state.endsWith('-paused')}>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
@@ -308,7 +309,7 @@ export default function UiPolishPreview() {
     </div>
     <div className={state.startsWith('conversation') || state.startsWith('album') || state.startsWith('catalog') ? 'app-shell' : 'app-shell app-shell--home'}>
       <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : state.startsWith('settings-') ? 'settings' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
-      {state === 'conversation-working' ? <WorkingConversationPreview session={sessions[0]} onBack={close} />
+      {state === 'conversation-working' || state === 'push-ask' ? <WorkingConversationPreview session={sessions[0]} onBack={close} />
       : state.startsWith('conversation') ? <>
         <Conversation session={sessions[0]} messages={state === 'conversation-blank' ? [] : demoMessages} thinking={false} onSend={() => {}} onShare={state === 'conversation-shared' ? () => setState('link-copied') : undefined} onStopSharing={state === 'conversation-shared' ? async () => {} : undefined} onOpenQueue={() => {}} onBack={close} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation-blank' ? [] : state === 'conversation-spotify' ? previewQueue.map((track) => ({ ...track, spotifyId: null })) : previewQueue} playing={false} playbackBusy={false} musicConnection={state === 'conversation-spotify' || state === 'conversation-ask' ? 'disconnected' : 'connected'} spotifyOnly={state === 'conversation-spotify'} askService={state === 'conversation-ask'} open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
@@ -332,6 +333,8 @@ export default function UiPolishPreview() {
     {state === 'merge-notice' && <Toast tone="success" message="Your mixes are in. This account already had a library, so we kept that one." />}
     {state.startsWith('name-page') && <NamePagePreview key={state} state={state as NamePreviewState} onDone={close} />}
     {state === 'making-working' && <WorkingMakingPreview />}
+    {/* The Mix ready notifications pop-up over the working conversation (approved board 2026-11-21 r3, web). */}
+    {state === 'push-ask' && <PushPermission onTurnOn={close} onNotNow={close} />}
     {/* The consent dialog: over the first run's prompt page, and over the app. The first Agree fails after a beat (busy, then the inline error); the next one goes through. */}
     {state === 'first-run-consent' && <><FirstRun services={previewFirstRunServices} onDone={close} /><AiConsentDialog onAgree={async () => { await consentAgree(); setState('first-run') }} onNotNow={() => setState('first-run')} /></>}
     {state.startsWith('shared') && <SharedMixPreview key={state} state={state as SharedPreviewState} />}

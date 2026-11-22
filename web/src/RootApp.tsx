@@ -17,6 +17,8 @@ import { sharedMixToken } from './lib/shared-route'
 import { DjStatusProvider } from './lib/dj-status'
 
 const api = createMixtapeApi(API_URL, sessionTokenStore.read)
+// /health on the raw api: it needs no session, so the gate's Refreshing… never shows for it.
+const readPushKey = () => api.getConfig().then((config) => config.vapidPublicKey)
 
 // Built when the first run first renders, never for a browser that already has a session.
 function firstRunServices() {
@@ -60,7 +62,7 @@ function SignedInApp({ user, lastSignInProvider, restoring, initialSession, refe
   const musicKit = useMemo(() => createMusicKitClient({ getDeveloperToken: gate.api.getMusicKitToken }), [])
   // /health needs no session: the raw api, so its reads never wait on the gate or show Refreshing….
   return <DjStatusProvider api={api}>
-    <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} signInAuth={browserAuth} refetchSession={refetch} signInError={signInError} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} onAccountDeleted={accountDeleted} />
+    <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} signInAuth={browserAuth} refetchSession={refetch} signInError={signInError} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} onAccountDeleted={accountDeleted} readPushKey={readPushKey} />
     {!restoring && pendingReads > 0 && <div className="session-refresh-badge" role="status"><span className="session-refresh-spinner" aria-hidden="true" />Refreshing…</div>}
   </DjStatusProvider>
 }

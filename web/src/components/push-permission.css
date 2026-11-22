@@ -1,0 +1,180 @@
+/* The blurred overlay: the centred pop-up's (approved board 2026-11-21-push-permission-modal-r3, .wscrim). */
+.wc-overlay.wc-overlay--blur {
+  background: rgba(28, 22, 34, 0.14);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+:where(:root[data-theme="dark"]) .wc-overlay.wc-overlay--blur {
+  background: rgba(0, 0, 0, 0.32);
+}
+/* Phones: still the centred pop-up, 22px in from each side, never the app's bottom sheet. */
+@media (max-width: 760px) {
+  .wc-overlay.wc-overlay--blur {
+    padding: max(22px, env(safe-area-inset-top)) 22px max(22px, env(safe-area-inset-bottom));
+    align-items: center;
+    justify-content: center;
+  }
+  .wc-overlay.wc-overlay--blur > .wc-modal.push-permission {
+    width: 100%;
+    max-width: 360px;
+    max-height: 100%;
+    padding: 0 20px 14px;
+    border-radius: 20px;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .wc-overlay.wc-overlay--blur {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: rgba(28, 22, 34, 0.42);
+  }
+}
+
+/* The pop-up (board .wdialog): everything centred, small type, quiet text buttons. */
+.wc-modal.push-permission {
+  width: min(360px, 100%);
+  padding: 0 20px 14px;
+  border: 0;
+  border-radius: 20px;
+  background: #fbfaf8;
+  color: #1c1a1e;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  overflow-x: hidden;
+}
+:where(:root[data-theme="dark"]) .wc-modal.push-permission {
+  background: #1c1a22;
+  color: #f2eef1;
+}
+.wc-modal.push-permission h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+}
+.wc-modal.push-permission p {
+  margin: 0 0 14px;
+  opacity: 0.8;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+.push-actions {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.push-actions .wc-text {
+  min-height: 36px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #857e86;
+  position: relative;
+}
+.push-actions .push-turn-on {
+  color: #544451;
+}
+:where(:root[data-theme="dark"]) .push-actions .wc-text {
+  color: #a59ea6;
+}
+:where(:root[data-theme="dark"]) .push-actions .push-turn-on {
+  color: #f0ebef;
+}
+@media (pointer: coarse) {
+  .push-actions .wc-text::before { content: ""; position: absolute; inset: -4px 0; }
+}
+
+/* The I1 art at web size: the cassette at 100px, tilted -4deg, and the notification rising every 3.2 s. */
+.push-art {
+  position: relative;
+  height: 110px;
+  margin: 6px -20px 20px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.push-tape {
+  display: block;
+  width: 100px;
+  transform: rotate(-4deg) translateY(16px);
+  filter: drop-shadow(0 10px 18px rgba(23, 22, 26, 0.28));
+}
+.push-toast {
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  z-index: 1;
+  width: 170px;
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 9px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.78);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 8px 22px rgba(30, 24, 40, 0.18), inset 0 0 0 0.5px rgba(255, 255, 255, 0.7);
+  color: #1c1a1e;
+  text-align: left;
+  transform: translateX(-50%) rotate(2deg);
+  animation: push-toast-pop 3.2s ease-in-out infinite;
+}
+:where(:root[data-theme="dark"]) .push-toast {
+  background: rgba(60, 56, 66, 0.82);
+  color: #f2eef1;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45), inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+}
+.push-toast-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: block;
+}
+.push-toast b {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.push-toast small {
+  display: block;
+  font-size: 9px;
+  line-height: 1.25;
+  opacity: 0.75;
+}
+.push-toast time {
+  align-self: start;
+  font-size: 8.5px;
+  opacity: 0.6;
+}
+@keyframes push-toast-pop {
+  0%, 8% { opacity: 0; transform: translate(-50%, 26px) rotate(2deg) scale(0.92); }
+  18%, 82% { opacity: 1; transform: translate(-50%, 0) rotate(2deg) scale(1); }
+  92%, 100% { opacity: 0; transform: translate(-50%, -6px) rotate(2deg) scale(0.98); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .push-toast { animation: none; opacity: 1; }
+}
+
+/* Making your mix, after Allow: one quiet line under the step line. */
+.fr-ping {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  opacity: 0.72;
+  font-size: 13px;
+}
+.fr-ping svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

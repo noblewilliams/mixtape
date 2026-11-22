@@ -12,6 +12,7 @@ import { ChooseService, SERVICE_HEADLINE, type MusicService } from './ChooseServ
 import { DOING_HEADLINES, DoingPage } from './DoingPage'
 import { BackButton, pageName, type FirstRunStep } from './FirstRunPage'
 import { Making, MAKING_HEADLINE } from './Making'
+import { PushOffer } from '../PushPermission'
 import type { FirstRunServices } from './services'
 import { Welcome, WELCOME_HEADLINE } from './Welcome'
 import './first-run.css'
@@ -132,6 +133,8 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
   // The first mix's turn for the making page's step line: held here, so a back
   // and a return to the running mix keep its step. One per try.
   const [making, setMaking] = useState<TurnWork | null>(null)
+  // The browser said yes on the push pop-up: Making your mix says the ping is coming.
+  const [pinging, setPinging] = useState(false)
   const makingTry = useRef(0)
   const popError = useRef('')
   const navigated = useRef(false)
@@ -187,6 +190,8 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
       live = false
     }
   }, [adding, services, onStep1])
+  // The VAPID key for the push pop-up: /health again (the first run keeps no config after Step 1).
+  const readPushKey = useCallback(() => services ? services.api.getConfig().then((config) => config.vapidPublicKey) : Promise.resolve(undefined), [services])
   const ensure = useCallback(async () => {
     if (!services) return
     await services.ensureSession()
@@ -510,7 +515,7 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
       ) : null
       break
     case 'making':
-      content = <Making key={key} focusHeading={focusHeading} working={making ?? undefined} />
+      content = <Making key={key} focusHeading={focusHeading} working={making ?? undefined} ping={pinging} />
       break
     case 'sign-in':
       content = signIn ? (
@@ -530,6 +535,10 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
         </DjStatusValue>
       </AiConsentGate.Provider>
       {asking ? <AiConsentDialog onAgree={agreeToAi} onNotNow={() => setAsking(null)} /> : null}
+      {/* Mix ready notifications, about 3 s into the first mix (approved 2026-11-21); never over the consent. */}
+      {!adding && services && page.id === 'making' ? (
+        <PushOffer api={services.api} readKey={readPushKey} when delayMs={3000} blocked={asking !== null} onEnabled={() => setPinging(true)} />
+      ) : null}
     </div>
   )
 }

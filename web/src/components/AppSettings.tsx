@@ -10,6 +10,8 @@ import { PRIVACY_POLICY_URL } from './AiConsent'
 import { ThemeToggle } from './ThemeToggle'
 import { InstallAppRow } from '../lib/install-app'
 import { usePlaysOn, writePlaysOn } from '../lib/plays-on'
+import { PushNotificationsRow } from './PushPermission'
+import type { ReadPushKey } from '../lib/web-push'
 
 type Props = {
   api: MixtapeApi
@@ -29,6 +31,8 @@ type Props = {
   saveName?: (name: string) => Promise<void>
   /** ?ui-preview only: open with the name field already in this state. */
   initialNameEdit?: NameEdit
+  /** The VAPID key for the Mix ready notifications row; without it (or push) the row is hidden. */
+  readPushKey?: ReadPushKey
 }
 
 export type NameEdit = { draft: string; failed?: boolean }
@@ -48,6 +52,7 @@ export function AppSettings({
   onSignIn,
   saveName,
   initialNameEdit,
+  readPushKey,
 }: Props) {
   const player = useSyncExternalStore(playback.subscribe, playback.getState)
   const [enabled, setEnabled] = useRestorableState<boolean | null>('settings.recommendations', null)
@@ -195,6 +200,7 @@ export function AppSettings({
           <ThemeToggle/>
         </div>
         <PlaysOnRow/>
+        {readPushKey ? <PushNotificationsRow api={api} readKey={readPushKey} /> : null}
         <InstallAppRow/>
       </section>
       {anonymous ? <section>{privacyRow}</section> : <section>

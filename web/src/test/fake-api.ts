@@ -588,6 +588,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
     getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null, albumPicks: true, neverRefuse: false, aiConsent: true, askName: false }),
     grantAiConsent: async () => ({ aiConsent: true }),
     getConfig: async () => ({ neverRefuse: false, djPaused: false }),
+    putPushDevice: async () => undefined,
+    deletePushDevice: async () => undefined,
     getArtistSeeds: async () => ({ seeds: artistSeeds.map((seed) => ({ ...seed })) }),
     putArtistSeeds: async (names) => {
       artistSeeds = [

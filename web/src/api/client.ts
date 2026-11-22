@@ -484,7 +484,21 @@ export function isDjPaused(error: unknown): boolean {
  * operator's kill switch (credits out, model down); an older server sends no
  * field and is read as open.
  */
-export type PublicConfig = { neverRefuse: boolean; djPaused: boolean }
+export type PublicConfig = {
+  neverRefuse: boolean
+  djPaused: boolean
+  /** The VAPID public key (base64url) when the server sends web push; absent means push is off. */
+  vapidPublicKey?: string
+}
+/** PUT /push/devices for this browser's push subscription (spec 2026-11-21 durable turns, Device registration). */
+export type WebPushDevice = {
+  provider: 'webpush'
+  platform: 'web'
+  /** The subscription's endpoint. */
+  token: string
+  keys: { p256dh: string; auth: string }
+  appVersion?: string
+}
 export type DeleteAccountResponse = {
   deleted: true
   apple: 'revoked' | 'failed' | 'not_linked' | 'no_token'
@@ -530,6 +544,10 @@ export type MixtapeApi = {
   grantAiConsent: () => Promise<{ aiConsent: true }>
   /** Reads GET /health, which needs no session; never creates one. */
   getConfig: (signal?: AbortSignal) => Promise<PublicConfig>
+  /** Registers this browser's push subscription for the signed-in (or anonymous) listener; 204. */
+  putPushDevice: (device: WebPushDevice) => Promise<void>
+  /** Forgets a push registration by its token (the endpoint); 204. */
+  deletePushDevice: (token: string, signal?: AbortSignal) => Promise<void>
   transcribe: (audio: File, signal?: AbortSignal) => Promise<{text:string;language:string}>
   getSuggestions: (timeZone: string) => Promise<SuggestionsResponse>
   selectSuggestion: (id: string, timeZone: string) => Promise<{prompt: string}>
@@ -857,8 +875,15 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
       return { aiConsent: true }
     },
     getConfig: async (signal) => {
-      const body = await request<{ neverRefuse?: boolean; djPaused?: boolean }>('/health', { signal })
-      return { neverRefuse: body.neverRefuse === true, djPaused: body.djPaused === true }
+      const body = await request<{ neverRefuse?: boolean; djPaused?: boolean; vapidPublicKey?: unknown }>('/health', { signal })
+      const vapid = typeof body.vapidPublicKey === 'string' && body.vapidPublicKey.trim() ? body.vapidPublicKey.trim() : null
+      return { neverRefuse: body.neverRefuse === true, djPaused: body.djPaused === true, ...(vapid ? { vapidPublicKey: vapid } : {}) }
+    },
+    putPushDevice: async (device) => {
+      await request('/push/devices', { method: 'PUT', body: JSON.stringify(device) })
+    },
+    deletePushDevice: async (token, signal) => {
+      await request(`/push/devices/${encodeURIComponent(token)}`, { method: 'DELETE', ...(signal ? { signal } : {}) })
     },
     createSession: (prompt, playlistSeed, energyArc, kind, options) =>
       turn<CreateSessionResponse>('/sessions', {

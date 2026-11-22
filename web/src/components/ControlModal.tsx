@@ -9,6 +9,8 @@ export function ControlModal({
   className = '',
   describedBy,
   focusTitle = false,
+  overlay = 'dim',
+  before,
 }: {
   title: string
   children: ReactNode
@@ -18,6 +20,10 @@ export function ControlModal({
   describedBy?: string
   /** Start focus on the heading instead of the first control. */
   focusTitle?: boolean
+  /** 'blur': the page behind is blurred under a light tint (the centred pop-up, approved 2026-11-21). */
+  overlay?: 'dim' | 'blur'
+  /** Drawn above the heading (decorative art). */
+  before?: ReactNode
 }) {
   const id = useId()
   const ref = useRef<HTMLElement>(null)
@@ -69,7 +75,7 @@ export function ControlModal({
   }, [])
   return createPortal(
     <div
-      className="wc-overlay"
+      className={overlay === 'blur' ? 'wc-overlay wc-overlay--blur' : 'wc-overlay'}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
@@ -83,6 +89,7 @@ export function ControlModal({
         aria-labelledby={id}
         aria-describedby={describedBy}
       >
+        {before}
         {focusTitle ? <h2 id={id} tabIndex={-1} data-autofocus="">{title}</h2> : <h2 id={id}>{title}</h2>}
         {children}
       </section>

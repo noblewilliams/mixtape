@@ -99,6 +99,8 @@ export function fakeServices({ neverRefuse = false }: { neverRefuse?: boolean } 
     }),
     // Not logged: the flag read is not a server action and never makes a session.
     getConfig: vi.fn(async () => ({ neverRefuse, djPaused: false })),
+    putPushDevice: vi.fn(async () => undefined),
+    deletePushDevice: vi.fn(async () => undefined),
     grantAiConsent: vi.fn(async (): Promise<{ aiConsent: true }> => {
       log.push('grantAiConsent')
       return { aiConsent: true }

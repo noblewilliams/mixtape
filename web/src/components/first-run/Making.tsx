@@ -4,6 +4,7 @@ import { Cassette } from '../Cassette'
 import { DjWorkingLine } from '../DjWorkingLine'
 import type { TurnWork } from '../djWorkingLines'
 import { FirstRunPage } from './FirstRunPage'
+import { PUSH_PINGING } from '../PushPermission'
 
 export const MAKING_HEADLINE = 'Making your mix.'
 export const MAKING_LINE = 'About a minute.'
@@ -20,7 +21,7 @@ export const MAKING_ANNOUNCEMENT = 'The DJ is listening. About a minute.'
  * is held by the flow, so going back and returning to the running mix keeps
  * the step.
  */
-export function Making({ focusHeading, working }: { focusHeading?: boolean; working?: TurnWork }) {
+export function Making({ focusHeading, working, ping = false }: { focusHeading?: boolean; working?: TurnWork; ping?: boolean }) {
   const still = useMediaQuery('(prefers-reduced-motion: reduce)')
   // Filled after mount so the polite region announces the line once. It sits
   // outside the busy page, which assistive tech may hold announcements for.
@@ -41,6 +42,13 @@ export function Making({ focusHeading, working }: { focusHeading?: boolean; work
       >
         <p className="fr-line">{MAKING_LINE}</p>
         <p className="fr-step" aria-hidden="true"><DjWorkingLine work={working} /></p>
+        {/* After Allow on the push pop-up (approved 2026-11-21): one quiet line, a bell and the promise. */}
+        {ping ? (
+          <p className="fr-ping">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></svg>
+            {PUSH_PINGING}
+          </p>
+        ) : null}
       </FirstRunPage>
       <p className="sr-only" role="status" aria-live="polite">{announce}</p>
     </div>
