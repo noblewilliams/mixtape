@@ -2,7 +2,9 @@
 
 **Status:** built 2026-11-22; **G1 done 2026-11-22**: merged to `main`
 (`2e69c34`), migration 0055 applied, Worker `e4ba9a54` deployed dark (both
-flags off; rollback `10fdc846`). G2 onward is the founder's.
+flags off; rollback `10fdc846`). **G2 done 2026-11-22**: `DURABLE_TURNS` on
+(Worker `f24b290f`, then `2cfa340f`), six-part production smoke passed
+(backlog). Watch week running. G3/G4 need the founder's keys and build.
 
 | Task | Commit |
 |---|---|
