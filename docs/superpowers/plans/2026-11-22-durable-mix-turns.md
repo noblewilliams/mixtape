@@ -1,7 +1,8 @@
 # Durable mix turns and mix-ready notifications: plan
 
-**Status:** built 2026-11-22 on branch `claude/durable-mix-spec-1b08b0`,
-not deployed. G (rollout) is the founder's.
+**Status:** built 2026-11-22; **G1 done 2026-11-22**: merged to `main`
+(`2e69c34`), migration 0055 applied, Worker `e4ba9a54` deployed dark (both
+flags off; rollback `10fdc846`). G2 onward is the founder's.
 
 | Task | Commit |
 |---|---|
