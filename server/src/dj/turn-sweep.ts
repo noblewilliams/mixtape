@@ -11,8 +11,9 @@ import { abandonTurn, TURN_LOST_MS } from './turn-job'
 // fails it ('lost'), undoes what its dead attempt wrote (best effort, the
 // listener's message kept), and tells the listener.
 
-// What notify is told about a turn that ended. S6 sends the push; until
-// then this is a no-op seam, called wherever a turn ends off a watcher.
+// What notify is told about a turn that ended. Production passes
+// push/notify.ts notifyTurn (index.ts); the default is a no-op, for callers
+// with nothing wired to push with.
 export type EndedTurn = { turnId: string; sessionId: string; userId: string; status: 'done' | 'failed' | 'stopped'; errorKind: string | null }
 export type NotifyTurn = (db: Db, turn: EndedTurn) => Promise<void>
 

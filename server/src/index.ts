@@ -39,6 +39,7 @@ import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 import type { AlbumDeps } from './albums/loop'
 import { TurnRunnerCore, type TurnRunnerNamespace } from './dj/turn-runner'
 import type { TurnJob } from './dj/turn-job'
+import { notifyTurn, turnPushEnabled, type PushConfig } from './push/notify'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -77,6 +78,16 @@ type Bindings = {
   TURN_RUNNER?: TurnRunnerNamespace
   DURABLE_TURNS?: string
   TURN_PUSH?: string
+  // Mix-ready push (spec 2026-11-21 durable-mix-turns, "APNs from Workers",
+  // "Web push"). Required once TURN_PUSH is on (buildPush). APPLE_TEAM_ID
+  // above is the provider token's issuer; APNS_TOPIC defaults to
+  // APPLE_BUNDLE_ID.
+  APNS_KEY_ID?: string
+  APNS_PRIVATE_KEY?: string
+  APNS_TOPIC?: string
+  VAPID_PUBLIC_KEY?: string
+  VAPID_PRIVATE_KEY?: string
+  VAPID_SUBJECT?: string
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -346,6 +357,44 @@ export function buildDurableTurns(env: { DURABLE_TURNS?: string; TURN_RUNNER?: T
   return { runner: env.TURN_RUNNER }
 }
 
+// Mix-ready push (spec 2026-11-21 durable-mix-turns). TURN_PUSH exact "on"
+// sends; with it on, every key is required: thrown here, every request fails
+// until wrangler.jsonc and the secrets are fixed (the buildShares pattern),
+// rather than quietly telling clients `push: true` and never pushing. Off,
+// notify records 'off' and nothing is read.
+export function buildPush(env: {
+  TURN_PUSH?: string
+  APPLE_TEAM_ID?: string
+  APPLE_BUNDLE_ID?: string
+  APNS_KEY_ID?: string
+  APNS_PRIVATE_KEY?: string
+  APNS_TOPIC?: string
+  VAPID_PUBLIC_KEY?: string
+  VAPID_PRIVATE_KEY?: string
+  VAPID_SUBJECT?: string
+}): PushConfig {
+  if (!turnPushEnabled(env)) return { enabled: false }
+  const required = ['APPLE_TEAM_ID', 'APNS_KEY_ID', 'APNS_PRIVATE_KEY', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'] as const
+  for (const name of required) {
+    if (!env[name]?.trim()) throw new Error(`${name} is required when TURN_PUSH is on`)
+  }
+  const topic = (env.APNS_TOPIC ?? env.APPLE_BUNDLE_ID)?.trim()
+  if (!topic) throw new Error('APNS_TOPIC or APPLE_BUNDLE_ID is required when TURN_PUSH is on')
+  const subject = env.VAPID_SUBJECT!.trim()
+  if (!/^(mailto:|https:)/.test(subject)) throw new Error('VAPID_SUBJECT must be a mailto: or https: URL')
+  return {
+    enabled: true,
+    apns: { teamId: env.APPLE_TEAM_ID!.trim(), keyId: env.APNS_KEY_ID!.trim(), privateKey: env.APNS_PRIVATE_KEY!, topic },
+    vapid: { publicKey: env.VAPID_PUBLIC_KEY!.trim(), privateKey: env.VAPID_PRIVATE_KEY!.trim(), subject },
+  }
+}
+
+// notifyTurn as the object and the cron call it, over their database.
+export function pushNotifier(env: Parameters<typeof buildPush>[0]) {
+  return (db: Db, turnId: string, opts: { recheck?: boolean; scheduleRecheck?: (ms: number) => void } = {}) =>
+    notifyTurn({ db, config: buildPush(env), ...(opts.scheduleRecheck ? { scheduleRecheck: opts.scheduleRecheck } : {}) }, turnId, { recheck: opts.recheck === true })
+}
+
 // Plan 2026-11-02 account deletion: the same Sign in with Apple key that signs
 // the web client secret signs one for whichever client a token belongs to.
 // createAuth has already failed fast on a missing Apple binding.
@@ -462,7 +511,10 @@ function buildRequestApp(db: Db, env: Bindings) {
   // Checked on every request so a missing binding fails loudly.
   const durable = buildDurableTurns(env)
   const durableTurns = durable ? { ...durable, push: { TURN_PUSH: env.TURN_PUSH } } : undefined
-  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), djPaused: djPausedMode(env), durableTurns, allowedOrigins })
+  // Checked on every request too, so TURN_PUSH on with a key missing fails loudly.
+  const push = buildPush(env)
+  const vapidPublicKey = push.enabled ? push.vapid?.publicKey : undefined
+  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), djPaused: djPausedMode(env), durableTurns, vapidPublicKey, allowedOrigins })
 }
 
 // The Durable Object the platform instantiates, one per session (spec
@@ -480,6 +532,7 @@ export class TurnRunner extends DurableObject<Bindings> {
       setAlarm: (at) => ctx.storage.setAlarm(at),
       openDb: () => buildDb(env),
       buildDeps: (db) => buildTurnDeps(env, db).djDeps,
+      notify: pushNotifier(env),
     })
   }
 
@@ -524,7 +577,8 @@ export default {
         spotifyArtwork,
         // Lost durable turns (dj/turn-sweep.ts): swept whatever DURABLE_TURNS
         // says, so a turn left behind by a flip back to off still ends.
-        turns: {},
+        // A lost turn's watched_result is false, so it pushes at once.
+        turns: { notify: async (turnDb, turn) => void (await pushNotifier(env)(turnDb, turn.turnId)) },
       }) }))
       // While the DJ is paused for billing, one tiny call per run checks
       // whether credits are back and reopens it (dj/auto-pause.ts).

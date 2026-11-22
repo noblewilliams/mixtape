@@ -2364,6 +2364,28 @@ report on 2026-11-21 met the turn-steps spec's reopen clause). Spec
   turn, no later message). A start that finds a job held with no alarm
   running sets the alarm again, so a session is never busy for good.
 
+- **Notify (S6/S7):** `push/notify.ts` runs once a turn is over (the
+  object, after it lets the job go; the cron, for lost turns). Stopped and
+  gone turns tell nobody. `TURN_PUSH` off records `off`; no live device,
+  `no_device`; a `seen` from any device, `seen`. A result a watcher was
+  written waits **8 s** for `seen` on a second alarm (the object keeps a
+  small recheck list by turn id and sets its one alarm for the earliest of
+  job, recheck and cleanup); the cron has no second alarm, so it pushes at
+  once. A push **fans out** to every live device, APNs and web alike; a
+  disable answer (APNs 410/400 bad token, web 404/410, or a subscription
+  whose keys cannot encrypt) sets `disabled_at`, while a bad VAPID key or
+  provider token only gives up. A 403 provider-token rejection is re-signed
+  **once per turn** (shared by every device that saw it) and retried once.
+  **Idempotent via `notified_at`:** it is claimed with a conditional UPDATE
+  (`notified_at IS NULL AND seen_at IS NULL`) before anything is sent, so two
+  callers never both push; a crash after the claim loses that push rather
+  than sending two. `notify_outcome` is `sent` if any device took it, else
+  `failed`. The `turn` event's `push` is `TURN_PUSH` on and a live device.
+  `TURN_PUSH=on` without the APNs key, the VAPID pair and subject throws at
+  wiring; `/health` serves `vapidPublicKey` only then. An anonymous link
+  moves `push_devices`, and the moved sessions' `dj_turns` rows with them
+  (they cascaded with the anonymous user before).
+
 **Reopens if:** turn logs show `attempt > 1` or `lost` often enough that one
 re-run is the wrong number; a turn ever needs more than the alarm's 15
 minutes; the turn is split into replayable steps (Workflows then become the

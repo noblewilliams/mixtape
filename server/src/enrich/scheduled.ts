@@ -197,7 +197,8 @@ async function runMaintenance(
     result.anonymous_expired = { error: 'failed' }
   }
 
-  // Database only, no outbound fetch until S6's push.
+  // A push per lost turn's device (push/notify.ts), at most
+  // LOST_TURN_SWEEP_LIMIT turns a run; nothing else leaves the database.
   if (deps.turns) {
     try {
       result.lostTurns = await (runners.lostTurns ?? sweepLostTurns)(db, deps.turns)

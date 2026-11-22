@@ -36,6 +36,12 @@ export type TurnRunnerShell = {
   endTimeoutMs?: number
   // For tests: how fast the turn's stop guard polls.
   stopTiming?: TurnStopTiming
+  // Tells the listener a turn ended (push/notify.ts notifyTurn, over this
+  // alarm's database; index.ts wires it). Called once the job is over, and
+  // again with `recheck` for a result a watcher was written (the 8 s window
+  // for `seen`): `scheduleRecheck` asks this object for that second call.
+  // Absent, nothing is notified.
+  notify?: (db: Db, turnId: string, opts: { recheck: boolean; scheduleRecheck: (ms: number) => void }) => Promise<unknown>
 }
 
 // What the Worker gets back from start: `busy` while another turn of this
@@ -54,6 +60,11 @@ export type TurnRunnerNamespace = {
 
 const JOB_KEY = 'job'
 const FINAL_KEY = 'final'
+// Notify rechecks still to run, by turn id only. The object has one alarm,
+// so it is always set for the earliest of: a held job (now), a recheck, and
+// the last event's cleanup.
+const RECHECKS_KEY = 'rechecks'
+type Recheck = { turnId: string; at: number }
 // The last event is kept this long after the end, for a watch that asks to
 // replay it (the Worker's own watch racing a very fast turn). After that only
 // the turn's id is kept, so a late attach still reads as finished (204).
@@ -122,10 +133,11 @@ export class TurnRunnerCore {
   }
 
   /**
-   * Runs the held job, then forgets it whatever the outcome. Never throws:
-   * the platform retries an alarm that throws, and only a dead attempt
-   * should be retried (runTurnJob's claim then decides). An alarm with no
-   * job is the cleanup one, which drops an expired last event.
+   * Runs the held job, then forgets it whatever the outcome, and tells the
+   * listener (shell.notify). Never throws: the platform retries an alarm
+   * that throws, and only a dead attempt should be retried (runTurnJob's
+   * claim then decides). An alarm with no job runs the notify rechecks that
+   * are due and drops an expired last event (the cleanup).
    */
   async alarm(): Promise<TurnJobResult | undefined> {
     let job: TurnJob | undefined
@@ -135,7 +147,9 @@ export class TurnRunnerCore {
       return undefined
     }
     if (!job) {
+      await this.runDueRechecks()
       await this.expireFinal()
+      await this.scheduleNext()
       return undefined
     }
     if (this.running) return undefined
@@ -143,10 +157,9 @@ export class TurnRunnerCore {
     const live = this.liveFor(job)
 
     let result: TurnJobResult | undefined
-    let pool: { end(): Promise<void> } | undefined
+    let opened: { db: Db; pool: { end(): Promise<void> } } | undefined
     try {
-      const opened = this.shell.openDb()
-      pool = opened.pool
+      opened = this.shell.openDb()
       const deps = this.shell.buildDeps(opened.db)
       if (deps) {
         result = await runTurnJob(job, {
@@ -163,8 +176,6 @@ export class TurnRunnerCore {
     } catch {
       console.error('turn runner failed')
       result = await this.failed(live)
-    } finally {
-      await pool?.end().catch(() => {})
     }
 
     // A duplicate had no answer to send: its watchers just close.
@@ -183,14 +194,90 @@ export class TurnRunnerCore {
     } catch {
       console.error('turn runner storage failed')
     }
+    if (this.live === live) this.live = null
+    this.running = false
+
+    // A duplicate was told by whoever finished it; stopped and gone have
+    // nobody to tell. done, failed and lost push (or record why not).
+    if (opened && result && (result.outcome === 'done' || result.outcome === 'failed' || result.outcome === 'lost')) {
+      await this.notify(opened.db, job.turnId, false)
+    }
+    if (opened) await this.runDueRechecks(opened.db)
+    await opened?.pool.end().catch(() => {})
+    await this.scheduleNext(this.now() + FINAL_REPLAY_MS)
+    return result
+  }
+
+  // One notify call; a 'deferred' answer schedules its recheck. A failure
+  // is logged as a fixed line: the turn's mix stands either way.
+  private async notify(db: Db, turnId: string, recheck: boolean): Promise<void> {
+    if (!this.shell.notify) return
+    let later: number | undefined
     try {
-      await this.shell.setAlarm(this.now() + FINAL_REPLAY_MS)
+      await this.shell.notify(db, turnId, { recheck, scheduleRecheck: (ms) => void (later = ms) })
+    } catch {
+      console.error('turn notify failed')
+    }
+    if (later === undefined) return
+    try {
+      const rechecks = (await this.shell.storage.get<Recheck[]>(RECHECKS_KEY)) ?? []
+      await this.shell.storage.put<Recheck[]>(RECHECKS_KEY, [...rechecks.filter((r) => r.turnId !== turnId), { turnId, at: this.now() + later }])
     } catch {
       console.error('turn runner storage failed')
     }
-    if (this.live === live) this.live = null
-    this.running = false
-    return result
+  }
+
+  // Runs every recheck that is due, each once: it is taken off the list
+  // before it runs, so a recheck that throws is not run again for ever.
+  private async runDueRechecks(db?: Db): Promise<void> {
+    let rechecks: Recheck[]
+    try {
+      rechecks = (await this.shell.storage.get<Recheck[]>(RECHECKS_KEY)) ?? []
+    } catch {
+      return
+    }
+    const now = this.now()
+    const due = rechecks.filter((r) => r.at <= now)
+    if (due.length === 0) return
+    try {
+      await this.shell.storage.put<Recheck[]>(RECHECKS_KEY, rechecks.filter((r) => r.at > now))
+    } catch {
+      return
+    }
+    if (!this.shell.notify) return
+    let pool: { end(): Promise<void> } | undefined
+    try {
+      if (!db) {
+        const opened = this.shell.openDb()
+        db = opened.db
+        pool = opened.pool
+      }
+      for (const recheck of due) await this.notify(db, recheck.turnId, true)
+    } catch {
+      console.error('turn notify failed')
+    } finally {
+      await pool?.end().catch(() => {})
+    }
+  }
+
+  // The one alarm, at the earliest thing still to do. `cleanupAt` is the
+  // last event's cleanup just after a turn ended; otherwise it is read from
+  // the stored last event.
+  private async scheduleNext(cleanupAt?: number): Promise<void> {
+    try {
+      const due: number[] = []
+      if (await this.shell.storage.get<TurnJob>(JOB_KEY)) due.push(this.now())
+      if (cleanupAt !== undefined) {
+        due.push(cleanupAt)
+      } else {
+        const final = await this.shell.storage.get<FinalRecord>(FINAL_KEY)
+        if (final?.reply) due.push(final.at + FINAL_REPLAY_MS)
+      }
+      for (const recheck of (await this.shell.storage.get<Recheck[]>(RECHECKS_KEY)) ?? []) due.push(recheck.at)
+      if (due.length > 0) await this.shell.setAlarm(Math.min(...due))
+    } catch {
+      console.error('turn runner storage failed')
+    }
   }
 
   /**
@@ -289,11 +376,10 @@ export class TurnRunnerCore {
     try {
       const final = await this.shell.storage.get<FinalRecord>(FINAL_KEY)
       if (!final?.reply) return
+      // Woken early (a recheck, or the platform): scheduleNext sets the
+      // alarm again, so the body is not kept past its time.
       if (this.now() - final.at >= FINAL_REPLAY_MS) {
         await this.shell.storage.put<FinalRecord>(FINAL_KEY, { turnId: final.turnId, at: final.at })
-      } else {
-        // Woken early: the body is not kept past its time for want of an alarm.
-        await this.shell.setAlarm(final.at + FINAL_REPLAY_MS)
       }
     } catch {
       // Overwritten by the next turn's end anyway.

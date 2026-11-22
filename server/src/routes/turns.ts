@@ -7,6 +7,7 @@ import { djSessions, djTurns } from '../db/schema'
 import { CONFLICT_APOLOGY, DjError } from '../dj/loop'
 import { abandonTurn, TURN_LOST_MS, type TurnJob } from '../dj/turn-job'
 import type { TurnRunnerNamespace, TurnRunnerStub } from '../dj/turn-runner'
+import { hasLiveDevice, turnPushEnabled } from '../push/notify'
 import { djErrorBody, finishedTurnReply, sessionListColumns } from './turn-bodies'
 import { INTERNAL_TURN_REPLY, sessionFrame, TurnStreamWriter, turnStreamResponse, wantsTurnStream, type TurnReply } from './turn-stream'
 
@@ -18,14 +19,21 @@ import { INTERNAL_TURN_REPLY, sessionFrame, TurnStreamWriter, turnStreamResponse
 
 export type DurableTurnsWiring = {
   runner: TurnRunnerNamespace
-  // What computePush reads (TURN_PUSH); S6 adds the device lookup.
+  // What computePush reads (TURN_PUSH).
   push?: { TURN_PUSH?: string }
 }
 
-// Whether the server will push this turn's end (the `turn` event's `push`).
-// The one seam S6 fills: false until devices and APNs exist.
-export async function computePush(_db: Db, _userId: string, _env: { TURN_PUSH?: string } | undefined): Promise<boolean> {
-  return false
+// Whether the server will push this turn's end (the `turn` event's `push`):
+// TURN_PUSH on and the user has a live device. The client then stays quiet
+// in the background rather than post its local notification too (spec,
+// "Who notifies"). A failed read says false: the local one then covers it.
+export async function computePush(db: Db, userId: string, env: { TURN_PUSH?: string } | undefined): Promise<boolean> {
+  if (!turnPushEnabled(env)) return false
+  try {
+    return await hasLiveDevice(db, userId)
+  } catch {
+    return false
+  }
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

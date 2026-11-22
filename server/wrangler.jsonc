@@ -79,8 +79,16 @@
     "DURABLE_TURNS": "off",
     // Mix-ready push (spec 2026-11-21): "on" pushes a turn's end to the
     // listener's devices when no client saw it. Anything else sends none.
-    // Needs the APNs and VAPID secrets once their tasks land.
+    // "on" requires APNS_KEY_ID, APNS_PRIVATE_KEY, VAPID_PUBLIC_KEY,
+    // VAPID_PRIVATE_KEY and VAPID_SUBJECT (every request fails without them,
+    // src/index.ts buildPush), and serves VAPID_PUBLIC_KEY on /health.
     "TURN_PUSH": "off"
+    // Web push VAPID public half and contact, both public. Uncomment with
+    // real values (`npx tsx scripts/vapid-keys.ts` prints a pair) before
+    // TURN_PUSH goes on:
+    // "VAPID_PUBLIC_KEY": "<base64url uncompressed P-256 point>",
+    // "VAPID_SUBJECT": "mailto:<contact>"
+    // Optional: APNS_TOPIC, the APNs topic (defaults to APPLE_BUNDLE_ID).
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:
@@ -97,6 +105,9 @@
   //   WEB_ORIGINS             — exact comma-separated web origins allowed to use cookies/CORS
   //   MUSICKIT_KEY_ID         — Apple Music private-key ID; set with MUSICKIT_PRIVATE_KEY to enable /musickit/*
   //   MUSICKIT_PRIVATE_KEY    — Apple Music .p8 key; never reuse or commit the downloaded key file
+  //   APNS_KEY_ID             — APNs auth key ID (Keys → Apple Push Notifications service); required when TURN_PUSH is "on"
+  //   APNS_PRIVATE_KEY        — APNs .p8 key (multiline or escaped newlines); required when TURN_PUSH is "on"; never paste or commit it
+  //   VAPID_PRIVATE_KEY       — web push VAPID private scalar, base64url (scripts/vapid-keys.ts); required when TURN_PUSH is "on"
   // ENRICH_ADMIN_TOKEN        — admin guard for /enrich/*; unset disables the route group entirely
   //   ANTHROPIC_API_KEY       — DJ engine (Sonnet 5 agent loop); unset disables /sessions/* entirely
   //   GROQ_API_KEY            — Groq Whisper key for POST /transcribe (voice capture); unset makes that one route answer 503, rest of the API unaffected

@@ -386,6 +386,11 @@ not sure the client saw it, the server pushes.**
   - No push registration for the user, or `TURN_PUSH` off →
     `notify_outcome = 'no_device' | 'off'`. Nothing else happens. The mix is
     there on reopen.
+  - A lost turn found by the hourly sweep pushes at once: it has no second
+    alarm to wait on, and no watcher was written its result.
+  - Once only: `notified_at` is claimed with a conditional UPDATE (also
+    fenced on `seen_at IS NULL`) before anything is sent, so two callers
+    never both push (implementation, 2026-11-22).
 - **On the device.** `apns-collapse-id = turnId`, and `thread-id =
   sessionId`. If a push for the mix already on screen arrives while the app
   is in the foreground, the presentation handler hides it.
@@ -419,8 +424,9 @@ simply there on reopen, as today.
   day`, and `apns-collapse-id: <turnId>`.
 - **Responses.** On `410 Unregistered`/`ExpiredToken` or `400
   BadDeviceToken`/`DeviceTokenNotForTopic`, mark the device `disabled_at`
-  and do not retry. On `403 ExpiredProviderToken`, re-sign once and retry
-  once. On `429 TooManyRequests` or a 5xx, give up for this turn
+  and do not retry. On `403 ExpiredProviderToken` (or
+  `InvalidProviderToken`), re-sign once per turn, shared by every device that
+  saw it, and retry once. On `429 TooManyRequests` or a 5xx, give up for this turn
   (`notify_outcome = 'failed'`). A ready mix is not worth a retry queue. The
   log records the status and reason code only.
 - **HTTP/2 works** (gate 0, 2026-11-22). A deployed Worker's plain

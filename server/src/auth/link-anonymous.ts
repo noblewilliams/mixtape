@@ -127,6 +127,26 @@ async function moveShares(tx: Pick<Db, 'execute'>, anonymousUserId: string, newU
     WHERE s.share_id = m.id AND s.user_id = ${newUserId} AND m.sharer_id = ${newUserId}`)
 }
 
+// Push registrations (spec 2026-11-21 durable-mix-turns, "Device
+// registration") follow the listener on every link, outside the merge probe
+// like AI consent: the phone that made the anonymous mix is the account's
+// phone now. The unique key is (provider, token), with no user_id in it, so
+// a move never collides; a token the account had registered too is already
+// one row.
+async function movePushDevices(tx: Pick<Db, 'execute'>, anonymousUserId: string, newUserId: string) {
+  await tx.execute(sql`UPDATE push_devices SET user_id = ${newUserId} WHERE user_id = ${anonymousUserId}`)
+}
+
+// Durable turn rows follow their sessions, as shares do: dj_turns.user_id
+// cascades on the user, so a turn left on the anonymous id would vanish with
+// it, and the session's current_turn_id with it.
+async function moveTurns(tx: Pick<Db, 'execute'>, anonymousUserId: string, newUserId: string) {
+  await tx.execute(sql`
+    UPDATE dj_turns t SET user_id = ${newUserId}
+    FROM dj_sessions d
+    WHERE t.session_id = d.id AND t.user_id = ${anonymousUserId} AND d.user_id = ${newUserId}`)
+}
+
 // Table, column and predicate text is constant in this file, never input.
 function moveStatement({ table, unique, partial }: Move, anonymousUserId: string, newUserId: string): SQL {
   const update = sql`UPDATE ${sql.raw(`"${table}"`)} t SET user_id = ${newUserId} WHERE t.user_id = ${anonymousUserId}`
@@ -192,6 +212,7 @@ export async function linkAnonymousRows(db: Db, input: LinkAnonymousRowsInput): 
     for (const move of ANSWER_MOVES) await tx.execute(moveStatement(move, anon, next))
     await moveShareSaves(tx, anon, next)
     await moveName(tx, anon, next)
+    await movePushDevices(tx, anon, next)
 
     // Nothing to move (a retried callback after the rows already moved, or an
     // anonymous user with nothing the mode would carry): write nothing.
@@ -203,6 +224,7 @@ export async function linkAnonymousRows(db: Db, input: LinkAnonymousRowsInput): 
       if (move.table === 'dj_sessions') {
         movedMixes = rowsOf(await tx.execute(sql`${moveStatement(move, anon, next)} RETURNING 1`)).length
         await moveShares(tx, anon, next)
+        await moveTurns(tx, anon, next)
       } else {
         await tx.execute(moveStatement(move, anon, next))
       }

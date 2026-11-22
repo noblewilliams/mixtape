@@ -33,6 +33,7 @@ import { transcribeRoutes } from './routes/transcribe'
 import { deleteAccount, type AccountDeletionWiring } from './routes/account-deletion'
 import { requireDjOpen } from './middleware/require-dj-open'
 import { readAutoPause } from './dj/auto-pause'
+import { pushDeviceRoutes } from './routes/push-devices'
 import { aiConsentRoutes, hasAiConsent, requireAiConsent, type AiConsentMode } from './routes/ai-consent'
 import type { FetchLike } from './musickit/catalog'
 import type { Db } from './db/types'
@@ -101,6 +102,7 @@ export function createApp({
   aiConsent = 'off',
   djPaused = false,
   durableTurns,
+  vapidPublicKey,
   allowedOrigins = [],
 }: {
   auth: AuthLike
@@ -123,6 +125,9 @@ export function createApp({
   // DURABLE_TURNS in wrangler.jsonc: present, mix turns run in the session's
   // TurnRunner object (routes/turns.ts). Absent, on the request as before.
   durableTurns?: DurableTurnsWiring
+  // TURN_PUSH on with VAPID configured: served on /health so the web bundle
+  // never hard-codes it (spec 2026-11-21 durable-mix-turns, "Web push").
+  vapidPublicKey?: string
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -172,6 +177,7 @@ export function createApp({
     service: 'mixtape-api',
     neverRefuse,
     djPaused: djPaused || (autoPaused ? await autoPaused() : false),
+    ...(vapidPublicKey ? { vapidPublicKey } : {}),
   }))
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2 live]  /sessions/* [P3 live]
@@ -254,6 +260,11 @@ export function createApp({
 
     app.use('/me/funnel-events/*', requireSession(auth))
     app.route('/me/funnel-events', funnelEventsRoutes(db))
+
+    // Anonymous listeners included; no AI consent gate (no model).
+    app.use('/push/devices', requireSession(auth))
+    app.use('/push/devices/*', requireSession(auth))
+    app.route('/push/devices', pushDeviceRoutes(db))
 
     if (enrich && (enrich.deps || enrich.artwork || enrich.seed)) {
       app.use('/enrich/*', requireAdmin(enrich.adminToken))
