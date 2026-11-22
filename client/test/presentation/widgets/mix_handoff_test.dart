@@ -7,7 +7,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
-    show CupertinoActivityIndicator, CupertinoAlertDialog, CupertinoTextField;
+    show CupertinoAlertDialog, CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart' show PlatformException;
@@ -27,7 +27,6 @@ import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_popup.dart';
-import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart' show FirstRunPill;
 import 'package:mixtape/presentation/widgets/foundation/service_marks.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
@@ -38,7 +37,8 @@ import 'package:mixtape/presentation/widgets/tape_header.dart' show TapeBar;
 import 'package:mixtape/presentation/widgets/tape_strip.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 
-import '../../data/playback/playback_controller_test.dart' as playback
+import '../../data/playback/playback_controller_test.dart'
+    as playback
     show FakeApi, FakeBridge;
 import '../../screens/queue_screen_test.dart' show FakeBridge, FakeDjApi;
 
@@ -77,7 +77,8 @@ class _HostState extends ConsumerState<_Host> with MixHandoff<_Host> {
   String get mixSessionId => 's1';
 
   @override
-  void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info}) => snacks.add(message);
+  void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info}) =>
+      snacks.add(message);
 
   @override
   Widget build(BuildContext context) {
@@ -296,13 +297,16 @@ void main() {
       );
     });
 
-    test('a save reports what landed, and the failures only when there are any', () {
-      expect(mixSaveSuccessMessage(12, 0), 'Saved 12 songs to Apple Music');
-      expect(
-        mixSaveSuccessMessage(10, 2),
-        'Saved 10 songs to Apple Music (2 failed)',
-      );
-    });
+    test(
+      'a save reports what landed, and the failures only when there are any',
+      () {
+        expect(mixSaveSuccessMessage(12, 0), 'Saved 12 songs to Apple Music');
+        expect(
+          mixSaveSuccessMessage(10, 2),
+          'Saved 10 songs to Apple Music (2 failed)',
+        );
+      },
+    );
 
     test("a refused save carries Apple's own reason", () {
       expect(
@@ -322,36 +326,45 @@ void main() {
       );
     });
 
-    test('the Spotify explainer says how to name the playlist in TuneMyMusic', () {
-      expect(
-        SpotifyHandoffSheet.lineFor(1),
-        'We’ll copy the song and open TuneMyMusic. Paste it in, tap '
-        '“My Playlist” to give it this mix’s name, then connect Spotify. '
-        'TuneMyMusic adds its own note to the description; you can edit it '
-        'in Spotify.',
-      );
-      expect(
-        SpotifyHandoffSheet.lineFor(3),
-        'We’ll copy your 3 songs and open TuneMyMusic. Paste them in, tap '
-        '“My Playlist” to give it this mix’s name, then connect Spotify. '
-        'TuneMyMusic adds its own note to the description; you can edit it '
-        'in Spotify.',
-      );
-    });
+    test(
+      'the Spotify explainer says how to name the playlist in TuneMyMusic',
+      () {
+        expect(
+          SpotifyHandoffSheet.lineFor(1),
+          'We’ll copy the song and open TuneMyMusic. Paste it in, tap '
+          '“My Playlist” to give it this mix’s name, then connect Spotify. '
+          'TuneMyMusic adds its own note to the description; you can edit it '
+          'in Spotify.',
+        );
+        expect(
+          SpotifyHandoffSheet.lineFor(3),
+          'We’ll copy your 3 songs and open TuneMyMusic. Paste them in, tap '
+          '“My Playlist” to give it this mix’s name, then connect Spotify. '
+          'TuneMyMusic adds its own note to the description; you can edit it '
+          'in Spotify.',
+        );
+      },
+    );
 
-    test('the Spotify Create playlist opens the paste-a-list page that makes a Spotify playlist', () {
-      expect(
-        mixTransferToolUrl.toString(),
-        'https://www.tunemymusic.com/transfer/freetext-to-spotify',
-      );
-    });
+    test(
+      'the Spotify Create playlist opens the paste-a-list page that makes a Spotify playlist',
+      () {
+        expect(
+          mixTransferToolUrl.toString(),
+          'https://www.tunemymusic.com/transfer/freetext-to-spotify',
+        );
+      },
+    );
 
-    test('the copied list is one "Artist - Title" line per song, every song', () {
-      expect(
-        mixTransferText([_track(0), _track(1, appleId: null)]),
-        'Artist 0 - Title 0\nArtist 1 - Title 1',
-      );
-    });
+    test(
+      'the copied list is one "Artist - Title" line per song, every song',
+      () {
+        expect(
+          mixTransferText([_track(0), _track(1, appleId: null)]),
+          'Artist 0 - Title 0\nArtist 1 - Title 1',
+        );
+      },
+    );
   });
 
   group('gating', () {
@@ -388,10 +401,15 @@ void main() {
   });
 
   group('the save alert', () {
-    testWidgets('prefills the mix title and the remembered author', (tester) async {
+    testWidgets('prefills the mix title and the remembered author', (
+      tester,
+    ) async {
       final host = await _pumpHost(
         tester,
-        _container(authorStore: InMemoryAuthorStore('Noble'), accountName: 'Ada'),
+        _container(
+          authorStore: InMemoryAuthorStore('Noble'),
+          accountName: 'Ada',
+        ),
         queue: [_track(0)],
         defaultName: 'Late drive',
       );
@@ -400,14 +418,18 @@ void main() {
 
       expect(
         tester
-            .widget<CupertinoTextField>(find.byKey(MixHandoffKeys.arrangement.nameField))
+            .widget<CupertinoTextField>(
+              find.byKey(MixHandoffKeys.arrangement.nameField),
+            )
             .controller!
             .text,
         'Late drive',
       );
       expect(
         tester
-            .widget<CupertinoTextField>(find.byKey(MixHandoffKeys.arrangement.authorField))
+            .widget<CupertinoTextField>(
+              find.byKey(MixHandoffKeys.arrangement.authorField),
+            )
             .controller!
             .text,
         'Noble',
@@ -439,30 +461,33 @@ void main() {
       expect(bridge.createCalls.single.author, 'Noble');
       expect(bridge.createCalls.single.ids, ['apple', 'apple']);
       expect(await store.read(), 'Noble');
-      expect(host.snacks, ['Saved 2 songs to Apple Music']);
+      expect(host.snacks, [mixSavingMessage, 'Saved 2 songs to Apple Music']);
     });
 
-    testWidgets('no author at all falls back to the app name and stores nothing', (
+    testWidgets(
+      'no author at all falls back to the app name and stores nothing',
+      (tester) async {
+        final store = InMemoryAuthorStore();
+        final bridge = FakeBridge();
+        await _pumpHost(
+          tester,
+          _container(bridge: bridge, authorStore: store),
+          queue: [_track(0)],
+        );
+
+        await tester.tap(find.byKey(const Key('open-save')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
+        await tester.pumpAndSettle();
+
+        expect(bridge.createCalls.single.author, 'mixtape');
+        expect(await store.read(), isNull);
+      },
+    );
+
+    testWidgets('a whitespace-only name cannot create a playlist', (
       tester,
     ) async {
-      final store = InMemoryAuthorStore();
-      final bridge = FakeBridge();
-      await _pumpHost(
-        tester,
-        _container(bridge: bridge, authorStore: store),
-        queue: [_track(0)],
-      );
-
-      await tester.tap(find.byKey(const Key('open-save')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
-      await tester.pumpAndSettle();
-
-      expect(bridge.createCalls.single.author, 'mixtape');
-      expect(await store.read(), isNull);
-    });
-
-    testWidgets('a whitespace-only name cannot create a playlist', (tester) async {
       final bridge = FakeBridge();
       await _pumpHost(
         tester,
@@ -483,30 +508,15 @@ void main() {
       expect(bridge.createCalls, isEmpty);
     });
 
-    testWidgets('a second Save tap while the first is in flight creates nothing new', (
+    // Founder, 2026-11-22: the sheet sat open for the whole native save,
+    // with Cancel dead and a Saving… label that could not be read. Save
+    // now closes it at once and the save reports itself in toasts.
+    testWidgets('Save closes the sheet at once and the save runs behind it', (
       tester,
     ) async {
       final completer = Completer<({int added, int failed})>();
-      final bridge = FakeBridge()..onCreatePlaylist = (_, _) => completer.future;
-      await _pumpHost(tester, _container(bridge: bridge), queue: [_track(0)]);
-
-      await tester.tap(find.byKey(const Key('open-save')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
-      await tester.pump();
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
-      await tester.pump();
-
-      expect(bridge.createCalls, hasLength(1));
-      completer.complete((added: 1, failed: 0));
-      await tester.pumpAndSettle();
-    });
-
-    testWidgets('a refused save retains the draft and reports the reason inline', (
-      tester,
-    ) async {
       final bridge = FakeBridge()
-        ..onCreatePlaylist = (_, _) async => throw MusicKitException('not authorized');
+        ..onCreatePlaylist = (_, _) => completer.future;
       final host = await _pumpHost(
         tester,
         _container(bridge: bridge),
@@ -518,12 +528,116 @@ void main() {
       await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(MixHandoffKeys.arrangement.nameField), findsOneWidget);
-      expect(host.snacks, isEmpty);
-      expect(find.text("Couldn't save the playlist — not authorized"), findsOneWidget);
+      expect(find.byKey(MixSaveDialog.popupKey), findsNothing);
+      expect(bridge.createCalls, hasLength(1));
+      expect(host.snacks, [mixSavingMessage]);
+      expect(host.savingPlaylist, isTrue);
+
+      completer.complete((added: 1, failed: 0));
+      await tester.pumpAndSettle();
+      expect(host.snacks, [mixSavingMessage, 'Saved 1 songs to Apple Music']);
+      expect(host.savingPlaylist, isFalse);
     });
 
-    testWidgets('a save that added nothing posts no taste signal', (tester) async {
+    testWidgets(
+      'Create playlist again while one is saving creates nothing new',
+      (tester) async {
+        final completer = Completer<({int added, int failed})>();
+        final bridge = FakeBridge()
+          ..onCreatePlaylist = (_, _) => completer.future;
+        final host = await _pumpHost(
+          tester,
+          _container(bridge: bridge),
+          queue: [_track(0)],
+        );
+
+        await tester.tap(find.byKey(const Key('open-save')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('open-save')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(MixSaveDialog.popupKey), findsNothing);
+        expect(bridge.createCalls, hasLength(1));
+        expect(host.snacks.last, mixSavingMessage);
+        completer.complete((added: 1, failed: 0));
+        await tester.pumpAndSettle();
+      },
+    );
+
+    // Founder, 2026-11-22: Apple's access prompt was still up when a long
+    // permission error had already landed. Access is asked, and answered,
+    // before anything saves or says it is saving.
+    testWidgets('asks for Apple Music access first and waits for the answer', (
+      tester,
+    ) async {
+      final answer = Completer<bool>();
+      final bridge = FakeBridge()..onRequestAuthorization = () => answer.future;
+      final host = await _pumpHost(
+        tester,
+        _container(bridge: bridge),
+        queue: [_track(0)],
+      );
+
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
+      await tester.pumpAndSettle();
+
+      expect(bridge.authorizationRequests, 1);
+      expect(bridge.createCalls, isEmpty);
+      expect(host.snacks, isEmpty);
+
+      answer.complete(true);
+      await tester.pumpAndSettle();
+      expect(bridge.createCalls, hasLength(1));
+      expect(host.snacks.last, 'Saved 1 songs to Apple Music');
+    });
+
+    testWidgets('access refused saves nothing and says where to allow it', (
+      tester,
+    ) async {
+      final bridge = FakeBridge()..onRequestAuthorization = () async => false;
+      final host = await _pumpHost(
+        tester,
+        _container(bridge: bridge),
+        queue: [_track(0)],
+      );
+
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
+      await tester.pumpAndSettle();
+
+      expect(bridge.createCalls, isEmpty);
+      expect(host.snacks, [mixSaveAccessMessage]);
+      expect(host.savingPlaylist, isFalse);
+    });
+
+    testWidgets('a refused save reports the reason as a toast', (tester) async {
+      final bridge = FakeBridge()
+        ..onCreatePlaylist = (_, _) async =>
+            throw MusicKitException('not authorized');
+      final host = await _pumpHost(
+        tester,
+        _container(bridge: bridge),
+        queue: [_track(0)],
+      );
+
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(MixSaveDialog.popupKey), findsNothing);
+      expect(host.snacks.last, "Couldn't save the playlist — not authorized");
+      expect(host.savingPlaylist, isFalse);
+    });
+
+    testWidgets('a save that added nothing posts no taste signal', (
+      tester,
+    ) async {
       final api = FakeDjApi();
       final bridge = FakeBridge()
         ..onCreatePlaylist = (_, _) async => (added: 0, failed: 2);
@@ -539,7 +653,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.postedEvents, isEmpty);
-      expect(host.snacks, ['Saved 0 songs to Apple Music (2 failed)']);
+      expect(host.snacks, [
+        mixSavingMessage,
+        'Saved 0 songs to Apple Music (2 failed)',
+      ]);
     });
 
     testWidgets('a successful save posts exactly one saved_playlist event', (
@@ -558,57 +675,65 @@ void main() {
       ]);
     });
 
-    testWidgets('an unexpected throw leaves the alert usable rather than stuck', (
+    testWidgets('an unexpected throw is reported and never strands the save', (
       tester,
     ) async {
-      // The two known outcomes pop the alert themselves; anything else
-      // (an offline store, a programming error) leaves it open, and the
-      // listener must still be able to retry or cancel.
-      var attempts = 0;
+      final bridge = FakeBridge()
+        ..onCreatePlaylist = (_, _) async => throw StateError('boom');
+      final host = await _pumpHost(
+        tester,
+        _container(bridge: bridge),
+        queue: [_track(0)],
+      );
+
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isStateError);
+      expect(host.snacks.last, mixSaveFailureMessage('something went wrong'));
+      expect(host.savingPlaylist, isFalse);
+    });
+
+    testWidgets('Save hands back the trimmed draft and closes', (tester) async {
+      MixSaveDraft? draft;
       await tester.pumpWidget(
         MaterialApp(
           theme: MixtapeTheme.light(),
-          home: MixSaveDialog(
-            keys: MixHandoffKeys.arrangement,
-            defaultName: 'Late drive',
-            defaultAuthor: '',
-            onConfirm: (_, _) async {
-              attempts++;
-              throw StateError('boom');
-            },
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                draft = await Navigator.of(context).push<MixSaveDraft>(
+                  MaterialPageRoute(
+                    builder: (_) => const Scaffold(
+                      body: MixSaveDialog(
+                        keys: MixHandoffKeys.arrangement,
+                        defaultName: 'Late drive',
+                        defaultAuthor: 'Noble',
+                      ),
+                    ),
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
           ),
         ),
       );
-      final keys = MixHandoffKeys.arrangement;
-
-      await tester.tap(find.byKey(keys.saveConfirm));
+      await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      // Reported to the app's error handler rather than lost as an
-      // unhandled async error the discarded future would swallow.
-      expect(tester.takeException(), isStateError);
-      expect(attempts, 1);
-      expect(find.byType(CupertinoActivityIndicator), findsNothing);
-      expect(
-        tester.widget<FirstRunPill>(find.byKey(keys.saveConfirm)).onPressed,
-        isNotNull,
-      );
-      expect(
-        tester.widget<CupertinoTextField>(find.byKey(keys.nameField)).enabled,
-        isTrue,
-      );
-      expect(
-        tester.widget<TextButton>(find.byKey(MixSaveDialog.cancelKey)).onPressed,
-        isNotNull,
-      );
-
-      // And a retry is possible rather than dead.
-      await tester.tap(find.byKey(keys.saveConfirm));
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
       await tester.pumpAndSettle();
-      expect(attempts, 2);
-      expect(tester.takeException(), isStateError);
+
+      expect(find.byKey(MixSaveDialog.popupKey), findsNothing);
+      expect(draft?.name, 'Late drive');
+      expect(draft?.author, 'Noble');
     });
 
-    testWidgets('each screen keeps its own keys and alert title', (tester) async {
+    testWidgets('each screen keeps its own keys and alert title', (
+      tester,
+    ) async {
       expect(
         MixHandoffKeys.arrangement.saveConfirm,
         isNot(MixHandoffKeys.conversation.saveConfirm),
@@ -751,46 +876,47 @@ void main() {
       },
     );
 
-    testWidgets('Play is inert while a start is in flight, and never opens Now Playing', (
-      tester,
-    ) async {
-      FlutterSecureStorage.setMockInitialValues({});
-      final gate = Completer<void>();
-      final player = PlaybackController(
-        playback.FakeApi(),
-        playback.FakeBridge()..pending = gate,
-      );
-      final tapped = await _pumpActions(
-        tester,
-        queue: [_track(0)],
-        // The mix reads as this one's from the tap: the controller marks it
-        // `waiting` before the native call.
-        playing: true,
-        player: player,
-      );
-      const keys = MixHandoffKeys.arrangement;
-      unawaited(player.start('s1', 1, 'Mix', [_track(0)]));
-      await tester.pump();
-      await tester.pump();
-      expect(player.busy, isTrue);
-      final play = tester.widget<TapeButton>(find.byKey(keys.playNow));
-      expect(play.label, 'Play');
-      expect(play.onPressed, isNull);
-      expect(find.byKey(MixHandoffKeys.meterKey), findsNothing);
-      await tester.tap(find.byKey(keys.playNow));
-      expect(tapped.nowPlaying, 0);
-      expect(tapped.plays, 0);
+    testWidgets(
+      'Play is inert while a start is in flight, and never opens Now Playing',
+      (tester) async {
+        FlutterSecureStorage.setMockInitialValues({});
+        final gate = Completer<void>();
+        final player = PlaybackController(
+          playback.FakeApi(),
+          playback.FakeBridge()..pending = gate,
+        );
+        final tapped = await _pumpActions(
+          tester,
+          queue: [_track(0)],
+          // The mix reads as this one's from the tap: the controller marks it
+          // `waiting` before the native call.
+          playing: true,
+          player: player,
+        );
+        const keys = MixHandoffKeys.arrangement;
+        unawaited(player.start('s1', 1, 'Mix', [_track(0)]));
+        await tester.pump();
+        await tester.pump();
+        expect(player.busy, isTrue);
+        final play = tester.widget<TapeButton>(find.byKey(keys.playNow));
+        expect(play.label, 'Play');
+        expect(play.onPressed, isNull);
+        expect(find.byKey(MixHandoffKeys.meterKey), findsNothing);
+        await tester.tap(find.byKey(keys.playNow));
+        expect(tapped.nowPlaying, 0);
+        expect(tapped.plays, 0);
 
-      gate.complete();
-      await tester.pump();
-      await tester.pump();
-      expect(player.busy, isFalse);
-      expect(
-        tester.widget<TapeButton>(find.byKey(keys.playNow)).label,
-        'Playing',
-      );
-      player.dispose();
-    });
+        gate.complete();
+        await tester.pump();
+        await tester.pump();
+        expect(player.busy, isFalse);
+        expect(
+          tester.widget<TapeButton>(find.byKey(keys.playNow)).label,
+          'Playing',
+        );
+        player.dispose();
+      },
+    );
 
     testWidgets('Play is inert while the mix is on its way to the Music app', (
       tester,
@@ -1035,25 +1161,31 @@ void main() {
   // Founder, 2026-11-22: the app's own pop-up (the notification ask's size)
   // with a small soft picture, and room to read the whole name.
   group('save pop-up', () {
-    testWidgets('opens as the app pop-up with its picture, not a system alert', (
+    testWidgets(
+      'opens as the app pop-up with its picture, not a system alert',
+      (tester) async {
+        await _pumpHost(tester, _container(), queue: [_track(0)]);
+        await tester.tap(find.byKey(const Key('open-save')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(MixtapePopup.surfaceKey), findsOneWidget);
+        expect(find.byKey(MixSaveDialog.artKey), findsOneWidget);
+        expect(find.byType(CupertinoAlertDialog), findsNothing);
+        expect(find.text('Save as playlist'), findsOneWidget);
+        expect(
+          find.byKey(MixHandoffKeys.arrangement.saveConfirm),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byKey(MixSaveDialog.cancelKey));
+        await tester.pumpAndSettle();
+        expect(find.byKey(MixtapePopup.surfaceKey), findsNothing);
+      },
+    );
+
+    testWidgets('while the keyboard is up the picture shrinks but stays', (
       tester,
     ) async {
-      await _pumpHost(tester, _container(), queue: [_track(0)]);
-      await tester.tap(find.byKey(const Key('open-save')));
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(MixtapePopup.surfaceKey), findsOneWidget);
-      expect(find.byKey(MixSaveDialog.artKey), findsOneWidget);
-      expect(find.byType(CupertinoAlertDialog), findsNothing);
-      expect(find.text('Save as playlist'), findsOneWidget);
-      expect(find.byKey(MixHandoffKeys.arrangement.saveConfirm), findsOneWidget);
-
-      await tester.tap(find.byKey(MixSaveDialog.cancelKey));
-      await tester.pumpAndSettle();
-      expect(find.byKey(MixtapePopup.surfaceKey), findsNothing);
-    });
-
-    testWidgets('while the keyboard is up the picture shrinks but stays', (tester) async {
       await _pumpHost(tester, _container(), queue: [_track(0)]);
       await tester.tap(find.byKey(const Key('open-save')));
       await tester.pumpAndSettle();
@@ -1067,29 +1199,43 @@ void main() {
         tester.getSize(find.byKey(MixSaveDialog.artKey)).height,
         MixPopupArt.compactHeight,
       );
-      expect(find.byKey(MixHandoffKeys.arrangement.saveConfirm), findsOneWidget);
-    });
-
-    testWidgets('a long name wraps onto more lines instead of scrolling out of sight', (
-      tester,
-    ) async {
-      const long = 'Dust slowly while the light pours in through the kitchen window';
-      await _pumpHost(tester, _container(), queue: [_track(0)], defaultName: long);
-      await tester.tap(find.byKey(const Key('open-save')));
-      await tester.pumpAndSettle();
-
-      final field = tester.widget<CupertinoTextField>(
-        find.byKey(MixHandoffKeys.arrangement.nameField),
-      );
-      expect(field.minLines, 1);
-      expect(field.maxLines, 3);
       expect(
-        tester.getSize(find.byKey(MixHandoffKeys.arrangement.nameField)).height,
-        greaterThan(
-          tester.getSize(find.byKey(MixHandoffKeys.arrangement.authorField)).height,
-        ),
+        find.byKey(MixHandoffKeys.arrangement.saveConfirm),
+        findsOneWidget,
       );
     });
+
+    testWidgets(
+      'a long name wraps onto more lines instead of scrolling out of sight',
+      (tester) async {
+        const long =
+            'Dust slowly while the light pours in through the kitchen window';
+        await _pumpHost(
+          tester,
+          _container(),
+          queue: [_track(0)],
+          defaultName: long,
+        );
+        await tester.tap(find.byKey(const Key('open-save')));
+        await tester.pumpAndSettle();
+
+        final field = tester.widget<CupertinoTextField>(
+          find.byKey(MixHandoffKeys.arrangement.nameField),
+        );
+        expect(field.minLines, 1);
+        expect(field.maxLines, 3);
+        expect(
+          tester
+              .getSize(find.byKey(MixHandoffKeys.arrangement.nameField))
+              .height,
+          greaterThan(
+            tester
+                .getSize(find.byKey(MixHandoffKeys.arrangement.authorField))
+                .height,
+          ),
+        );
+      },
+    );
   });
 
   group('save alert, new to you', () {
@@ -1099,18 +1245,18 @@ void main() {
     const three =
         '3 songs here are new to you. Saving adds them to your Apple Music library.';
 
-    Future<void> pumpDialog(WidgetTester tester, int count) => tester.pumpWidget(
-      MaterialApp(
-        theme: MixtapeTheme.light(),
-        home: MixSaveDialog(
-          keys: MixHandoffKeys.arrangement,
-          defaultName: 'Late drive',
-          defaultAuthor: '',
-          newToYouCount: count,
-          onConfirm: (_, _) async {},
-        ),
-      ),
-    );
+    Future<void> pumpDialog(WidgetTester tester, int count) =>
+        tester.pumpWidget(
+          MaterialApp(
+            theme: MixtapeTheme.light(),
+            home: MixSaveDialog(
+              keys: MixHandoffKeys.arrangement,
+              defaultName: 'Late drive',
+              defaultAuthor: '',
+              newToYouCount: count,
+            ),
+          ),
+        );
 
     testWidgets('a mix of only owned songs keeps the alert unchanged', (
       tester,
@@ -1139,23 +1285,26 @@ void main() {
       expect(find.text(three), findsOneWidget);
     });
 
-    testWidgets('the shared save flow, used by both screens, counts the queue\'s new songs', (tester) async {
-      await _pumpHost(
-        tester,
-        _container(),
-        queue: [
-          _track(0, newToYou: true),
-          _track(1),
-          _track(2, newToYou: true),
-          _track(3, newToYou: true),
-        ],
-      );
+    testWidgets(
+      'the shared save flow, used by both screens, counts the queue\'s new songs',
+      (tester) async {
+        await _pumpHost(
+          tester,
+          _container(),
+          queue: [
+            _track(0, newToYou: true),
+            _track(1),
+            _track(2, newToYou: true),
+            _track(3, newToYou: true),
+          ],
+        );
 
-      await tester.tap(find.byKey(const Key('open-save')));
-      await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('open-save')));
+        await tester.pumpAndSettle();
 
-      expect(find.text(three), findsOneWidget);
-    });
+        expect(find.text(three), findsOneWidget);
+      },
+    );
   });
   group('Play here', () {
     PlatformException native(String code) =>
@@ -1244,38 +1393,39 @@ void main() {
       });
     }
 
-    testWidgets('leaving the screen mid-start still releases and plays in Music', (
-      tester,
-    ) async {
-      FlutterSecureStorage.setMockInitialValues({});
-      final app = _LateFailBridge();
-      final player = PlaybackController(playback.FakeApi(), app);
-      final music = FakeBridge();
-      final api = FakeDjApi();
-      final container = _container(api: api, bridge: music, player: player);
-      await _pumpHost(tester, container, queue: [_track(0), _track(1)]);
+    testWidgets(
+      'leaving the screen mid-start still releases and plays in Music',
+      (tester) async {
+        FlutterSecureStorage.setMockInitialValues({});
+        final app = _LateFailBridge();
+        final player = PlaybackController(playback.FakeApi(), app);
+        final music = FakeBridge();
+        final api = FakeDjApi();
+        final container = _container(api: api, bridge: music, player: player);
+        await _pumpHost(tester, container, queue: [_track(0), _track(1)]);
 
-      await tester.tap(find.byKey(const Key('host-play-here')));
-      await tester.pump();
-      // The listener leaves before Apple answers.
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: const MaterialApp(home: SizedBox()),
-        ),
-      );
-      app.gate.complete();
-      for (var i = 0; i < 6; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
-      }
+        await tester.tap(find.byKey(const Key('host-play-here')));
+        await tester.pump();
+        // The listener leaves before Apple answers.
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const MaterialApp(home: SizedBox()),
+          ),
+        );
+        app.gate.complete();
+        for (var i = 0; i < 6; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
 
-      expect(music.playCalls, [
-        ['apple', 'apple'],
-      ]);
-      expect(player.sessionId, isNull, reason: 'released');
-      expect(api.postedEvents.map((e) => e.type), ['played']);
-      expect(tester.takeException(), isNull);
-    });
+        expect(music.playCalls, [
+          ['apple', 'apple'],
+        ]);
+        expect(player.sessionId, isNull, reason: 'released');
+        expect(api.postedEvents.map((e) => e.type), ['played']);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('no subscription still tries the Music app', (tester) async {
       final t = await pumpPlay(

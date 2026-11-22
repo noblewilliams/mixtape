@@ -1,8 +1,7 @@
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart'
-    show CupertinoTextField;
+import 'package:flutter/cupertino.dart' show CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -39,7 +38,8 @@ import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/mix_quote.dart';
 import 'package:mixtape/presentation/widgets/foundation/mini_toast.dart';
 import 'package:mixtape/presentation/widgets/foundation/swipe_action_row.dart';
-import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart' show FirstRunPill;
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart'
+    show FirstRunPill;
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
 import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
@@ -240,8 +240,16 @@ class FakeBridge implements MusicKitBridge {
   >
   createCalls = [];
 
+  /// Apple Music access: granted unless a test answers otherwise.
+  Future<bool> Function()? onRequestAuthorization;
+  int authorizationRequests = 0;
+
   @override
-  Future<bool> requestAuthorization() => throw UnimplementedError();
+  Future<bool> requestAuthorization() {
+    authorizationRequests++;
+    final impl = onRequestAuthorization;
+    return impl == null ? Future.value(true) : impl();
+  }
 
   @override
   Future<LibraryPage> fetchLibrarySongs({
@@ -925,9 +933,7 @@ void main() {
     expect(bridge.createCalls, isEmpty);
     expect(
       tester
-          .widget<FirstRunPill>(
-            find.byKey(const Key('save-confirm-button')),
-          )
+          .widget<FirstRunPill>(find.byKey(const Key('save-confirm-button')))
           .onPressed,
       isNull,
     );
@@ -979,16 +985,8 @@ void main() {
     await tester.tap(find.byKey(const Key('save-confirm-button')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('playlist-name-field')), findsOneWidget);
-    expect(
-      tester
-          .widget<CupertinoTextField>(
-            find.byKey(const Key('playlist-name-field')),
-          )
-          .controller!
-          .text,
-      'Test Session',
-    );
+    // The sheet closed on Save; the refusal comes back as a toast.
+    expect(find.byKey(const Key('playlist-name-field')), findsNothing);
     expect(
       find.text("Couldn't save the playlist — not authorized"),
       findsOneWidget,

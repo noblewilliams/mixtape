@@ -316,10 +316,15 @@ class FirstRunPill extends StatelessWidget {
     this.compact = false,
     this.minHeight,
     this.fontSize,
+    this.onLight = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// On a light sheet (the Create playlist sheet): disabled reads in muted
+  /// ink on a faint ink wash, since cream on translucent paper disappears.
+  final bool onLight;
 
   /// A full-width pill shorter than [height], and its type (the Mix ready
   /// pop-up's 50 pt pill at 15 pt).
@@ -352,7 +357,11 @@ class FirstRunPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final enabled = onPressed != null;
-    final ink = enabled ? FirstRunColors.ink : FirstRunColors.cream;
+    final ink = enabled
+        ? FirstRunColors.ink
+        : onLight
+        ? FirstRunColors.paperMuted
+        : FirstRunColors.cream;
     final weight = !enabled
         ? FontWeight.w400
         : (emphasis || forward)
@@ -385,9 +394,11 @@ class FirstRunPill extends StatelessWidget {
             shape: const WidgetStatePropertyAll(StadiumBorder()),
             elevation: const WidgetStatePropertyAll(0),
             backgroundColor: WidgetStateProperty.resolveWith(
-              (states) => states.contains(WidgetState.disabled)
-                  ? FirstRunColors.paper.withValues(alpha: 0.45)
-                  : FirstRunColors.paper,
+              (states) => !states.contains(WidgetState.disabled)
+                  ? FirstRunColors.paper
+                  : onLight
+                  ? FirstRunColors.ink.withValues(alpha: 0.06)
+                  : FirstRunColors.paper.withValues(alpha: 0.45),
             ),
             foregroundColor: WidgetStatePropertyAll(ink),
             overlayColor: WidgetStatePropertyAll(

@@ -10,7 +10,7 @@ import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:mixtape/presentation/widgets/foundation/empty_state.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
-import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart' show FirstRunPill;
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart' show FirstRunColors, FirstRunPill;
 import 'package:mixtape/presentation/widgets/tape_settings_dialog.dart';
 
 void main() {
@@ -69,7 +69,6 @@ void main() {
   testWidgets('empty playlist name disables submission until nonblank input', (
     tester,
   ) async {
-    var saves = 0;
     await tester.pumpWidget(
       MaterialApp(
         theme: MixtapeTheme.light(),
@@ -78,15 +77,21 @@ void main() {
             keys: MixHandoffKeys.arrangement,
             defaultName: ' ',
             defaultAuthor: '',
-            onConfirm: (_, _) async {
-              saves++;
-            },
           ),
         ),
       ),
     );
     final button = find.byKey(MixHandoffKeys.arrangement.saveConfirm);
     expect(tester.widget<FirstRunPill>(button).onPressed, isNull);
+    // The sheet is light: the first-run pill's cream disabled label vanished
+    // on it (founder, 2026-11-22), so it reads in muted ink here.
+    expect(
+      tester
+          .widget<Text>(find.descendant(of: button, matching: find.byType(Text)))
+          .style
+          ?.color,
+      FirstRunColors.paperMuted,
+    );
     await tester.enterText(
       find.byKey(MixHandoffKeys.arrangement.nameField),
       '   ',
@@ -98,9 +103,7 @@ void main() {
       'Sunday',
     );
     await tester.pump();
-    await tester.tap(button);
-    await tester.pump();
-    expect(saves, 1);
+    expect(tester.widget<FirstRunPill>(button).onPressed, isNotNull);
   });
 
   testWidgets(

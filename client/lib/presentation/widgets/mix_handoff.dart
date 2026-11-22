@@ -110,6 +110,13 @@ String mixSaveSuccessMessage(int added, int failed) => failed > 0
 String mixSaveFailureMessage(String reason) =>
     "Couldn't save the playlist — $reason";
 
+/// Shown the moment Save closes the sheet: the save runs behind it.
+const mixSavingMessage = 'Saving to Apple Music…';
+
+/// Apple Music access refused (now or before): nothing was saved.
+const mixSaveAccessMessage =
+    'Allow Apple Music access for mixtape in Settings to save playlists';
+
 String mixSpotifyCopiedMessage(int count) => count == 1
     ? 'Copied 1 song · paste it in, then rename “My Playlist”'
     : 'Copied $count songs · paste them in, then rename “My Playlist”';
@@ -238,7 +245,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// True while the Send to Music bridge call is in flight.
   bool get sendingToMusic => _sendingToMusic;
 
-  /// True from opening the save alert until it closes.
+  /// True from opening the save sheet until the save behind it resolves.
   bool get savingPlaylist => _savingPlaylist;
 
   /// True while the Spotify playlist handoff is in hand (its explainer, the
@@ -427,13 +434,21 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// means an empty field; per dj_providers' warning we never await a
   /// provider future across auth transitions). Blank falls back to 'mixtape'
   /// on save.
+  ///
+  /// Save closes the sheet at once and the save runs behind it, reported in
+  /// toasts (founder, 2026-11-22: a sheet held open through the whole native
+  /// save, Cancel dead, read as broken). [savingPlaylist] stays true until
+  /// the save resolves, so a second Create playlist cannot start another.
   Future<void> createPlaylist({
     required List<QueueTrack> queue,
     required String defaultName,
     required MixHandoffKeys keys,
     Color? caseColor,
   }) async {
-    if (_savingPlaylist) return;
+    if (_savingPlaylist) {
+      showMixSnack(mixSavingMessage);
+      return;
+    }
     setState(() => _savingPlaylist = true);
     try {
       String? storedAuthor;
@@ -444,7 +459,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       }
       if (!mounted) return;
       final accountName = ref.read(accountNameProvider).value;
-      await showMixtapePopup<void>(
+      final draft = await showMixtapePopup<MixSaveDraft>(
         context,
         label: keys.saveDialogTitle,
         builder: (dialogContext) => MixSaveDialog(
@@ -457,40 +472,30 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
                   ? storedAuthor
                   : accountName) ??
               '',
-          onConfirm: (name, author) => _confirmSave(
-            dialogContext: dialogContext,
-            queue: queue,
-            rawName: name,
-            defaultName: defaultName,
-            rawAuthor: author,
-          ),
         ),
       );
+      if (draft == null || !mounted) return;
+      await _save(queue: queue, draft: draft, defaultName: defaultName);
     } finally {
       if (mounted) setState(() => _savingPlaylist = false);
     }
   }
 
-  /// Runs the actual bridge call for a confirmed save — called by
-  /// [MixSaveDialog] itself, which owns the double-tap guard on its Save
-  /// button (each tap would otherwise create a NEW playlist; there's no way
-  /// to dedupe after the fact). Always resolves the alert (pops it) on both
-  /// success and failure, then reports the outcome as a toast on the screen
-  /// underneath.
-  Future<void> _confirmSave({
-    required BuildContext dialogContext,
+  /// The save behind a closed sheet. Apple Music access is asked first and
+  /// its answer awaited, so nothing saves (or says it is saving) while
+  /// Apple's prompt is still up. Every outcome ends in exactly one toast.
+  Future<void> _save({
     required List<QueueTrack> queue,
-    required String rawName,
+    required MixSaveDraft draft,
     required String defaultName,
-    required String rawAuthor,
   }) async {
-    final trimmed = rawName.trim();
+    final trimmed = draft.name.trim();
     final name = trimmed.isEmpty ? defaultName : trimmed;
     // Attribution: without an explicit author Apple shows the Xcode product
     // name ("Runner"). The user's typed name wins; blank falls back to the
-    // app name. Remembered (even if the save then fails) so the next alert
+    // app name. Remembered (even if the save then fails) so the next sheet
     // prefills it — it's the user's name, not per-playlist data.
-    final trimmedAuthor = rawAuthor.trim();
+    final trimmedAuthor = draft.author.trim();
     final author = trimmedAuthor.isEmpty ? 'mixtape' : trimmedAuthor;
     if (trimmedAuthor.isNotEmpty) {
       try {
@@ -503,42 +508,78 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       for (final t in queue)
         if (t.appleId != null) t.appleId!,
     ];
+    final bridge = ref.read(musicKitBridgeProvider);
     final creationApi = ref.read(djApiProvider);
     final creationSessionId = mixSessionId;
     final receipt = mixRecordsEvidence;
+    var announced = false;
     try {
-      final result = await ref
-          .read(musicKitBridgeProvider)
-          .createPlaylist(
-            name,
-            ids,
-            author: author,
-            description: 'made by mixtape',
-            onCreated: (libraryId) {
-              if (!receipt) return;
-              // Bind to the originating mix, not a screen/account that may
-              // have changed while Apple was creating the playlist.
-              unawaited(
-                creationApi
-                    .recordPlaylistCreation(creationSessionId, libraryId)
-                    .catchError((Object _) {}),
-              );
-            },
+      if (!await bridge.requestAuthorization()) {
+        if (mounted)
+          showMixSnack(mixSaveAccessMessage, kind: FeedbackKind.error);
+        return;
+      }
+      if (!mounted) return;
+      showMixSnack(mixSavingMessage);
+      announced = true;
+      final result = await bridge.createPlaylist(
+        name,
+        ids,
+        author: author,
+        description: 'made by mixtape',
+        onCreated: (libraryId) {
+          if (!receipt) return;
+          // Bind to the originating mix, not a screen/account that may
+          // have changed while Apple was creating the playlist.
+          unawaited(
+            creationApi
+                .recordPlaylistCreation(creationSessionId, libraryId)
+                .catchError((Object _) {}),
           );
+        },
+      );
       // A zero-added save is a false taste signal, not evidence of a like —
       // see [postMixEvent].
       if (result.added > 0) postMixEvent('saved_playlist');
-      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
       if (!mounted) return;
+      if (announced) _replaceSavingSnack();
       showMixSnack(
         mixSaveSuccessMessage(result.added, result.failed),
         kind: result.added > 0 ? FeedbackKind.success : FeedbackKind.error,
       );
-    } on MusicKitException {
-      // Keep the entered name and author next to the recovery message.
-      rethrow;
+    } on MusicKitException catch (error) {
+      if (mounted) {
+        if (announced) _replaceSavingSnack();
+        showMixSnack(
+          mixSaveFailureMessage(error.message),
+          kind: FeedbackKind.error,
+        );
+      }
+    } catch (error, stack) {
+      // Not a refusal the bridge knows about: keep it for the error handler,
+      // and still close the loop for the listener.
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stack,
+          library: 'mixtape',
+          context: ErrorDescription('while saving a mix as a playlist'),
+        ),
+      );
+      if (mounted) {
+        if (announced) _replaceSavingSnack();
+        showMixSnack(
+          mixSaveFailureMessage('something went wrong'),
+          kind: FeedbackKind.error,
+        );
+      }
     }
   }
+
+  /// The result takes the Saving toast's place rather than queueing behind
+  /// it for its whole duration (ScaffoldMessenger shows one at a time).
+  void _replaceSavingSnack() =>
+      ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
 
   /// Create playlist on Spotify: the song list goes to the clipboard and
   /// TuneMyMusic's paste-a-list page opens to build the Spotify playlist.
@@ -788,15 +829,18 @@ String mixSaveNewToYouLine(int count) => count == 1
     ? '1 song here is new to you. Saving adds it to your Apple Music library.'
     : '$count songs here are new to you. Saving adds them to your Apple Music library.';
 
-/// P3's native alert: the mix title as the default name, and "Your name"
-/// remembered for next time.
+/// What the save sheet hands back on Save: the name and author as typed.
+typedef MixSaveDraft = ({String name, String author});
+
+/// The save sheet: the mix title as the default name, and "Your name"
+/// remembered for next time. Save pops a [MixSaveDraft]; the host saves
+/// behind it. Cancel (or a tap outside) pops nothing.
 class MixSaveDialog extends StatefulWidget {
   const MixSaveDialog({
     super.key,
     required this.keys,
     required this.defaultName,
     required this.defaultAuthor,
-    required this.onConfirm,
     this.newToYouCount = 0,
     this.caseColor,
   });
@@ -819,7 +863,6 @@ class MixSaveDialog extends StatefulWidget {
   /// Songs in the mix from outside the listener's library; saving adds them
   /// to it, so the alert says so when there are any.
   final int newToYouCount;
-  final Future<void> Function(String name, String author) onConfirm;
 
   @override
   State<MixSaveDialog> createState() => _MixSaveDialogState();
@@ -832,8 +875,7 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
   late final TextEditingController _author = TextEditingController(
     text: widget.defaultAuthor,
   );
-  bool _submitting = false;
-  String? _error;
+  bool _submitted = false;
 
   @override
   void dispose() {
@@ -842,42 +884,13 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    // Guards a double-tap: each tap would otherwise create a NEW playlist.
-    if (_submitting || _name.text.trim().isEmpty) return;
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    try {
-      await widget.onConfirm(_name.text, _author.text);
-    } on MusicKitException catch (error) {
-      if (mounted) {
-        setState(() => _error = mixSaveFailureMessage(error.message));
-      }
-    } catch (error, stack) {
-      // onConfirm resolves both outcomes it knows about — a save and Apple's
-      // refusal — by popping this alert itself. Anything else reaching here
-      // is unexpected, and the button's callback discards this future, so
-      // rethrowing would lose it as an unhandled async error: report it to
-      // the app's error handler instead.
-      FlutterError.reportError(
-        FlutterErrorDetails(
-          exception: error,
-          stack: stack,
-          library: 'mixtape',
-          context: ErrorDescription('while saving a mix as a playlist'),
-        ),
-      );
-    } finally {
-      // onConfirm pops this alert itself on both the success and the
-      // MusicKit-failure path, so normally this widget is already gone and
-      // the line below never runs. It matters for the third path: anything
-      // else thrown (an offline store, a programming error) leaves the alert
-      // open, and without this the listener would be stranded on a dead
-      // spinner with Cancel disabled and no way out.
-      if (mounted) setState(() => _submitting = false);
-    }
+  void _submit() {
+    // One draft per sheet: a double-tap must not save twice.
+    if (_submitted || _name.text.trim().isEmpty) return;
+    _submitted = true;
+    Navigator.of(
+      context,
+    ).pop<MixSaveDraft>((name: _name.text, author: _author.text));
   }
 
   @override
@@ -900,7 +913,7 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
       borderRadius: BorderRadius.circular(14),
     );
     const fieldPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 12);
-    final canSave = !_submitting && _name.text.trim().isNotEmpty;
+    final canSave = _name.text.trim().isNotEmpty;
     final typing = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     final body = Column(
@@ -935,7 +948,6 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
           key: widget.keys.nameField,
           controller: _name,
           onChanged: (_) => setState(() {}),
-          enabled: !_submitting,
           placeholder: 'Playlist name',
           minLines: 1,
           maxLines: 3,
@@ -950,31 +962,17 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
         CupertinoTextField(
           key: widget.keys.authorField,
           controller: _author,
-          enabled: !_submitting,
           placeholder: 'Your name',
           textInputAction: TextInputAction.done,
           textCapitalization: TextCapitalization.words,
           onSubmitted: (_) {
-            if (canSave) unawaited(_submit());
+            if (canSave) _submit();
           },
           style: fieldText,
           padding: fieldPadding,
           decoration: field(),
         ),
         const SizedBox(height: 8),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Semantics(
-              liveRegion: true,
-              child: Text(
-                _error!,
-                style: helper.copyWith(
-                  color: Theme.of(context).colorScheme.error,
-                ),
-              ),
-            ),
-          ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
@@ -1024,20 +1022,21 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
             children: [
               FirstRunPill(
                 key: widget.keys.saveConfirm,
-                label: _submitting ? 'Saving…' : 'Save playlist',
+                label: 'Save playlist',
                 minHeight: 50,
                 fontSize: 15.2,
-                onPressed: canSave ? Haptics.on(HapticKind.commit, _submit) : null,
+                onLight: true,
+                onPressed: canSave
+                    ? Haptics.on(HapticKind.commit, _submit)
+                    : null,
               ),
               const SizedBox(height: 4),
               TextButton(
                 key: MixSaveDialog.cancelKey,
-                onPressed: _submitting
-                    ? null
-                    : Haptics.on(
-                        HapticKind.dismiss,
-                        () => Navigator.of(context).pop(),
-                      ),
+                onPressed: Haptics.on(
+                  HapticKind.dismiss,
+                  () => Navigator.of(context).pop(),
+                ),
                 style: TextButton.styleFrom(
                   foregroundColor: tokens.muted,
                   minimumSize: const Size.fromHeight(44),

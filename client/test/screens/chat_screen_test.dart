@@ -317,6 +317,9 @@ class FakeBridge implements MusicKitBridge {
   MusicKitException? failWith;
 
   @override
+  Future<bool> requestAuthorization() async => true;
+
+  @override
   Future<bool> playQueue(List<String> appleIds) async {
     if (failWith != null) throw failWith!;
     playedIds = appleIds;

@@ -118,6 +118,9 @@ class _MusicKit implements MusicKitBridge {
   final played = <List<String>>[];
 
   @override
+  Future<bool> requestAuthorization() async => true;
+
+  @override
   Future<bool> playQueue(List<String> appleIds) async {
     played.add(appleIds);
     return true;
