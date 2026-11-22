@@ -190,11 +190,42 @@ class MusicKitBridge: NSObject {
             name: name, description: description, authorDisplayName: author)
         },
         add: { song, playlist in try await MusicLibrary.shared.add(song, to: playlist) },
-        libraryId: { $0.id.rawValue }
+        libraryId: { $0.id.rawValue },
+        fallback: { ids in
+          try await createMediaPlayerPlaylist(
+            name: name, appleIds: ids, author: author, description: description)
+        }
       )
       result(MixPlaylistWriter<Song, Playlist>.flutterResult(
         await writer.write(appleIds: appleIds)))
     }
+  }
+
+  /// The MediaPlayer path: no MusicKit developer token, the same store-ID
+  /// route the Music app hand-off uses. It reports no MusicKit library ID, so
+  /// the creation receipt stays unknown rather than guessed.
+  private static func createMediaPlayerPlaylist(
+    name: String, appleIds: [String], author: String?, description: String?
+  ) async throws -> (added: Int, failed: Int) {
+    let metadata = MPMediaPlaylistCreationMetadata(name: name)
+    // Without an explicit author Apple attributes the playlist to the Xcode
+    // product name ("Runner").
+    if let author, !author.isEmpty { metadata.authorDisplayName = author }
+    if let description, !description.isEmpty { metadata.descriptionText = description }
+    let playlist = try await MPMediaLibrary.default().getPlaylist(
+      with: UUID(), creationMetadata: metadata)
+    var added = 0
+    var failed = 0
+    // One at a time, in order: concurrent adds land in completion order.
+    for id in appleIds {
+      do {
+        try await playlist.addItem(withProductID: id)
+        added += 1
+      } catch {
+        failed += 1
+      }
+    }
+    return (added, failed)
   }
 
   private static func requestAuthorization(result: @escaping FlutterResult) {
@@ -505,7 +536,8 @@ class MusicKitBridge: NSObject {
 /// into "Could not create playlist." with nothing to go on (2026-11-22).
 struct MixPlaylistWriter<SongValue, PlaylistValue> {
   enum Outcome {
-    case saved(added: Int, failed: Int, libraryId: String)
+    /// `libraryId` is nil when the MediaPlayer fallback saved it.
+    case saved(added: Int, failed: Int, libraryId: String?)
     case failed(message: String, detail: String?)
   }
 
@@ -513,6 +545,9 @@ struct MixPlaylistWriter<SongValue, PlaylistValue> {
   let create: () async throws -> PlaylistValue
   let add: (SongValue, PlaylistValue) async throws -> PlaylistValue
   let libraryId: (PlaylistValue) -> String
+  /// Runs only when MusicKit fails before a playlist exists (lookup or
+  /// creation), so it can never duplicate one MusicKit already made.
+  var fallback: (([String]) async throws -> (added: Int, failed: Int))? = nil
 
   func write(appleIds: [String]) async -> Outcome {
     // Resolve exact songs before creating anything. Do not guess a MusicKit
@@ -527,7 +562,8 @@ struct MixPlaylistWriter<SongValue, PlaylistValue> {
         }
       }
     } catch {
-      return .failed(message: "Could not find the songs in Apple Music.", detail: Self.reason(error))
+      return await fallBack(
+        appleIds, message: "Could not find the songs in Apple Music.", cause: error)
     }
     guard !songs.isEmpty else {
       return .failed(message: "No songs could be resolved.", detail: nil)
@@ -536,7 +572,7 @@ struct MixPlaylistWriter<SongValue, PlaylistValue> {
     do {
       playlist = try await create()
     } catch {
-      return .failed(message: "Could not create playlist.", detail: Self.reason(error))
+      return await fallBack(appleIds, message: "Could not create playlist.", cause: error)
     }
     var added = 0
     var failed = 0
@@ -554,10 +590,24 @@ struct MixPlaylistWriter<SongValue, PlaylistValue> {
     return .saved(added: added, failed: failed, libraryId: libraryId(playlist))
   }
 
+  private func fallBack(_ appleIds: [String], message: String, cause: Error) async -> Outcome {
+    guard let fallback else { return .failed(message: message, detail: Self.reason(cause)) }
+    do {
+      let saved = try await fallback(appleIds)
+      return .saved(added: saved.added, failed: saved.failed, libraryId: nil)
+    } catch {
+      return .failed(
+        message: message,
+        detail: "\(Self.reason(cause)); fallback: \(Self.reason(error))")
+    }
+  }
+
   static func flutterResult(_ outcome: Outcome) -> Any {
     switch outcome {
     case let .saved(added, failed, libraryId):
-      return ["added": added, "failed": failed, "appleLibraryId": libraryId]
+      var value: [String: Any] = ["added": added, "failed": failed]
+      if let libraryId { value["appleLibraryId"] = libraryId }
+      return value
     case let .failed(message, detail):
       return FlutterError(code: "playlist_failed", message: message, details: detail)
     }

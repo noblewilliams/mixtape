@@ -113,10 +113,84 @@ extension RunnerTests {
     add: @escaping (String, FakePlaylist) async throws -> FakePlaylist = { song, playlist in
       playlist.songs.append(song)
       return playlist
-    }
+    },
+    fallback: (([String]) async throws -> (added: Int, failed: Int))? = nil
   ) -> MixPlaylistWriter<String, FakePlaylist> {
     MixPlaylistWriter(
-      resolveBatch: resolve, create: create, add: add, libraryId: { _ in "p.new" })
+      resolveBatch: resolve, create: create, add: add, libraryId: { _ in "p.new" },
+      fallback: fallback)
+  }
+
+  // Production has no MusicKit-path save, ever: the typed path fails on
+  // device. The MediaPlayer path (no developer token) must take over.
+  func testMixPlaylistFallsBackWhenCatalogLookupFails() async {
+    let received = FakePlaylist()
+    let outcome = await writer(
+      resolve: { _ in throw ProbeError(reason: "developer token request failed") },
+      fallback: { ids in received.songs = ids; return (added: ids.count, failed: 0) }
+    ).write(appleIds: ["b", "a", "b"])
+
+    guard case let .saved(added, failed, libraryId) = outcome else {
+      return XCTFail("expected a save, got \(outcome)")
+    }
+    XCTAssertEqual(received.songs, ["b", "a", "b"])
+    XCTAssertEqual(added, 3)
+    XCTAssertEqual(failed, 0)
+    XCTAssertNil(libraryId)
+  }
+
+  func testMixPlaylistFallsBackWhenCreationFails() async {
+    let outcome = await writer(
+      create: { throw ProbeError(reason: "permission denied") },
+      fallback: { ids in (added: ids.count - 1, failed: 1) }
+    ).write(appleIds: ["a", "b"])
+
+    guard case let .saved(added, failed, _) = outcome else {
+      return XCTFail("expected a save, got \(outcome)")
+    }
+    XCTAssertEqual(added, 1)
+    XCTAssertEqual(failed, 1)
+  }
+
+  func testMixPlaylistReportsBothReasonsWhenFallbackAlsoFails() async {
+    let outcome = await writer(
+      create: { throw ProbeError(reason: "permission denied") },
+      fallback: { _ in throw ProbeError(reason: "media library refused") }
+    ).write(appleIds: ["a"])
+
+    guard case let .failed(message, detail) = outcome else {
+      return XCTFail("expected a failure, got \(outcome)")
+    }
+    XCTAssertEqual(message, "Could not create playlist.")
+    XCTAssertEqual(detail?.contains("permission denied"), true)
+    XCTAssertEqual(detail?.contains("media library refused"), true)
+  }
+
+  // A playlist MusicKit already created must never be duplicated by the
+  // fallback: once creation succeeds, add failures are counted, not retried.
+  func testMixPlaylistDoesNotFallBackAfterCreationSucceeds() async {
+    let fellBack = FakePlaylist()
+    let outcome = await writer(
+      add: { _, _ in throw ProbeError(reason: "not addable") },
+      fallback: { _ in fellBack.songs.append("x"); return (added: 1, failed: 0) }
+    ).write(appleIds: ["a"])
+
+    XCTAssertTrue(fellBack.songs.isEmpty)
+    guard case let .saved(added, failed, libraryId) = outcome else {
+      return XCTFail("expected a save, got \(outcome)")
+    }
+    XCTAssertEqual(added, 0)
+    XCTAssertEqual(failed, 1)
+    XCTAssertEqual(libraryId, "p.new")
+  }
+
+  @MainActor func testMixPlaylistFallbackSaveOmitsLibraryId() {
+    let value = MixPlaylistWriter<String, FakePlaylist>.flutterResult(
+      .saved(added: 2, failed: 0, libraryId: nil)
+    ) as? [String: Any]
+
+    XCTAssertEqual(value?["added"] as? Int, 2)
+    XCTAssertNil(value?["appleLibraryId"])
   }
 
   // The founder's 2026-11-22 report: "Couldn't save the playlist — Could not
