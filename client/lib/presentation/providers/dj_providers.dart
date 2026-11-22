@@ -1664,15 +1664,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// same error-bubble shape [send]'s failure branches produce, so the
   /// existing retry affordance (resend against the nearest preceding user
   /// turn) works unchanged.
+  ///
+  /// A durable turn (spec 2026-11-21) finishes on the server whatever the
+  /// connection did, so a dropped create's error stands only when the mix
+  /// opens unanswered: no DJ line after the listener's last, and no turn
+  /// still running (the comeback follows that one).
   void seedInitialError(String message) {
-    _mergeCurrent(
-      (c) => c.copyWith(
+    _mergeCurrent((c) {
+      final last = c.messages.isEmpty ? null : c.messages.last;
+      final answered =
+          last != null && !last.isError && last.message.role == 'dj';
+      if (answered || c.session.turn != null) return c;
+      return c.copyWith(
         messages: [
           ...c.messages,
           ChatMessage(_localMessage('dj', message), isError: true),
         ],
-      ),
-    );
+      );
+    });
   }
 
   void clearTransientError() {

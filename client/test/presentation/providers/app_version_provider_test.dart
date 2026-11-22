@@ -38,7 +38,7 @@ void main() {
   });
 
   test('a running patch is named after the build', () async {
-    expect(await _label(patch: 3), 'Mixtape 1.2.0 (15) · patch 3');
+    expect(await _label(patch: 3), 'Mixtape 1.2.0 (15) · 3');
   });
 
   test('no version from the binary hides the line', () async {

@@ -742,7 +742,7 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
 /// The identity block's round prism avatar: the one prism instance on this
 /// screen, clipped to a 48 pt circle (smoke round two, note 7).
 /// The quiet line at the very foot of You: which binary and over-the-air
-/// patch is running ("Mixtape 1.2.0 (15) · patch 2"), so a tester can tell
+/// patch is running ("Mixtape 1.2.0 (15) · 2"), so a tester can tell
 /// builds apart. Left out when the binary cannot say.
 class _BuildLine extends ConsumerWidget {
   const _BuildLine();

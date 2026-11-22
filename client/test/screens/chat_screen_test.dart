@@ -1398,6 +1398,49 @@ void main() {
       expect(find.text('sorted'), findsOneWidget);
     });
 
+    // 2026-11-22: a create whose stream dropped opens the mix with the
+    // generic error, but a durable turn finishes anyway. The error only
+    // stands when the mix opens with no answer and nothing running.
+    testWidgets('an initialError is dropped when the reply already landed', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [
+          _msg('m1', 'user', 'dinner with friends'),
+          _msg('m2', 'dj', 'Got a soft, warm one going.'),
+        ],
+        queue: [_track(0)],
+      );
+      await _pump(tester, _makeContainer(api), initialError: 'the DJ hiccupped');
+
+      expect(find.byKey(LyricTurn.errorKey), findsNothing);
+      expect(find.text('Got a soft, warm one going.'), findsOneWidget);
+    });
+
+    testWidgets('an initialError is dropped while the server still runs the turn', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session().copyWith(
+          turn: const DjSessionTurn(id: 't1', status: 'running'),
+        ),
+        messages: [_msg('m1', 'user', 'dinner with friends')],
+        queue: [],
+      );
+      await _pump(
+        tester,
+        _makeContainer(api),
+        initialError: 'the DJ hiccupped',
+        settle: false,
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byKey(LyricTurn.errorKey), findsNothing);
+    });
+
     testWidgets('a null initialError seeds nothing', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);

@@ -844,16 +844,16 @@ void main() {
           tester,
           _container(
             auth: _Auth(anonymous: anonymous),
-            versionLabel: 'Mixtape 1.2.0 (15) · patch 2',
+            versionLabel: 'Mixtape 1.2.0 (15) · 2',
           ),
         );
 
         await tester.scrollUntilVisible(
-          find.text('Mixtape 1.2.0 (15) · patch 2'),
+          find.text('Mixtape 1.2.0 (15) · 2'),
           200,
           scrollable: find.byType(Scrollable).first,
         );
-        expect(find.text('Mixtape 1.2.0 (15) · patch 2'), findsOneWidget);
+        expect(find.text('Mixtape 1.2.0 (15) · 2'), findsOneWidget);
       });
     }
 

@@ -1,4 +1,4 @@
-/// The build line at the foot of You ("Mixtape 1.2.0 (15) · patch 3"), so a
+/// The build line at the foot of You ("Mixtape 1.2.0 (15) · 3"), so a
 /// tester can tell which binary and over-the-air patch is running.
 library;
 
@@ -18,5 +18,5 @@ final appVersionLabelProvider = FutureProvider<String?>((ref) async {
   }
   if (version == null || version.isEmpty) return null;
   final patch = await ref.watch(appUpdaterProvider).currentPatch();
-  return patch == null ? 'Mixtape $version' : 'Mixtape $version · patch $patch';
+  return patch == null ? 'Mixtape $version' : 'Mixtape $version · $patch';
 });
