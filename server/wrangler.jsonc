@@ -20,6 +20,17 @@
       "simple": { "limit": 60, "period": 60 }
     }
   ],
+  // Durable mix turns (spec 2026-11-21): one TurnRunner object per session
+  // runs its mix turn on an alarm, off the request, so a client that drops
+  // or backgrounds no longer loses the turn. The class is exported from
+  // src/index.ts. Nothing routes to it unless DURABLE_TURNS is "on" (vars);
+  // with it on and this binding missing, src/index.ts buildDurableTurns
+  // refuses to start. Migration tags are permanent once deployed: add a new
+  // tag for any later class change, never edit v1.
+  "durable_objects": {
+    "bindings": [{ "name": "TURN_RUNNER", "class_name": "TurnRunner" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TurnRunner"] }],
   // Maintenance on the hour, then enrichment two minutes later while Postgres
   // is still awake. 22 and 42 are enrichment-only runs (no maintenance).
   // Dispatched on event.cron (src/enrich/scheduled.ts); keep the two in step.
@@ -59,7 +70,17 @@
     "DJ_PAUSED": "off",
     // Shared mixes (spec 2026-11-13): share links are <SHARE_BASE_URL>/m/<token>.
     // Required; src/index.ts buildShares fails fast without it.
-    "SHARE_BASE_URL": "https://miixtape.netlify.app"
+    "SHARE_BASE_URL": "https://miixtape.netlify.app",
+    // Durable mix turns (spec 2026-11-21): "on" runs POST /sessions and
+    // /sessions/:id/messages mix turns in the TURN_RUNNER object above, and
+    // their streams carry the `turn` event. Anything else is today's
+    // in-request turn. Off: flip back the same way; turns already in an
+    // object still finish there.
+    "DURABLE_TURNS": "off",
+    // Mix-ready push (spec 2026-11-21): "on" pushes a turn's end to the
+    // listener's devices when no client saw it. Anything else sends none.
+    // Needs the APNs and VAPID secrets once their tasks land.
+    "TURN_PUSH": "off"
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:
@@ -86,5 +107,7 @@
   //   ALBUM_PICKS             declared under "vars" above; read once per request in src/index.ts
   //   NEVER_REFUSE            declared under "vars" above; read once per request in src/index.ts
   //   PROPOSE_FIRST           declared under "vars" above; read once per request in src/index.ts
+  //   DURABLE_TURNS           declared under "vars" above; read once per request in src/index.ts
+  //   TURN_PUSH               declared under "vars" above; read by the turn's notify
   // MusicKit keys also enable the server-only Apple catalog client used by artwork enrichment.
 }

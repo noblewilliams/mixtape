@@ -1,6 +1,14 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // The Workers runtime module TurnRunner extends (src/index.ts); Node
+      // has no such module, so tests get a plain base class instead.
+      'cloudflare:workers': fileURLToPath(new URL('./test/helpers/cloudflare-workers.ts', import.meta.url)),
+    },
+  },
   test: {
     // Every suite spins up its own PGlite instance from a dumped template.
     // Under parallel file execution that WASM work contends for CPU, so a

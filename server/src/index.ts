@@ -1,4 +1,5 @@
 import type { ExecutionContext } from 'hono'
+import { DurableObject, type DurableObjectState } from 'cloudflare:workers'
 import { Pool } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-serverless'
 import * as schema from './db/schema'
@@ -36,6 +37,8 @@ import { createDeezerTempoClient } from './enrich/deezer-tempo'
 import type { SpotifyArtworkDeps } from './artwork/spotify-fallback'
 import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 import type { AlbumDeps } from './albums/loop'
+import { TurnRunnerCore, type TurnRunnerNamespace } from './dj/turn-runner'
+import type { TurnJob } from './dj/turn-job'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -69,6 +72,11 @@ type Bindings = {
   DJ_PAUSED?: string
   SHARE_BASE_URL?: string
   SHARE_READ_LIMITER?: ShareRateLimiter
+  // Durable mix turns (spec 2026-11-21): the TurnRunner namespace and its
+  // two switches, both exact-"on".
+  TURN_RUNNER?: TurnRunnerNamespace
+  DURABLE_TURNS?: string
+  TURN_PUSH?: string
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -320,6 +328,24 @@ export function buildShares(env: { SHARE_BASE_URL?: string; SHARE_READ_LIMITER?:
   return { baseUrl: raw.replace(/\/+$/, ''), limiter: env.SHARE_READ_LIMITER }
 }
 
+// Durable mix turns (spec 2026-11-21 durable-mix-turns): "on" runs mix
+// turns in the TurnRunner Durable Object instead of on the request. Same
+// exact-"on" rule as album picks.
+export function durableTurnsEnabled(env: { DURABLE_TURNS?: string }): boolean {
+  return env.DURABLE_TURNS === 'on'
+}
+
+// With the switch on, the binding is required: thrown here, every request
+// fails until wrangler.jsonc is fixed (the buildShares pattern), rather than
+// quietly running turns on the request. Off, there is nothing to wire.
+export function buildDurableTurns(env: { DURABLE_TURNS?: string; TURN_RUNNER?: TurnRunnerNamespace }): { runner: TurnRunnerNamespace } | undefined {
+  if (!durableTurnsEnabled(env)) return undefined
+  if (!env.TURN_RUNNER || typeof env.TURN_RUNNER.idFromName !== 'function') {
+    throw new Error('TURN_RUNNER durable object binding is required when DURABLE_TURNS is on')
+  }
+  return { runner: env.TURN_RUNNER }
+}
+
 // Plan 2026-11-02 account deletion: the same Sign in with Apple key that signs
 // the web client secret signs one for whichever client a token belongs to.
 // createAuth has already failed fast on a missing Apple binding.
@@ -401,14 +427,25 @@ export function serveFetch<E>(req: Request, env: E, ctx: ExecutionContext, wirin
   return withRequestPool(ctx, pool, async (requestCtx) => wiring.buildApp(db, env).fetch(req, env, requestCtx))
 }
 
+// How a mix turn is wired: the DJ's model clients, its catalogue fill and
+// the Apple catalogue under both. The request path and the durable turn
+// (TurnRunner below, spec 2026-11-21 durable-mix-turns, "Run (object side)")
+// both build their DJ here, so a turn runs the same wherever it runs. The
+// fill's subrequest counter is per call, so per request or per alarm. The
+// MusicKit wiring is returned too, for the request's other routes.
+export function buildTurnDeps(env: Bindings, db: Db, allowedOrigins: string[] = parseWebOrigins(env.WEB_ORIGINS)) {
+  const musicKit = buildMusicKit(env, allowedOrigins)
+  const baseDjDeps = buildDjDeps(env, db)
+  const fill = buildFillDeps(env, musicKit)
+  const djDeps: DjDeps | undefined = baseDjDeps && fill ? { ...baseDjDeps, fill } : baseDjDeps
+  return { djDeps, musicKit }
+}
+
 function buildRequestApp(db: Db, env: Bindings) {
   const auth = createAuth(db, env)
   const allowedOrigins = parseWebOrigins(env.WEB_ORIGINS)
   const deps = buildDeps(env)
-  const musicKit = buildMusicKit(env, allowedOrigins)
-  const baseDjDeps = buildDjDeps(env, db)
-  const fill = buildFillDeps(env, musicKit)
-  const djDeps = baseDjDeps && fill ? { ...baseDjDeps, fill } : baseDjDeps
+  const { djDeps, musicKit } = buildTurnDeps(env, db, allowedOrigins)
   const dj = djDeps ? { deps: djDeps } : undefined
   const playlistEditingDeps = buildPlaylistEditingDeps(djDeps, musicKit)
   const playlistEditing = playlistEditingDeps ? { deps: playlistEditingDeps } : undefined
@@ -422,7 +459,41 @@ function buildRequestApp(db: Db, env: Bindings) {
   const transcribe = buildTranscribe(env)
   const accountDeletion = { apple: buildAppleRevoke(env) }
   const shares = buildShares(env)
+  // Checked on every request so a missing binding fails loudly. Nothing
+  // routes to the object yet: S5 hands the runner to the session routes.
+  buildDurableTurns(env)
   return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), djPaused: djPausedMode(env), allowedOrigins })
+}
+
+// The Durable Object the platform instantiates, one per session (spec
+// 2026-11-21 durable-mix-turns, "Run (object side)"; wrangler.jsonc binds it
+// as TURN_RUNNER). A few lines over TurnRunnerCore (dj/turn-runner.ts),
+// which Node tests drive with a fake storage and alarm: this only hands it
+// the object's storage and the same wiring the request path uses.
+export class TurnRunner extends DurableObject<Bindings> {
+  private readonly core: TurnRunnerCore
+
+  constructor(ctx: DurableObjectState, env: Bindings) {
+    super(ctx, env)
+    this.core = new TurnRunnerCore({
+      storage: ctx.storage,
+      setAlarm: (at) => ctx.storage.setAlarm(at),
+      openDb: () => buildDb(env),
+      buildDeps: (db) => buildTurnDeps(env, db).djDeps,
+    })
+  }
+
+  start(job: TurnJob) {
+    return this.core.start(job)
+  }
+
+  async alarm(): Promise<void> {
+    await this.core.alarm()
+  }
+
+  fetch(req: Request): Promise<Response> {
+    return this.core.fetch(req)
+  }
 }
 
 export default {
