@@ -26,9 +26,13 @@ export type PromptComposerProps = {
    */
   onStop?: () => void
   transcribe: Transcribe
+  /** Drawn inside the field, above the text: the songs quoted to the DJ. */
+  accessory?: ReactNode
+  /** Something rides with the message besides the words (a quote): Send works on an empty field. */
+  sendsEmpty?: boolean
 }
 
-export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe your mix', sendLabel = 'Make a mix', inputPlaceholder, submitError = 'Couldn’t make your mix. Your prompt is still here—try again.', maxLength = 2000, onSubmit, busy = false, onStop, transcribe }: PromptComposerProps) {
+export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe your mix', sendLabel = 'Make a mix', inputPlaceholder, submitError = 'Couldn’t make your mix. Your prompt is still here—try again.', maxLength = 2000, onSubmit, busy = false, onStop, transcribe, accessory, sendsEmpty = false }: PromptComposerProps) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [placeholder, setPlaceholder] = useState(0)
@@ -64,7 +68,7 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
   }, [draft, voice, busy, sending, inputPlaceholder, paused])
 
   async function submit() {
-    if (!draft.trim() || busy || sending || voice !== 'idle' || paused) return
+    if ((!draft.trim() && !sendsEmpty) || busy || sending || voice !== 'idle' || paused) return
     if (!consentReady()) return
     const sent = draft
     setSending(true)
@@ -85,7 +89,8 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
   const working = busy || sending
   return <div className="home-compose">
     {error && <div className="home-voice-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
-    <form className={`home-composer${tools ? ' home-composer--tools' : ''}`} onSubmit={event => { event.preventDefault(); void submit() }}>
+    <form className={`home-composer${tools ? ' home-composer--tools' : ''}${accessory ? ' home-composer--accessory' : ''}`} onSubmit={event => { event.preventDefault(); void submit() }}>
+      {accessory}
       {voice === 'idle' ? <textarea ref={input} aria-label={inputLabel} maxLength={maxLength} rows={1} value={draft} disabled={paused} placeholder={paused ? DJ_PAUSED_LINE : inputPlaceholder ?? placeholders[placeholder]} onChange={event => setDraft(event.target.value)} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit() }
       }} /> : <div className="home-voice-status" role="status">{voice === 'recording' && <i className="home-record-dot" />}<span>{voiceStatus(voice)}</span></div>}
@@ -94,7 +99,7 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
       {(!working || voice !== 'idle') && <button className="home-voice-button" type="button" aria-label={voiceLabel(voice)} aria-pressed={voice === 'recording'} disabled={paused && voice === 'idle'} onClick={toggle}><VoiceGlyph voice={voice} /></button>}
       {onStop
         ? <button className="home-send-button" type="button" aria-label="Stop" onClick={onStop}><StopIcon /></button>
-        : <button className="home-send-button" type="submit" aria-label={sendLabel} disabled={!draft.trim() || working || voice !== 'idle' || paused}><SendIcon /></button>}
+        : <button className="home-send-button" type="submit" aria-label={sendLabel} disabled={(!draft.trim() && !sendsEmpty) || working || voice !== 'idle' || paused}><SendIcon /></button>}
     </form>
     {/* One quiet line, part of the composer; a kept draft hides the placeholder, so the line names the break too. */}
     {paused && <p className="composer-paused">{draft ? `${DJ_PAUSED_LINE}. ` : ''}{DJ_PAUSED_DETAIL}</p>}

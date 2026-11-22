@@ -62,7 +62,7 @@ describe('approved artwork mix rail', () => {
 
   it('keeps the swipe reveal flush and the Undo treatment compact', () => {
     expect(stylesheet).toMatch(/\.track-row\s*{[^}]*--swipe-reveal:\s*0px;[^}]*background:\s*transparent;[^}]*border:\s*0;/s)
-    expect(stylesheet).toMatch(/\.track-remove\s*{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s)
+    expect(stylesheet).toMatch(/\.track-swipe-action\s*{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s)
     expect(stylesheet).toMatch(/\.queue-undo-toast\s*{[^}]*min-height:\s*38px;[^}]*padding:\s*4px 9px 4px 12px;/s)
     expect(stylesheet).toMatch(/\.queue-undo-action\s*{[^}]*background:\s*transparent;[^}]*border:\s*0;[^}]*border-radius:\s*0;/s)
     expect(stylesheet).not.toMatch(/\.queue-undo-(?:progress|countdown)/)
@@ -168,7 +168,7 @@ describe('approved Spotify import surfaces', () => {
 describe('approved Spotify mix rail outputs', () => {
   it('gives every Open in Spotify link a 44px target and its own column in the row', () => {
     expect(stylesheet).toMatch(/\.track-row \.open\s*{[^}]*min-width:\s*44px;[^}]*min-height:\s*44px;[^}]*text-decoration:\s*underline;/s)
-    expect(stylesheet).toMatch(/\.track-swipe-surface\.has-open\s*{[^}]*grid-template-columns:\s*48px minmax\(0, 1fr\) auto 44px;/s)
+    expect(stylesheet).toMatch(/\.track-swipe-surface\.has-open\s*{[^}]*grid-template-columns:\s*48px minmax\(0, 1fr\) auto auto;/s)
   })
 
   it('stacks the Spotify actions in the Apple slot with the one-line hint', () => {

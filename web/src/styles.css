@@ -1264,7 +1264,7 @@ html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 44px;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   color: var(--graphite);
@@ -1273,7 +1273,9 @@ html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
   outline: 0;
   text-align: left;
   touch-action: pan-y;
-  transform: translateX(calc(-1 * var(--swipe-reveal)));
+  user-select: none;
+  -webkit-user-select: none;
+  transform: translateX(calc(var(--swipe-direction, -1) * var(--swipe-reveal)));
   transition: transform 0.2s cubic-bezier(0.2, 0.72, 0.2, 1);
 }
 
@@ -1436,7 +1438,9 @@ html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
   transform: scale(1.015);
 }
 
-.track-remove {
+/* Swipe actions (decision 2026-11-22, as on iOS): left reveals Remove, right
+   reveals Quote; part way they rest open as a capsule, all the way they act. */
+.track-swipe-action {
   width: var(--swipe-reveal);
   min-width: 0;
   height: 42px;
@@ -1444,12 +1448,10 @@ html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
   position: absolute;
   z-index: 3;
   top: 50%;
-  right: 0;
   display: grid;
   place-items: center;
   overflow: hidden;
-  color: #fff9f8;
-  background: #dc666b;
+  color: #fff;
   border: 0;
   border-radius: 999px;
   box-shadow: none;
@@ -1458,24 +1460,61 @@ html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
   transform: translateY(-50%);
 }
 
-.track-remove svg {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
-  stroke-width: 1.8;
+.track-remove { right: 0; background: #c4566f; }
+.track-quote { left: 0; background: #5a4957; }
+
+.track-swipe-action svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
 }
 
-.track-row:not([data-swipe-state="closed"]) .track-remove {
+.track-row[data-swipe-side="remove"] .track-remove,
+.track-row[data-swipe-side="quote"] .track-quote {
   opacity: 1;
 }
 
-.track-row[data-swipe-state="settled"] .track-remove {
+.track-row[data-swipe-side="remove"][data-swipe-state="settled"] .track-remove,
+.track-row[data-swipe-side="quote"][data-swipe-state="settled"] .track-quote {
   pointer-events: auto;
   animation: remove-pop 0.42s cubic-bezier(0.22, 1.45, 0.38, 1) both;
 }
 
-.track-row[data-swipe-state="armed"] .track-remove {
-  background: #d9585f;
+.track-row[data-swipe-state="armed"] .track-remove { background: #b4465f; }
+.track-row[data-swipe-state="armed"] .track-quote { background: #4a3a47; }
+
+/* The hairlines either side of a sliding row step away. */
+.track-row:not([data-swipe-state="closed"])::before,
+.track-row:not([data-swipe-state="closed"]) + .track-row::before {
+  opacity: 0;
+}
+
+.track-tail {
+  display: flex;
+  align-items: center;
+}
+
+/* A mouse has no swipe: a quiet quote key shows on the row under the pointer or in focus. */
+.track-quote-inline {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.track-quote-inline:hover { color: var(--graphite); background: var(--hairline); }
+.track-row:hover .track-quote-inline,
+.track-quote-inline:focus-visible { opacity: 1; }
+
+@media (hover: none), (pointer: coarse) {
+  .track-quote-inline { display: none; }
 }
 
 @keyframes remove-pop {
@@ -4270,7 +4309,7 @@ button.mini:disabled {
    target in its own column; a Spotify-only mix gets the Spotify actions in
    the Apple slot; a corpus-mode mix carries the banner above the tracks. */
 .track-swipe-surface.has-open {
-  grid-template-columns: 48px minmax(0, 1fr) auto 44px;
+  grid-template-columns: 48px minmax(0, 1fr) auto auto;
 }
 
 .track-row .open {

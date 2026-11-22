@@ -2466,7 +2466,27 @@ conversation. Now, on iOS:
   the shape; it now draws the same curve the Shape chip and menu draw for
   that shape.
 
-Web keeps its composer as it is for now.
+Web followed the same day, in the same format (`> Title — Artist` lines,
+read back as quotes; `web/src/lib/mix-quote.ts`):
+
+- **Quotes from the tape.** A right swipe (one finger, or two on a trackpad)
+  quotes a song: part way it rests open on a plum quote capsule, all the way
+  it quotes at once. A mouse has no swipe, so a quiet quote key shows on the
+  row under the pointer or in keyboard focus (hidden on touch). Remove keeps
+  its left swipe, now a rose capsule with the eject glyph. The toast says
+  "Quoted “Title”" or "Removed “Title”" with Undo. The hairlines either side
+  of a sliding row step away.
+- **One draft per mix.** Both composers bind to one shared value per key
+  (`useSharedRestorableState`, `useMixDraft`), so text, quotes and the
+  pending shape pick follow the listener between them. A stopped or kept
+  turn comes back with its quotes.
+- **The tape's composer only where the tape covers the conversation**
+  (1020 px and below, the slide-over and the phone sheet). Wider, the
+  conversation's composer sits beside the songs already, so quotes land in it
+  and there is no second field. The tape composer shows the working line for
+  a turn sent from it, then the DJ's reply; while its field has focus the
+  play and save actions step aside.
+- No state board: this ports the iOS design approved on device the same day.
 
 **Reopens if:** the DJ misreads quote lines (then send quotes as a
 structured field with track ids), or a title containing " — " splits wrong

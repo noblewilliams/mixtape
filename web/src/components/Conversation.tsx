@@ -1,6 +1,8 @@
-import { useRestorableState } from '../lib/workspace-restore'
+import { useSharedRestorableState } from '../lib/workspace-restore'
 import { TapeSettings } from './TapeSettings'
-import { PromptComposer, PromptKept, type PromptComposerProps } from './PromptComposer'
+import { PromptKept, type PromptComposerProps } from './PromptComposer'
+import { MixComposer, QuotedSongLines } from './MixComposer'
+import { splitQuotedMessage } from '../lib/mix-quote'
 import { useDjStatus } from '../lib/dj-status'
 import { EnergyControl, type EnergyArc } from './EnergyJourney'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -116,12 +118,11 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
   const [stopError, setStopError] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => { if (!options) return; const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setOptions(false) }; const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOptions(false) }; document.addEventListener('pointerdown', close); document.addEventListener('keydown', escape); return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape) } }, [options])
-  const [draft, setDraft] = useRestorableState(`conversation.${session.id}.draft`, '')
   // A shape picked here is the listener's until a message carries it, even
   // across a version a turn lands meanwhile. Once a send that carried it lands
   // a new version, that version's own shape is the truth again, unless the
   // listener picked again while it was out.
-  const [pendingShape, setPendingShape] = useRestorableState<EnergyArc | null>(`conversation.${session.id}.shapePick`, null)
+  const [pendingShape, setPendingShape] = useSharedRestorableState<EnergyArc | null>(`conversation.${session.id}.shapePick`, null)
   const picks = useRef(0)
   const carried = useRef<{ pick: number; version: number } | null>(null)
   useEffect(() => {
@@ -226,7 +227,7 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
             <div className="conversation-turn-wrap" key={message.id}>
               {placement.get(index)?.map((item) => <PassedRow key={`passed-${item.id}`} album={item} onGoBack={onGoBack} />)}
               {/* The listener's lines can take focus when it comes back to the transcript (a remake from the panel). */}
-              <p className={`conversation-turn conversation-turn--${message.role}`} data-turn-id={message.id} tabIndex={message.role === 'user' ? -1 : undefined}>{message.content}</p>
+              <p className={`conversation-turn conversation-turn--${message.role}`} data-turn-id={message.id} tabIndex={message.role === 'user' ? -1 : undefined}>{message.role === 'user' ? <UserTurn content={message.content} /> : message.content}</p>
               {index === panelAnchor ? inlinePanel : null}
               {index === lastDjIndex && (suggestions.length > 0 || onAddHistory) ? (
                 <div className="home-starters conversation-pills">
@@ -276,32 +277,28 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
 
       <div className="composer-area">
         {player}
-        <PromptComposer draft={draft} setDraft={setDraft}
-          onSubmit={async text => {
+        <MixComposer sessionId={session.id}
+          onSend={async message => {
             carry()
-            const request = shape ? onSend(text, shape) : onSend(text)
-            setDraft('')
-            // A kept prompt (the consent dialog answered, or a stop) comes back to an empty field;
-            // a draft typed meanwhile is kept. Its pick was never applied, so it stays pending.
-            try { await request } catch (cause) {
-              if (cause instanceof PromptKept) {
-                carried.current = null
-                setDraft(value => (value.trim() ? value : text))
-              }
+            // A kept prompt's pick was never applied, so it stays pending.
+            try { await (shape ? onSend(message, shape) : onSend(message)) } catch (cause) {
+              if (cause instanceof PromptKept) carried.current = null
               throw cause
             }
           }} transcribe={transcribe}
-          onStop={onStop && (() => {
-            const text = onStop()
-            if (text) setDraft(value => (value.trim() ? value : text))
-          })}
+          onStop={onStop}
           busy={thinking || loading || selectionBusy}
-          inputLabel="Message your DJ" sendLabel="Send message"
           inputPlaceholder={album ? 'Another? Older? Something you do not know?' : 'Tell the DJ what to change…'}
-          submitError="Couldn’t send your message. Your text is still here—try again."
           tools={album ? <>{attachment}</> : <>{attachment}<EnergyControl compact value={shape} onSelect={pickShape} disabled={loading || selectionBusy} /></>}
         />
       </div>
     </main>
   )
+}
+
+/** The listener's turn: songs it quoted drawn as quotes, then its words. */
+function UserTurn({ content }: { content: string }) {
+  const { quotes, text } = splitQuotedMessage(content)
+  if (quotes.length === 0) return <>{content}</>
+  return <><QuotedSongLines quotes={quotes} />{text}</>
 }

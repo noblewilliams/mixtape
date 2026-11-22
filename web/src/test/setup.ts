@@ -11,3 +11,9 @@ class ResizeObserverStub {
 }
 
 window.ResizeObserver = ResizeObserverStub
+
+// Shared drafts (useSharedRestorableState) live for the page; each test starts clean.
+import { afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
+import { clearWorkspaceRestore } from '../lib/workspace-restore'
+afterEach(() => { cleanup(); clearWorkspaceRestore() })

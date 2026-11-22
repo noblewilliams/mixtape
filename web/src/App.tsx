@@ -58,6 +58,7 @@ import { placeOnShelf } from './components/ListenLaterList'
 import { InterviewDialog } from './components/InterviewDialog'
 import { NewTapeDialog, SaveDialog, Toast } from './components/Overlays'
 import { QueuePanel } from './components/QueuePanel'
+import { TapeComposer } from './components/MixComposer'
 import { PlaylistAttachment, type PlaylistAttachmentValue } from './components/PlaylistAttachment'
 import { MemoryControls } from './components/MemoryControls'
 import './components/web-controls.css'
@@ -2604,6 +2605,18 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onChooseService={writePlaysOn}
             narrow={narrow}
             musicDoor={musicDoor}
+            composer={<TapeComposer
+              key={activeSession.id}
+              sessionId={activeSession.id}
+              currentShape={mixShapes[`${activeSession.id}:${activeSession.queueVersion}`]}
+              lastReply={[...activeMessages].reverse().find((message) => message.role === 'dj')}
+              thinking={turnOut(activeSession.id)}
+              working={turnWork[activeSession.id]}
+              onSend={(text, shape) => sendMessage(text, shape, true)}
+              onStop={turnWork[activeSession.id] ? () => stopMixTurn(activeSession.id) : undefined}
+              busy={turnOut(activeSession.id) || loadingSessionId === activeSession.id || seedBusy === activeSession.id}
+              transcribe={transcribe}
+            />}
           />}
         </>
       )}

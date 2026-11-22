@@ -59,3 +59,30 @@
   .composer-tools .wc-text { padding-inline: 5px; gap: 4px; }
   .composer-tools .wc-attached-label { max-width: 110px; }
 }
+
+/* Quoted songs (decision 2026-11-22): one row inside the field, scrolling sideways. */
+.home-composer--accessory:not(.home-composer--tools) { flex-wrap: wrap; padding-top: 8px; }
+.home-composer--accessory .quote-chips { flex: 1 0 100%; grid-column: 1 / -1; }
+.quote-chips { display: flex; gap: 6px; min-width: 0; margin: 0; padding: 0 0 2px; list-style: none; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.quote-chips::-webkit-scrollbar { display: none; }
+.quote-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 220px; height: 26px; padding: 0 3px 0 9px; border-radius: 999px; background: color-mix(in srgb, var(--graphite) 7%, transparent); color: var(--graphite); font-size: 12px; line-height: 1; }
+.quote-chip > svg { flex: none; color: var(--muted); }
+.quote-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quote-chip button { flex: none; width: 20px; height: 20px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+.quote-chip button:hover { background: var(--hairline); color: var(--graphite); }
+
+/* A sent turn's quotes, above its words. */
+.turn-quotes { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; margin-bottom: 5px; }
+.turn-quote { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; color: var(--muted); font-size: 12px; font-weight: 400; font-style: italic; }
+.turn-quote > svg { flex: none; }
+.turn-quote > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The tape's composer: at the foot of the panel while it covers the conversation. */
+.queue-composer { flex: none; display: grid; gap: 8px; padding: 10px 14px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--hairline); }
+.queue-composer .home-compose { padding-top: 0; }
+.tape-reply { margin: 0; max-height: 96px; overflow-y: auto; color: var(--graphite); font-size: 13px; line-height: 1.45; }
+.tape-working { margin: 0; color: var(--muted); font-size: 12px; }
+.queue-composer { position: relative; }
+.queue-composer .queue-undo-toast { right: 14px; bottom: calc(100% + 8px); }
+/* While the listener types, the songs get the room: the play and save actions step aside, as on iOS. */
+.queue-panel:has(.queue-composer textarea:focus) :is(.music-actions, .rail-actions, .service-choices) { display: none; }

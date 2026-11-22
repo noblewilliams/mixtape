@@ -19,6 +19,7 @@ import type { MixesTab } from './components/Home'
 import type { ModeSeed } from './components/HomeComposer'
 import { useMediaQuery } from './lib/use-media-query'
 import { Conversation } from './components/Conversation'
+import { TapeComposer } from './components/MixComposer'
 import { PlaylistAttachment } from './components/PlaylistAttachment'
 import { QueuePanel } from './components/QueuePanel'
 import { tapeColors } from './data/tape-colors'
@@ -301,7 +302,7 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-paused', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'push-ask', 'making-working', 'conversation-blank', 'conversation-paused', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked', 'shared-play-modal', 'shared-play-connect', 'mixes-shared', 'mixes-shared-open', 'mixes-shared-gone', 'conversation-shared', 'share-name-page', 'link-copied']
+  const options = ['home', 'home-paused', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-quoting', 'conversation-working', 'push-ask', 'making-working', 'conversation-blank', 'conversation-paused', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked', 'shared-play-modal', 'shared-play-connect', 'mixes-shared', 'mixes-shared-open', 'mixes-shared-gone', 'conversation-shared', 'share-name-page', 'link-copied']
   // *-paused: the DJ pause switch on (credits out, model down).
   return <DjStatusFixed paused={state.endsWith('-paused')}>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
@@ -310,6 +311,7 @@ export default function UiPolishPreview() {
     <div className={state.startsWith('conversation') || state.startsWith('album') || state.startsWith('catalog') ? 'app-shell' : 'app-shell app-shell--home'}>
       <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : state.startsWith('settings-') ? 'settings' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
       {state === 'conversation-working' || state === 'push-ask' ? <WorkingConversationPreview session={sessions[0]} onBack={close} />
+      : state === 'conversation-quoting' ? <QuotingPreview session={sessions[0]} onBack={close} />
       : state.startsWith('conversation') ? <>
         <Conversation session={sessions[0]} messages={state === 'conversation-blank' ? [] : demoMessages} thinking={false} onSend={() => {}} onShare={state === 'conversation-shared' ? () => setState('link-copied') : undefined} onStopSharing={state === 'conversation-shared' ? async () => {} : undefined} onOpenQueue={() => {}} onBack={close} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation-blank' ? [] : state === 'conversation-spotify' ? previewQueue.map((track) => ({ ...track, spotifyId: null })) : previewQueue} playing={false} playbackBusy={false} musicConnection={state === 'conversation-spotify' || state === 'conversation-ask' ? 'disconnected' : 'connected'} spotifyOnly={state === 'conversation-spotify'} askService={state === 'conversation-ask'} open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
@@ -345,4 +347,30 @@ export default function UiPolishPreview() {
     {state === 'delete-account' && <DeleteAccountDialog deleteAccount={() => new Promise((_, reject) => setTimeout(() => reject(new Error('preview')), 1200))} onDeleted={close} onClose={close} />}
     {state === 'preference' && <ControlModal title="Forget this preference?" alert onClose={close}><p>Keep vocals in the background for dinner.</p><p>The DJ will stop using this note. You can’t undo this.</p><div className="wc-actions"><button className="wc-text" onClick={close}>Cancel</button><button className="wc-text wc-danger" onClick={()=>setState('success')}>Forget preference</button></div></ControlModal>}
   </DjStatusFixed>
+}
+
+
+/** Talking from the tape (decision 2026-11-22): a quoted turn, quotes from the tape, its composer when narrow. */
+function QuotingPreview({ session, onBack }: { session: DjSession; onBack: () => void }) {
+  const narrow = useMediaQuery('(max-width: 1020px)')
+  const [open, setOpen] = useState(narrow)
+  const [messages, setMessages] = useState<DjMessage[]>(() => [
+    ...demoMessages,
+    { id: 'quoted-turn', role: 'user', content: '> Essence — Wizkid feat. Tems\n> Soweto — Victony\nthese two feel too close together', createdAt: '2026-11-22T12:00:00.000Z' },
+    { id: 'quoted-reply', role: 'dj', content: 'Fair. I moved Soweto later so the lift lands after the road opens up.', createdAt: '2026-11-22T12:00:05.000Z' },
+  ])
+  const [thinking, setThinking] = useState(false)
+  const send = (text: string) => {
+    setMessages((current) => [...current, { id: `u-${current.length}`, role: 'user', content: text, createdAt: new Date().toISOString() }])
+    setThinking(true)
+    setTimeout(() => {
+      setThinking(false)
+      setMessages((current) => [...current, { id: `d-${current.length}`, role: 'dj', content: 'Done. Swapped it for something with more air in the middle.', createdAt: new Date().toISOString() }])
+    }, 2500)
+  }
+  return <>
+    <Conversation session={session} messages={messages} thinking={thinking} onSend={send} onOpenQueue={() => setOpen(true)} onBack={onBack} />
+    <QueuePanel session={session} tracks={previewQueue} playing={false} playbackBusy={false} musicConnection="connected" open={open} narrow={narrow} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => setOpen(false)} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}}
+      composer={<TapeComposer sessionId={session.id} lastReply={[...messages].reverse().find((message) => message.role === 'dj')} thinking={thinking} onSend={send} busy={thinking} transcribe={async () => ({ text: '' })} />} />
+  </>
 }

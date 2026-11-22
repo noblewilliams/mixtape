@@ -4,6 +4,8 @@ import type { QueueOp } from '../api/client'
 import type { DjSession, QueueTrack } from '../domain'
 import { QueuePanel, type MusicConnectionState } from './QueuePanel'
 import type { MusicDoorInput } from './MusicDoor'
+import type { ReactNode } from 'react'
+import { MixComposer } from './MixComposer'
 
 const session: DjSession = {
   id: 'session-1',
@@ -71,6 +73,7 @@ function renderQueue(overrides: {
   narrow?: boolean
   musicDoor?: MusicDoorInput
   open?: boolean
+  composer?: ReactNode
 } = {}) {
   const onPreviewTracks = overrides.onPreviewTracks ?? vi.fn()
   const onCommitQueueOp = overrides.onCommitQueueOp ?? vi.fn(async () => undefined)
@@ -95,6 +98,7 @@ function renderQueue(overrides: {
       onChooseService={overrides.onChooseService}
       narrow={overrides.narrow}
       musicDoor={overrides.musicDoor}
+      composer={overrides.composer}
     />,
   )
   return { ...view, onPreviewTracks, onCommitQueueOp, onOutput }
@@ -629,5 +633,70 @@ describe('a Spotify-only listener', () => {
 
     renderQueue({ tracks: catalogueTracks, spotifyOnly: true, musicConnection: 'connecting' })
     expect(screen.getByRole('button', { name: 'Connecting Apple Music…' })).toBeInTheDocument()
+  })
+})
+
+
+describe('quoting songs from the tape', () => {
+  afterEach(cleanup)
+
+  function swipeRight(trackRow: HTMLElement, to: number) {
+    fireEvent.pointerDown(within(trackRow).getByTestId('track-swipe-surface'), { button: 0, clientX: 20, clientY: 30, pointerId: 1 })
+    fireEvent.pointerMove(trackRow, { clientX: to, clientY: 31, pointerId: 1 })
+    fireEvent.pointerUp(trackRow, { clientX: to, clientY: 31, pointerId: 1 })
+  }
+  const composer = <MixComposer sessionId="session-1" onSend={vi.fn()} busy={false} transcribe={vi.fn()} />
+
+  it('a full swipe right quotes the song into the composer and says so', () => {
+    renderQueue({ narrow: true, composer })
+    const trackRow = row('track-2')
+    swipeRight(trackRow, 320)
+
+    expect(trackRow).toHaveAttribute('data-swipe-state', 'closed')
+    expect(screen.getByRole('status')).toHaveTextContent('Quoted “Essence”')
+    const chips = screen.getByRole('list', { name: 'Quoted songs' })
+    expect(within(chips).getByText('Essence · Wizkid feat. Tems')).toBeInTheDocument()
+  })
+
+  it('a part swipe right rests open on the Quote capsule, which quotes', () => {
+    renderQueue({ narrow: true, composer })
+    const trackRow = row('track-1')
+    fireEvent.pointerDown(within(trackRow).getByTestId('track-swipe-surface'), { button: 0, clientX: 20, clientY: 30, pointerId: 1 })
+    fireEvent.pointerMove(trackRow, { clientX: 80, clientY: 31, pointerId: 1 })
+    expect(trackRow).toHaveAttribute('data-swipe-side', 'quote')
+    expect(trackRow.style.getPropertyValue('--swipe-direction')).toBe('1')
+    fireEvent.pointerUp(trackRow, { clientX: 80, clientY: 31, pointerId: 1 })
+
+    expect(trackRow).toHaveAttribute('data-swipe-state', 'settled')
+    const capsule = trackRow.querySelector<HTMLButtonElement>('.track-quote')!
+    expect(capsule).not.toHaveAttribute('aria-hidden')
+    expect(trackRow.querySelector('.track-remove')).toHaveAttribute('aria-hidden', 'true')
+    fireEvent.click(capsule)
+    expect(screen.getByText('Sweetest Taboo · Sade')).toBeInTheDocument()
+  })
+
+  it('a mouse quotes from the row key, and quoting twice keeps one chip', () => {
+    renderQueue({ narrow: true, composer })
+    fireEvent.click(within(row('track-3')).getAllByRole('button', { name: 'Quote Anybody' })[0])
+    fireEvent.click(within(row('track-3')).getAllByRole('button', { name: 'Quote Anybody' })[0])
+    expect(within(screen.getByRole('list', { name: 'Quoted songs' })).getAllByRole('listitem')).toHaveLength(1)
+  })
+
+  it('a removal says which song, with Undo', () => {
+    renderQueue()
+    const trackRow = row('track-1')
+    fireEvent.pointerDown(within(trackRow).getByTestId('track-swipe-surface'), { button: 0, clientX: 390, clientY: 30, pointerId: 1 })
+    fireEvent.pointerMove(trackRow, { clientX: 110, clientY: 31, pointerId: 1 })
+    fireEvent.pointerUp(trackRow, { clientX: 110, clientY: 31, pointerId: 1 })
+    expect(screen.getByRole('status')).toHaveTextContent('Removed “Sweetest Taboo”')
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+  })
+
+  it('draws the composer only while the panel covers the conversation', () => {
+    const wide = renderQueue({ composer })
+    expect(screen.queryByRole('textbox', { name: 'Message your DJ' })).toBeNull()
+    wide.unmount()
+    renderQueue({ narrow: true, composer })
+    expect(screen.getByRole('textbox', { name: 'Message your DJ' })).toBeInTheDocument()
   })
 })

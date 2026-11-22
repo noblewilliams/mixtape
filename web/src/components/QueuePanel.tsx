@@ -6,11 +6,13 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   type WheelEvent,
 } from 'react'
 import { ApiError, type QueueOp } from '../api/client'
 import type { DjSession, QueueTrack } from '../domain'
-import { CloseIcon, ErrorCircleIcon, SuccessCircleIcon, UndoIcon } from './Icons'
+import { EjectIcon, ErrorCircleIcon, QuoteIcon, SuccessCircleIcon, UndoIcon, CloseIcon } from './Icons'
+import { useMixDraft } from '../lib/mix-draft'
 import { ConnectMusicButton, LabelButton, PlayButton } from './TapeActions'
 import { CatalogBanner, MusicDoor, type MusicDoorInput } from './MusicDoor'
 import type { PlaysOn } from '../lib/plays-on'
@@ -55,10 +57,17 @@ type QueuePanelProps = {
   narrow?: boolean
   /** The catalog mix's door, as the conversation draws it. */
   musicDoor?: MusicDoorInput
+  /**
+   * The mix's composer, drawn at the foot of the panel while it covers the
+   * conversation (narrow), so the listener can talk to the DJ from the songs.
+   */
+  composer?: ReactNode
 }
 
 type SwipeState = {
   trackId: string
+  /** Left (the row slides left) reveals Remove; right reveals Quote. */
+  side: 'remove' | 'quote'
   reveal: number
   phase: 'moving' | 'settled' | 'armed'
 }
@@ -154,7 +163,9 @@ export function QueuePanel({
   onChooseService,
   narrow = false,
   musicDoor,
+  composer,
 }: QueuePanelProps) {
+  const draft = useMixDraft(session.id)
   const [displayTracks, setDisplayTracks] = useState(() => withPositions(tracks))
   const [swipe, setSwipeState] = useState<SwipeState | null>(null)
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null)
@@ -368,13 +379,39 @@ export function QueuePanel({
     const track = displayTracksRef.current[index]
     preview(displayTracksRef.current.filter((item) => item.trackId !== trackId))
     setSwipe(null)
-    beginUndo({ kind: 'remove', track, index }, `${track.title} removed from the mix.`)
+    beginUndo({ kind: 'remove', track, index }, `Removed “${track.title}”`)
+  }
+
+  function quoteTrack(trackId: string) {
+    const track = displayTracksRef.current.find((item) => item.trackId === trackId)
+    setSwipe(null)
+    if (!track) return
+    draft.quote({ title: track.title, artist: track.artist, trackId: track.trackId })
+    showOutputToast(`Quoted “${track.title}”`)
+  }
+
+  /** Where a swipe lands: past the threshold it acts, part way it rests open, else it closes. */
+  function settleSwipe(trackId: string, side: SwipeState['side'], reveal: number, width: number) {
+    if (reveal >= width * REMOVE_THRESHOLD) {
+      if (side === 'remove') removeTrack(trackId)
+      else quoteTrack(trackId)
+    } else if (reveal >= 18) {
+      setSwipe({ trackId, side, reveal: SETTLED_REMOVE_SIZE, phase: 'settled' })
+    } else {
+      setSwipe(null)
+    }
+  }
+
+  function swipeTo(trackId: string, signed: number, width: number): SwipeState {
+    const side = signed >= 0 ? 'remove' : 'quote'
+    const reveal = Math.min(width, Math.abs(signed))
+    return { trackId, side, reveal, phase: reveal >= width * REMOVE_THRESHOLD ? 'armed' : 'moving' }
   }
 
   function handleRowKeyDown(event: KeyboardEvent<HTMLElement>, trackId: string) {
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
-      setSwipe({ trackId, reveal: SETTLED_REMOVE_SIZE, phase: 'settled' })
+      setSwipe({ trackId, side: 'remove', reveal: SETTLED_REMOVE_SIZE, phase: 'settled' })
     } else if (event.key === 'Escape' && swipeRef.current?.trackId === trackId) {
       event.preventDefault()
       setSwipe(null)
@@ -421,12 +458,7 @@ export function QueuePanel({
       gesture.horizontal = true
     }
     event.preventDefault()
-    const reveal = Math.max(0, Math.min(gesture.width, deltaX))
-    setSwipe({
-      trackId: gesture.trackId,
-      reveal,
-      phase: reveal >= gesture.width * REMOVE_THRESHOLD ? 'armed' : 'moving',
-    })
+    setSwipe(swipeTo(gesture.trackId, deltaX, gesture.width))
   }
 
   function endPointerSwipe(event: PointerEvent<HTMLLIElement>) {
@@ -435,13 +467,7 @@ export function QueuePanel({
     pointerSwipeRef.current = null
     const current = swipeRef.current
     if (!current || current.trackId !== gesture.trackId) return
-    if (current.reveal >= gesture.width * REMOVE_THRESHOLD) {
-      removeTrack(gesture.trackId)
-    } else if (current.reveal >= 18) {
-      setSwipe({ trackId: gesture.trackId, reveal: SETTLED_REMOVE_SIZE, phase: 'settled' })
-    } else {
-      setSwipe(null)
-    }
+    settleSwipe(gesture.trackId, current.side, current.reveal, gesture.width)
   }
 
   function cancelPointerSwipe() {
@@ -453,20 +479,14 @@ export function QueuePanel({
     if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || Math.abs(event.deltaX) < 2) return
     event.preventDefault()
     const width = Math.max(1, event.currentTarget.getBoundingClientRect().width)
-    const current = swipeRef.current?.trackId === trackId ? swipeRef.current.reveal : 0
-    const reveal = Math.max(0, Math.min(width, current + event.deltaX))
-    setSwipe({ trackId, reveal, phase: reveal >= width * REMOVE_THRESHOLD ? 'armed' : 'moving' })
+    const open = swipeRef.current?.trackId === trackId ? swipeRef.current : null
+    const current = open ? (open.side === 'quote' ? -open.reveal : open.reveal) : 0
+    setSwipe(swipeTo(trackId, current + event.deltaX, width))
     if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
     wheelTimerRef.current = setTimeout(() => {
       const settled = swipeRef.current
       if (!settled || settled.trackId !== trackId) return
-      if (settled.reveal >= width * REMOVE_THRESHOLD) {
-        removeTrack(trackId)
-      } else if (settled.reveal >= 18) {
-        setSwipe({ trackId, reveal: SETTLED_REMOVE_SIZE, phase: 'settled' })
-      } else {
-        setSwipe(null)
-      }
+      settleSwipe(trackId, settled.side, settled.reveal, width)
     }, WHEEL_RELEASE_MS)
   }
 
@@ -525,6 +545,22 @@ export function QueuePanel({
     setDraggedTrackId(null)
   }
 
+  const toastView = toast ? (
+        <div className="queue-undo-toast">
+          <span className="queue-undo-message" role="status" aria-live="polite">
+            {toast.message}
+            {toast.hint ? <small className="queue-toast-hint">{toast.hint}</small> : null}
+          </span>
+          {toast.undo ? (
+            <button className="queue-undo-action" type="button" onClick={undoLastMutation} aria-label="Undo">
+              <UndoIcon />
+              <span>Undo</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null
+  const tapeComposer = narrow && composer
+
   return (
     <aside className={`queue-panel ${open ? 'is-open' : ''}`} aria-label="Your mix">
       <header className="queue-header">
@@ -562,6 +598,7 @@ export function QueuePanel({
             const reasonId = `track-reason-${track.trackId}`
             const rowStyle = {
               '--swipe-reveal': `${currentSwipe?.reveal ?? 0}px`,
+              '--swipe-direction': currentSwipe?.side === 'quote' ? 1 : -1,
               '--artwork-color': track.artworkBgColor ? `#${track.artworkBgColor}` : '#d8d3cd',
             } as CSSProperties
             return (
@@ -570,6 +607,7 @@ export function QueuePanel({
                 key={track.trackId}
                 data-track-id={track.trackId}
                 data-swipe-state={currentSwipe?.phase ?? 'closed'}
+                data-swipe-side={currentSwipe?.side}
                 style={rowStyle}
                 onPointerMove={movePointerSwipe}
                 onPointerUp={endPointerSwipe}
@@ -616,6 +654,16 @@ export function QueuePanel({
                       </span>
                     </a>
                   ) : null}
+                  <span className="track-tail">
+                  <button
+                    className="track-quote-inline"
+                    type="button"
+                    aria-label={`Quote ${track.title}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => quoteTrack(track.trackId)}
+                  >
+                    <QuoteIcon width={15} height={15} />
+                  </button>
                   <button
                     className="reorder-handle"
                     type="button"
@@ -632,16 +680,27 @@ export function QueuePanel({
                       <i className="reorder-grip-line" />
                     </span>
                   </button>
+                  </span>
                 </div>
                 <button
-                  className="track-remove"
+                  className="track-swipe-action track-quote"
+                  type="button"
+                  aria-label={`Quote ${track.title}`}
+                  aria-hidden={currentSwipe?.side === 'quote' ? undefined : true}
+                  tabIndex={currentSwipe?.side === 'quote' ? 0 : -1}
+                  onClick={() => quoteTrack(track.trackId)}
+                >
+                  <QuoteIcon filled />
+                </button>
+                <button
+                  className="track-swipe-action track-remove"
                   type="button"
                   aria-label={`Remove ${track.title}`}
-                  aria-hidden={currentSwipe ? undefined : true}
-                  tabIndex={currentSwipe ? 0 : -1}
+                  aria-hidden={currentSwipe?.side === 'remove' ? undefined : true}
+                  tabIndex={currentSwipe?.side === 'remove' ? 0 : -1}
                   onClick={() => removeTrack(track.trackId)}
                 >
-                  <CloseIcon />
+                  <EjectIcon />
                 </button>
               </li>
             )
@@ -650,7 +709,7 @@ export function QueuePanel({
       )}
 
       <p id="queue-interaction-help" className="sr-only">
-        Use the three-line handle or its Arrow keys to reorder. Swipe left with one finger or two fingers on a trackpad to remove. Delete reveals Remove and Escape closes it.
+        Use the three-line handle or its Arrow keys to reorder. Swipe left with one finger or two fingers on a trackpad to remove, or right to quote the song to the DJ. Delete reveals Remove and Escape closes it.
       </p>
 
       {displayTracks.length > 0 && showApple ? (
@@ -719,20 +778,8 @@ export function QueuePanel({
         </div>
       ) : null}
 
-      {toast ? (
-        <div className="queue-undo-toast">
-          <span className="queue-undo-message" role="status" aria-live="polite">
-            {toast.message}
-            {toast.hint ? <small className="queue-toast-hint">{toast.hint}</small> : null}
-          </span>
-          {toast.undo ? (
-            <button className="queue-undo-action" type="button" onClick={undoLastMutation} aria-label="Undo">
-              <UndoIcon />
-              <span>Undo</span>
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      {/* With the composer at the foot, the toast sits just above it. */}
+      {tapeComposer ? <div className="queue-composer">{toastView}{composer}</div> : toastView}
 
       {spotifyHandoff.explainer}
     </aside>

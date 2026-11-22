@@ -161,3 +161,32 @@ export function BookmarkIcon({ filled = false, ...props }: IconProps & { filled?
     </svg>
   )
 }
+
+/**
+ * A speech bubble holding two quote marks: the quote action and quoted songs
+ * (the iOS QuoteGlyph). Filled draws the marks cut out of a solid bubble.
+ */
+export function QuoteIcon({ filled = false, ...props }: IconProps & { filled?: boolean }) {
+  const marks = 'M9.2 8.1a1.9 1.9 0 1 1-1.4 3.2c.1 1.2-.5 2.1-1.5 2.6.6-.7.9-1.4.8-2.2a1.9 1.9 0 0 1 2.1-3.6zm5.6 0a1.9 1.9 0 1 1-1.4 3.2c.1 1.2-.5 2.1-1.5 2.6.6-.7.9-1.4.8-2.2a1.9 1.9 0 0 1 2.1-3.6z'
+  const bubble = 'M6.7 2h10.6A5.3 5.3 0 0 1 22.6 7.3v5.6a5.3 5.3 0 0 1-5.3 5.3h-6.2L4.3 22.6l1.2-4.5A5.3 5.3 0 0 1 1.4 12.9V7.3A5.3 5.3 0 0 1 6.7 2z'
+  return filled ? (
+    <svg {...iconDefaults} stroke="none" {...props}>
+      <path d={`${bubble}${marks}`} fill="currentColor" fillRule="evenodd" />
+    </svg>
+  ) : (
+    <svg {...iconDefaults} {...props}>
+      <path d={bubble} />
+      <path d={marks} fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+/** Eject: the tape's remove action, as on iOS. */
+export function EjectIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} stroke="none" {...props}>
+      <path d="M12 4.2 20 13.4H4z" fill="currentColor" />
+      <rect x="4" y="16.2" width="16" height="3.2" rx="1" fill="currentColor" />
+    </svg>
+  )
+}
