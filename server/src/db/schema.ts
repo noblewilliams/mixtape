@@ -20,6 +20,7 @@ import {
   halfvec,
   check,
   foreignKey,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { user } from './auth-schema'
 
@@ -417,6 +418,13 @@ export const djSessions = pgTable(
     activeTurnId: uuid('active_turn_id'),
     activeTurnAt: timestamp('active_turn_at', { withTimezone: true }),
     turnStopRequested: boolean('turn_stop_requested').notNull().default(false),
+    // The latest durable turn on this session (spec 2026-11-21
+    // durable-mix-turns, "Turn records"), so a read can say whether a turn
+    // is still working. Set null when that turn row goes. The stop claim
+    // above stays a separate guard. The FK is circular (dj_turns.session_id
+    // points back here), hence the AnyPgColumn annotation; the migration adds
+    // it by ALTER after both tables exist.
+    currentTurnId: uuid('current_turn_id').references((): AnyPgColumn => djTurns.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
@@ -426,6 +434,59 @@ export const djSessions = pgTable(
   (t) => [
     index('dj_sessions_user_idx').on(t.userId, t.createdAt),
     check('dj_sessions_kind_check', sql`${t.kind} IN ('mix', 'album')`),
+  ],
+)
+
+// One row per mix turn (spec 2026-11-21 durable-mix-turns, "Turn records"):
+// the retry guard, the writes a rollback must undo, and whether the listener
+// was told. The id is the client's Idempotency-Key when it sends one, so
+// callers may supply it; the default covers the rest. Never holds the
+// listener's words or a step's artists (only the step's name).
+export const djTurns = pgTable(
+  'dj_turns',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => djSessions.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['create', 'message', 'remake'] }).notNull(),
+    // queued -> running (the alarm claimed it) -> done | failed | stopped,
+    // the terminal ones set once by a conditional UPDATE on (status, attempt).
+    status: text('status', { enum: ['queued', 'running', 'done', 'failed', 'stopped'] })
+      .notNull()
+      .default('queued'),
+    step: text('step'),
+    stepAt: timestamp('step_at', { withTimezone: true }),
+    // Bumped every 15 s while running; older than 90 s means lost.
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+    attempt: integer('attempt').notNull().default(0),
+    // A DjError kind, or 'internal' / 'lost': a code, never text.
+    errorKind: text('error_kind'),
+    // TurnWrites plus startingVersion and the claim's title/notPersonal.
+    writes: jsonb('writes'),
+    watchedResult: boolean('watched_result').notNull().default(false),
+    seenAt: timestamp('seen_at', { withTimezone: true }),
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    notifyOutcome: text('notify_outcome', { enum: ['sent', 'seen', 'no_device', 'off', 'failed'] }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('dj_turns_session_created_idx').on(t.sessionId, t.createdAt.desc()),
+    // The stale sweep reads only live turns.
+    index('dj_turns_live_heartbeat_idx')
+      .on(t.status, t.heartbeatAt)
+      .where(sql`${t.status} IN ('queued', 'running')`),
+    check('dj_turns_kind_check', sql`${t.kind} IN ('create', 'message', 'remake')`),
+    check('dj_turns_status_check', sql`${t.status} IN ('queued', 'running', 'done', 'failed', 'stopped')`),
+    check(
+      'dj_turns_notify_outcome_check',
+      sql`${t.notifyOutcome} IS NULL OR ${t.notifyOutcome} IN ('sent', 'seen', 'no_device', 'off', 'failed')`,
+    ),
   ],
 )
 
@@ -1750,4 +1811,51 @@ export const mixShareSaves = pgTable('mix_share_saves', {
 export const djPauses = pgTable('dj_pauses', {
   id: text('id').primaryKey(),
   pausedAt: timestamp('paused_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// A device that can be told a mix is ready (spec 2026-11-21
+// durable-mix-turns, "Device registration"). One row per (provider, token):
+// a re-registration upserts on it and moves the row to the caller, so a
+// phone passed to a new account follows its owner. Stores nothing else about
+// the phone.
+export const pushDevices = pgTable(
+  'push_devices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    provider: text('provider', { enum: ['apns', 'fcm', 'webpush'] }).notNull(),
+    platform: text('platform', { enum: ['ios', 'android', 'web'] }).notNull(),
+    // APNs hex token, FCM token, or the web-push endpoint.
+    token: text('token').notNull(),
+    // Web push only: { p256dh, auth }.
+    keys: jsonb('keys').$type<{ p256dh: string; auth: string }>(),
+    // APNs only (which host to send to); null otherwise.
+    environment: text('environment', { enum: ['production', 'sandbox'] }),
+    appVersion: text('app_version'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('push_devices_provider_token_idx').on(t.provider, t.token),
+    check('push_devices_provider_check', sql`${t.provider} IN ('apns', 'fcm', 'webpush')`),
+    check('push_devices_platform_check', sql`${t.platform} IN ('ios', 'android', 'web')`),
+    check(
+      'push_devices_environment_check',
+      sql`${t.environment} IS NULL OR ${t.environment} IN ('production', 'sandbox')`,
+    ),
+  ],
+)
+
+// The signed APNs provider JWT, shared across isolates and objects (spec
+// 2026-11-21 durable-mix-turns, "APNs from Workers"): Apple refuses refreshes
+// more often than every 20 minutes, so a per-isolate token would trip 429
+// TooManyProviderTokenUpdates. A signed credential, not the .p8 key, which
+// stays a secret. Replaced with UPDATE ... WHERE issued_at = $old.
+export const apnsProviderTokens = pgTable('apns_provider_tokens', {
+  keyId: text('key_id').primaryKey(),
+  token: text('token').notNull(),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
 })
