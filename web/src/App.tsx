@@ -29,7 +29,9 @@ import {
   type SessionDetailResponse,
   type TurnProgress,
   ShareNameRequiredError,
+  TurnAnswerGoneError,
 } from './api/client'
+import { parseTurnStep } from './api/sse'
 import { nextWorkingStep, type TurnWork, type WorkingStep } from './components/djWorkingLines'
 import { toAlbumPickState, toDjMessage, toDjSession, toListenLaterEntry, toQueueTrack } from './api/mappers'
 import { AlbumPanel } from './components/AlbumPanel'
@@ -64,7 +66,7 @@ import { YourMusicView, type MusicSection } from './components/YourMusicView'
 import { createMusicSyncService } from './sync/music-sync-service'
 import { createMusicSyncRun } from './sync/music-sync-run'
 import { createUploadGate } from './sync/upload-gate'
-import type { AlbumPick, AlbumPickState, AppView, CollectionView, DjMessage, DjSession, ListenLaterEntry, QueueTrack, SessionKind, SharedMixRow } from './domain'
+import type { AlbumPick, AlbumPickState, AppView, CollectionView, DjMessage, DjSession, ListenLaterEntry, LiveTurn, QueueTrack, SessionKind, SharedMixRow } from './domain'
 import { SharedMixPage, type SharedMixPlayer } from './components/SharedMixPage'
 import { ShareLinkCache, shareLink, sharePendingLink, type ShareOutcome } from './lib/share-link'
 import { createImportRun } from './import/import-run'
@@ -393,8 +395,21 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // out and its step once its stream opened. Lives here, not in the
   // conversation, so leaving the mix and coming back keeps the step; gone when
   // the turn ends, so never restored. `turn` keeps a late turn from clearing a newer one.
-  const [turnWork, setTurnWork] = useState<Record<string, TurnWork & { turn: number }>>({})
+  // `followed`: a turn this tab did not send, which the server says is running
+  // (a reload mid-turn, another device: durable turns), followed by attaching.
+  const [turnWork, setTurnWork] = useState<Record<string, TurnWork & { turn: number; followed?: true }>>({})
   const turnCount = useRef(0)
+  // Durable turns (spec 2026-11-21): the turn ids this tab sent or attached
+  // to, so a session read that still shows one never attaches to it again;
+  // the attach out per session; and the `seen` bookkeeping (once per turn).
+  const attachedTurns = useRef(new Set<string>())
+  const followedTurns = useRef(new Map<string, { turn: number; turnId: string; controller: AbortController }>())
+  useEffect(() => () => {
+    followedTurns.current.forEach((follow) => follow.controller.abort())
+    followedTurns.current.clear()
+  }, [])
+  const seenTurns = useRef(new Set<string>())
+  const unseenTurns = useRef(new Map<string, string>())
   // Sessions with a turn out right now, read synchronously by work that outlives a render.
   const turnsOut = useRef(new Set<string>())
   // The one later read per session after a dropped turn stream; cleared on unmount.
@@ -1117,12 +1132,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     return ids
   }
 
-  async function loadSession(sessionId: string, isCancelled: () => boolean = () => controlLife.current.signal.aborted, force = false) {
+  /** `quiet`: a read in the background (a followed turn's end): no loading state, no error line. */
+  async function loadSession(sessionId: string, isCancelled: () => boolean = () => controlLife.current.signal.aborted, force = false, quiet = false) {
     const revision = contentRevision.current[sessionId] ?? 0
     const cancelled = () => isCancelled() || revision !== (contentRevision.current[sessionId] ?? 0)
     const cached = Boolean(messagesBySession[sessionId] && queuesBySession[sessionId])
     if (cached && refreshedSessions.current.has(sessionId) && !force) return
-    if (!cached) setLoadingSessionId(sessionId)
+    if (!cached && !quiet) setLoadingSessionId(sessionId)
     const metadataAtStart = metadataRevision.current[sessionId] ?? 0
     try {
       const detail = await api.getSession(sessionId)
@@ -1139,11 +1155,83 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (mapped.albums) setAlbumsBySession((current) => ({ ...current, [sessionId]: mapped.albums! }))
       setError('')
     } catch (requestError) {
-      if (!cancelled()) setError(errorCopy(requestError))
+      if (!cancelled() && !quiet) setError(errorCopy(requestError))
       if (requestError instanceof ApiError && requestError.status === 401 && !cancelled()) signOut()
     } finally {
-      if (!isCancelled()) setLoadingSessionId(null)
+      if (!isCancelled() && !quiet) setLoadingSessionId(null)
     }
+  }
+
+  /** Whether this tab is in front, focused, and showing `sessionId`'s conversation. */
+  function showingMix(sessionId: string): boolean {
+    const { activeView: view, activeSessionId: id } = navigation.current
+    return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus() && view === 'session' && id === sessionId
+  }
+
+  function markSeen(sessionId: string, turnId: string) {
+    if (unseenTurns.current.get(sessionId) === turnId) unseenTurns.current.delete(sessionId)
+    if (seenTurns.current.has(turnId)) return
+    seenTurns.current.add(turnId)
+    // Fire and forget: the server only skips its push on it.
+    void api.markTurnSeen(sessionId, turnId).catch(() => undefined)
+  }
+
+  /**
+   * A durable turn's result or error landed (spec 2026-11-21, "Who notifies"):
+   * `seen` now when this tab shows that mix in front and focused, otherwise
+   * once it does (the effect below), so the server does not push it.
+   */
+  function turnLanded(sessionId: string, turnId: string | undefined) {
+    if (!turnId || seenTurns.current.has(turnId)) return
+    if (showingMix(sessionId)) markSeen(sessionId, turnId)
+    else unseenTurns.current.set(sessionId, turnId)
+  }
+
+  /**
+   * Follows a turn the server says is running on this session (a reload mid-
+   * turn, a list read, another device): the working line shows at once, from
+   * the read's step, and the attach resumes it live. Once per turn. At its end
+   * (result, error, nothing running, or a failed attach) the session is read
+   * again and the working line goes.
+   */
+  function followTurn(sessionId: string, live: LiveTurn) {
+    if (attachedTurns.current.has(live.id) || turnsOut.current.has(sessionId)) return
+    attachedTurns.current.add(live.id)
+    const signal = controlLife.current.signal
+    const turn = (turnCount.current += 1)
+    const controller = new AbortController()
+    const now = Date.now()
+    const known = live.step ? parseTurnStep({ step: live.step }) : null
+    let step = nextWorkingStep(null, { type: 'opened' }, now)
+    if (known) step = nextWorkingStep(step, known, now)
+    followedTurns.current.set(sessionId, { turn, turnId: live.id, controller })
+    turnsOut.current.add(sessionId)
+    setTurnWork((current) => ({ ...current, [sessionId]: { turn, startedAt: now, step, followed: true } }))
+    const onProgress = (progress: TurnProgress) => {
+      const next = nextWorkingStep(step, progress, Date.now())
+      if (next === step || controller.signal.aborted || signal.aborted) return
+      step = next
+      setTurnWork((current) => (current[sessionId]?.turn === turn ? { ...current, [sessionId]: { ...current[sessionId], step: next } } : current))
+    }
+    const settled = api.attachTurn(sessionId, onProgress, controller.signal).then(() => true, () => false)
+    void settled.then(async (ended) => {
+      // Stopped (its stop reads the session) or gone with the workspace.
+      if (controller.signal.aborted || signal.aborted || followedTurns.current.get(sessionId)?.turn !== turn) return
+      followedTurns.current.delete(sessionId)
+      try {
+        await loadSession(sessionId, undefined, true, true)
+      } finally {
+        turnsOut.current.delete(sessionId)
+        if (!signal.aborted) {
+          setTurnWork((current) => {
+            if (current[sessionId]?.turn !== turn) return current
+            const { [sessionId]: _ended, ...rest } = current
+            return rest
+          })
+          if (ended) turnLanded(sessionId, live.id)
+        }
+      }
+    })
   }
 
   async function retryCollection() {
@@ -1381,6 +1469,24 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     container.startMessages?.()
     return () => container.removeEventListener('message', onMessage)
   }, [])
+  // A session read that shows a running turn (durable turns) follows it: the
+  // Mixes list and the conversation then show it working until it settles.
+  useEffect(() => {
+    if (restoring) return
+    for (const session of sessions) if (session.turn && session.kind !== 'album') followTurn(session.id, session.turn)
+  }, [sessions, restoring])
+  // A turn that ended while this tab was behind, unfocused or elsewhere: `seen`
+  // once the tab shows that mix in front again.
+  useEffect(() => {
+    const check = () => unseenTurns.current.forEach((turnId, sessionId) => { if (showingMix(sessionId)) markSeen(sessionId, turnId) })
+    check()
+    window.addEventListener('focus', check)
+    document.addEventListener('visibilitychange', check)
+    return () => {
+      window.removeEventListener('focus', check)
+      document.removeEventListener('visibilitychange', check)
+    }
+  }, [activeView, activeSessionId])
   useEffect(() => {
     const pending = pendingInitialMilestone.current
     if (!pending || !onboarding) return
@@ -1492,6 +1598,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       : useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined
     homeShape.current = shape ?? null
     const create = stoppable && kind === 'mix' ? newStoppableCreate() : null
+    // The create's durable turn, from its stream's `turn` event (spec 2026-11-21).
+    let createTurnId: string | undefined
     if (create) {
       stoppableCreate.current = create
       setCreateStoppable(true)
@@ -1508,7 +1616,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (kind === 'album') response = await api.createSession(prompt, seed, undefined, 'album')
       else if (create) {
         const request = api.createSession(prompt, seed, shape, undefined, {
-          onProgress: (progress) => { if (progress.type === 'session') create.name(progress.sessionId) },
+          onProgress: (progress) => {
+            if (progress.type === 'session') create.name(progress.sessionId)
+            if (progress.type === 'turn') {
+              createTurnId = progress.turnId
+              attachedTurns.current.add(progress.turnId)
+            }
+          },
           signal: create.controller.signal,
         })
         request.then((answer) => { create.response = answer; create.name(answer.session.id) }, () => create.name(null))
@@ -1518,6 +1632,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (create?.stopped) throw turnHalted
       setNewSeed(null)
       adoptNewSession(response)
+      // The mix opens here: once that renders, `seen` goes if the tab is in front.
+      if (createTurnId) unseenTurns.current.set(response.session.id, createTurnId)
       const late = homeShape.current
       if (stoppable && kind === 'mix' && late && late !== (shape ?? null)) {
         setShapeSeeds((current) => ({ ...current, [response.session.id]: { shape: late, id: Date.now() } }))
@@ -1622,6 +1738,24 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
    */
   function stopMixTurn(sessionId: string): string | undefined {
     const turn = stoppableTurns.current.get(sessionId)
+    const follow = followedTurns.current.get(sessionId)
+    if (!turn && follow) {
+      // A followed turn: the attach goes, the turn is stopped, and the session
+      // read again (the stop takes the listener's line, or the whole first mix).
+      followedTurns.current.delete(sessionId)
+      follow.controller.abort()
+      turnsOut.current.delete(sessionId)
+      setTurnWork((current) => {
+        if (current[sessionId]?.turn !== follow.turn) return current
+        const { [sessionId]: _stopped, ...rest } = current
+        return rest
+      })
+      const stopping = (pendingStops.current.get(sessionId) ?? Promise.resolve()).then(() => settleStop(sessionId, true)).finally(() => {
+        if (pendingStops.current.get(sessionId) === stopping) pendingStops.current.delete(sessionId)
+      })
+      pendingStops.current.set(sessionId, stopping)
+      return undefined
+    }
     if (!turn) return undefined
     stoppableTurns.current.delete(sessionId)
     turn.controller.abort()
@@ -1650,11 +1784,14 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     return turn.restorable ? turn.text : undefined
   }
 
-  /** The stop itself, off screen. Too late, or a stop that failed: the session is read again and what landed is shown. */
-  async function settleStop(sessionId: string) {
+  /**
+   * The stop itself, off screen. Too late, or a stop that failed: the session is read again and what landed is shown.
+   * `reread`: read it after a stop too (a followed turn, whose line came from the server), and forget a session the stop deleted.
+   */
+  async function settleStop(sessionId: string, reread = false) {
     const signal = controlLife.current.signal
     try {
-      if ((await api.stopTurn(sessionId)).stopped) return
+      if ((await api.stopTurn(sessionId)).stopped && !reread) return
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) { if (!signal.aborted) signOut(); return }
     }
@@ -1674,6 +1811,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       void refreshSessionAfterTurn(sessionId, detail)
     } catch (requestError) {
       if (!signal.aborted && requestError instanceof ApiError && requestError.status === 401) signOut()
+      else if (!signal.aborted && reread && requestError instanceof ApiError && requestError.status === 404) forgetSession(sessionId)
     }
   }
 
@@ -1718,8 +1856,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const remakeSettled = () => setRemakingSessionId((current) => (current === sessionId ? null : current))
     // A mix turn asks for its steps (spec 2026-11-13 dj-turn-steps); an album turn keeps its static line.
     const turnId = (turnCount.current += 1)
-    const stream: { step: WorkingStep | null } = { step: null }
+    const stream: { step: WorkingStep | null; turnId?: string } = { step: null }
     const onProgress = (progress: TurnProgress) => {
+      if (progress.type === 'turn' && !signal.aborted) {
+        stream.turnId = progress.turnId
+        attachedTurns.current.add(progress.turnId)
+      }
       const next = nextWorkingStep(stream.step, progress, Date.now())
       if (next === stream.step || signal.aborted) return
       stream.step = next
@@ -1758,6 +1900,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       // Stopped after it answered: the stop's own read shows what landed.
       if (stopped()) throw turnHalted
       landReply(sessionId, response, { isAlbum, hadMix, metadataAtStart })
+      turnLanded(sessionId, stream.turnId)
       const reread = refreshSessionAfterTurn(sessionId)
       // A remake waits for both reads: whether the mix is personal now, and
       // whether the music is ready at all (if not, the door's first state).
@@ -1794,7 +1937,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       // The stream opened and then dropped: the server has this turn and is
       // likely still running it, so it fails as a server-side turn does (the
       // same line), and the session is read for a reply that lands meanwhile.
-      const dropped = stream.step !== null && requestError instanceof TypeError
+      // A retry whose turn's answer is gone (durable turns) ran too: read it the same way.
+      const dropped = (stream.step !== null && requestError instanceof TypeError) || requestError instanceof TurnAnswerGoneError
+      if (requestError instanceof ApiError) turnLanded(sessionId, stream.turnId)
       const errorId = `${sessionId}-error-${Date.now()}`
       setMessagesBySession((current) => ({
         ...current,
@@ -1851,7 +1996,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     setSessions((current) =>
       current.map((session) => {
         if (session.id !== sessionId) return session
-        const { pick: _pick, ...rest } = session
+        const { pick: _pick, turn: _turn, ...rest } = session
         const next = toDjSession(
           {
             ...rest,

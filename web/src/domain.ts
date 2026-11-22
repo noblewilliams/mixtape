@@ -16,7 +16,15 @@ export type DjSession = {
   kind: SessionKind
   /** Album sessions only: the current pick for the Mixes list, null before the first. */
   pick?: AlbumSummary | null
+  /**
+   * The mix turn the server says is still queued or running, as of the last
+   * read (durable turns): what the app attaches to. Absent otherwise.
+   */
+  turn?: LiveTurn
 }
+
+/** A turn the server is running for a session: its id, and its latest step name (null before the first). */
+export type LiveTurn = { id: string; status: 'queued' | 'running'; step: string | null }
 
 export type DjMessage = {
   id: string

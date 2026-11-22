@@ -9,6 +9,10 @@
  * events, then exactly one of `result` (today's success body) or `error`
  * (`{status, body}`), with `: keepalive` comments between. A stream that ends
  * before `result` or `error` is a dropped connection.
+ *
+ * A server running durable turns (spec 2026-11-21 durable-mix-turns) also
+ * sends `turn` (`{turnId, push}`) right after `session`, or first on a message
+ * turn; `GET /sessions/:id/turn/stream` (attach) carries the same events.
  */
 
 /** One server-sent event: its name (`message` when it had no `event:` line) and its data lines joined with `\n`. */
@@ -114,7 +118,14 @@ export type TurnStepProgress = {
  * session before its turn ran. The final answer is not progress: it is the
  * call's return value or exception, as on the JSON path.
  */
-export type TurnProgress = { type: 'opened' } | { type: 'session'; sessionId: string } | TurnStepProgress
+export type TurnProgress = { type: 'opened' } | { type: 'session'; sessionId: string } | TurnStartedProgress | TurnStepProgress
+
+/**
+ * A `turn` event (durable turns): the server runs this turn off the request
+ * under `turnId`, so a dropped stream can attach to it again. `push`: the
+ * server will push the turn's end to this listener's devices.
+ */
+export type TurnStartedProgress = { type: 'turn'; turnId: string; push: boolean }
 
 export type TurnProgressListener = (progress: TurnProgress) => void
 
@@ -166,11 +177,11 @@ function tryParse(data: string): unknown {
 }
 
 /**
- * Reads a streamed turn from `body`: hands each `session` and `step` event to
+ * Reads a streamed turn from `body`: hands each `session`, `turn` and `step` event to
  * `onProgress` as it arrives (a listener that throws is ignored), and answers
  * with the `result` or `error` event as soon as its blank line arrives. The
  * rest of the body is then cancelled and the reader released. Unknown events,
- * and `session` or `step` events that do not parse, are skipped.
+ * and `session`, `turn` or `step` events that do not parse, are skipped.
  *
  * Throws a TypeError, as a failed `fetch` does, when the body ends before a
  * `result` or `error` event, a read fails, or no byte arrives for
@@ -199,6 +210,10 @@ export async function readTurnStream(
         const session = tryParse(data)
         const id = isRecord(session) && isRecord(session.session) ? session.session.id : undefined
         if (typeof id === 'string' && id !== '') report({ type: 'session', sessionId: id })
+      } else if (event === 'turn') {
+        const turn = tryParse(data)
+        const turnId = isRecord(turn) ? text(turn.turnId) : undefined
+        if (turnId !== undefined && isRecord(turn)) report({ type: 'turn', turnId, push: turn.push === true })
       } else if (event === 'step') {
         const step = parseTurnStep(tryParse(data))
         if (step) report(step)

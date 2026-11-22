@@ -5,9 +5,9 @@ import type {
   PlaylistEntrySnapshot,
   PlaylistSnapshot,
 } from '../musickit/library'
-import { readTurnStream, type TurnProgressListener } from './sse'
+import { readTurnStream, type TurnProgressListener, type TurnStreamEnd } from './sse'
 
-export type { TurnProgress, TurnProgressListener, TurnStepProgress } from './sse'
+export type { TurnProgress, TurnProgressListener, TurnStartedProgress, TurnStepProgress } from './sse'
 
 export type InitialPlaylistSeed = { playlistId: string; excludeSourceTracks?: boolean }
 
@@ -52,7 +52,24 @@ export type ApiSession = {
   updatedAt: string
   /** Absent on older servers; absence means a mix. */
   kind?: 'mix' | 'album'
+  /**
+   * The session's current turn while it is queued or running (durable turns,
+   * spec 2026-11-21 "Session reads"): on GET /sessions rows and GET
+   * /sessions/:id. Absent otherwise, and on older servers.
+   */
+  turn?: ApiLiveTurn
 }
+
+/** A mix turn the server is still running: its id, and its latest step (a raw step name, or null before the first). */
+export type ApiLiveTurn = { id: string; status: 'queued' | 'running'; step: string | null }
+
+/**
+ * How attaching to a session's running turn ended (`GET
+ * /sessions/:id/turn/stream`): its `result` body, its `error` event, or
+ * nothing running (a 204: it finished, or never was). Either way the caller
+ * reads the session again.
+ */
+export type TurnAttachEnd = { kind: 'result'; body: unknown } | { kind: 'error'; status: number; body: unknown } | { kind: 'not_running' }
 
 export type ApiSessionSummary = ApiSession & {
   /** A live share link (GET /sessions only; absent on older servers). */
@@ -575,6 +592,15 @@ export type MixtapeApi = {
   sendMessage: (sessionId: string, text: string, energyArc?: EnergyArc, options?: SendMessageOptions) => Promise<SendMessageResponse>
   /** Stops the session's running mix turn; may take a while (it answers once the turn is undone). */
   stopTurn: (sessionId: string) => Promise<StopTurnResponse>
+  /**
+   * Follows the session's running mix turn (durable turns): `onProgress`
+   * hears `opened`, the `turn` event and the latest step, then each step live.
+   * Answers once the turn ends, or at once when nothing is running. A drop is
+   * the TypeError a failed fetch is; a server without the route answers its 404.
+   */
+  attachTurn: (sessionId: string, onProgress?: TurnProgressListener, signal?: AbortSignal) => Promise<TurnAttachEnd>
+  /** Tells the server the turn's end was on screen, so it does not push it (`POST /sessions/:id/turn/:turnId/seen`). */
+  markTurnSeen: (sessionId: string, turnId: string) => Promise<void>
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   choosePick: (sessionId: string, input: ChoosePickInput, expectedVersion?: number) => Promise<AlbumPickResponse>
   listListenLater: (signal?: AbortSignal) => Promise<{ entries: ApiListenLaterEntry[] }>
@@ -701,6 +727,18 @@ export class ApiError extends Error {
 }
 
 /** POST /sessions refused a new mix: an anonymous listener reached the cap. */
+/**
+ * A retried mix turn whose key named a turn the server no longer holds an
+ * answer for (a 204). The turn ran; the session holds what it left, so the
+ * caller reads it again, as after a dropped stream. A TypeError, as a drop is.
+ */
+export class TurnAnswerGoneError extends TypeError {
+  constructor() {
+    super('The turn finished; its answer is gone.')
+    this.name = 'TurnAnswerGoneError'
+  }
+}
+
 export class AnonymousCapError extends ApiError {
   readonly limit: number
 
@@ -806,25 +844,88 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     return settle<T>(await send(path, init, 'application/json'))
   }
 
+  // Set once any stream from this server carried a `turn` event: proof it runs
+  // durable turns, and so attaches a retried Idempotency-Key to the turn the
+  // first request started rather than start a second (the iOS client's rule).
+  let honoursTurnKeys = false
+
+  const opened = (onProgress: TurnProgressListener | undefined) => {
+    try {
+      onProgress?.({ type: 'opened' })
+    } catch {
+      // A caption never breaks the turn.
+    }
+  }
+
+  async function attach(sessionId: string, onProgress?: TurnProgressListener, signal?: AbortSignal): Promise<TurnAttachEnd> {
+    const response = await send(`/sessions/${encodeURIComponent(sessionId)}/turn/stream`, signal ? { signal } : {}, 'text/event-stream')
+    if (response.status === 204) return { kind: 'not_running' }
+    const streamed = response.ok && (response.headers.get('content-type') ?? '').includes('text/event-stream')
+    if (!streamed) {
+      await settle(response)
+      return { kind: 'not_running' }
+    }
+    if (!response.body) throw new TypeError('The turn stream had no body.')
+    opened(onProgress)
+    const end = await readTurnStream(response.body, (progress) => {
+      if (progress.type === 'turn') honoursTurnKeys = true
+      onProgress?.(progress)
+    }, { idleTimeoutMs: streamIdleTimeoutMs })
+    if (end.kind === 'result') return { kind: 'result', body: withAddMusicOffer(end.body as { addMusic?: unknown }) }
+    if (end.kind === 'error') return end
+    return { kind: 'error', status: 502, body: { error: 'malformed_response' } }
+  }
+
   /**
    * A mix turn. With `onProgress` it asks for the turn as an event stream; an
    * answer that is JSON (an older server, a refusal before the turn) or not
    * 2xx is read exactly as `request` reads it. On a stream, `result` is the
    * body and `error` the ApiError the JSON path would give, and a stream that
    * drops before either is the TypeError a failed fetch is.
+   *
+   * Durable turns (spec 2026-11-21): it carries a fresh `Idempotency-Key`. A
+   * request that fails before its stream opens is sent once more with the same
+   * key, but only once this server has sent a `turn` event (an older or
+   * rolled-back server ignores the key, and a retry there could make a second
+   * mix). A stream that drops after its `turn` event attaches to the turn
+   * (`sessionId`: the message turn's; a create learns it from `session`) and
+   * answers as the turn ends; when the attach fails or finds nothing running,
+   * the drop's TypeError stands.
    */
-  async function turn<T>(path: string, init: RequestInit, onProgress?: TurnProgressListener): Promise<T> {
+  async function turn<T>(path: string, init: RequestInit, onProgress?: TurnProgressListener, sessionId?: string): Promise<T> {
     if (!onProgress) return request<T>(path, init)
-    const response = await send(path, init, 'text/event-stream')
+    const keyed: RequestInit = { ...init, headers: { 'idempotency-key': crypto.randomUUID() } }
+    let turnId: string | undefined
+    let session = sessionId
+    const listen: TurnProgressListener = (progress) => {
+      if (progress.type === 'turn') {
+        honoursTurnKeys = true
+        turnId = progress.turnId
+      }
+      if (progress.type === 'session') session ??= progress.sessionId
+      onProgress(progress)
+    }
+    let response: Response
+    try {
+      response = await send(path, keyed, 'text/event-stream')
+    } catch (error) {
+      if (!(error instanceof TypeError) || !honoursTurnKeys || init.signal?.aborted) throw error
+      response = await send(path, keyed, 'text/event-stream')
+    }
+    if (response.status === 204) throw new TurnAnswerGoneError()
     const streamed = response.ok && (response.headers.get('content-type') ?? '').includes('text/event-stream')
     if (!streamed) return settle<T>(response)
     if (!response.body) throw new TypeError('The turn stream had no body.')
+    opened(onProgress)
+    let end: TurnStreamEnd | TurnAttachEnd
     try {
-      onProgress({ type: 'opened' })
-    } catch {
-      // A caption never breaks the turn.
+      end = await readTurnStream(response.body, listen, { idleTimeoutMs: streamIdleTimeoutMs })
+    } catch (error) {
+      if (!(error instanceof TypeError) || !turnId || !session || init.signal?.aborted) throw error
+      const attached = await attach(session, onProgress, init.signal ?? undefined).catch(() => null)
+      if (!attached || attached.kind === 'not_running') throw error
+      end = attached
     }
-    const end = await readTurnStream(response.body, onProgress, { idleTimeoutMs: streamIdleTimeoutMs })
     if (end.kind === 'result') return end.body as T
     if (end.kind === 'error') throw new ApiError(end.status, end.body)
     throw new ApiError(502, { error: 'malformed_response' })
@@ -906,7 +1007,11 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'POST',
         body: JSON.stringify({ text, ...(energyArc ? { energyArc } : {}), ...(options?.remake ? { remake: true } : {}) }),
         ...(options?.signal ? { signal: options.signal } : {}),
-      }, options?.onProgress).then(withAddMusicOffer),
+      }, options?.onProgress, sessionId).then(withAddMusicOffer),
+    attachTurn: (sessionId, onProgress, signal) => attach(sessionId, onProgress, signal),
+    markTurnSeen: async (sessionId, turnId) => {
+      await request(`/sessions/${encodeURIComponent(sessionId)}/turn/${encodeURIComponent(turnId)}/seen`, { method: 'POST' })
+    },
     stopTurn: async (sessionId) => {
       try {
         const body = await request<{ stopped?: unknown }>(`/sessions/${encodeURIComponent(sessionId)}/turn/stop`, { method: 'POST' })

@@ -284,3 +284,24 @@ describe('shared mix mapper (strict)', () => {
     expect(() => toSharedMixRow({ ...row, sharerName: 7 })).toThrow(MalformedResponseError)
   })
 })
+
+describe('a session read’s running turn (durable turns)', () => {
+  const base: ApiSessionSummary = {
+    id: 'session-9', title: 'Rain', status: 'active', queueVersion: 1, notPersonal: false,
+    updatedAt: '2026-11-22T08:00:00.000Z', trackCount: 0, durationMs: 0,
+  }
+
+  it('maps a queued or running turn on list rows and detail sessions', () => {
+    expect(toDjSession({ ...base, turn: { id: 't-1', status: 'running', step: 'picking' } }).turn).toEqual({ id: 't-1', status: 'running', step: 'picking' })
+    const detail: ApiSession = { id: 'session-9', title: 'Rain', status: 'active', queueVersion: 1, notPersonal: false, updatedAt: base.updatedAt, turn: { id: 't-2', status: 'queued', step: null } }
+    expect(toDjSession(detail).turn).toEqual({ id: 't-2', status: 'queued', step: null })
+  })
+
+  it('leaves the field out when it is absent or does not read as a running turn', () => {
+    expect(toDjSession(base)).not.toHaveProperty('turn')
+    for (const turn of [null, { id: '', status: 'running', step: null }, { id: 't-1', status: 'succeeded', step: null }, 'running']) {
+      expect(toDjSession({ ...base, turn } as unknown as ApiSessionSummary)).not.toHaveProperty('turn')
+    }
+    expect(toDjSession({ ...base, turn: { id: 't-1', status: 'running', step: 7 } } as unknown as ApiSessionSummary).turn).toEqual({ id: 't-1', status: 'running', step: null })
+  })
+})

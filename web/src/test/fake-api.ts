@@ -656,6 +656,9 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
     },
     // As the server once a running turn is undone; tests override it for the too-late answer.
     stopTurn: async () => ({ stopped: true }),
+    // As an older server's nothing-running: tests override these for durable turns.
+    attachTurn: async () => ({ kind: 'not_running' }),
+    markTurnSeen: async () => undefined,
     stopSharing: async (sessionId) => {
       const token = sessionShares.get(sessionId)
       if (token) sharedMixes.set(token, 'revoked')

@@ -1,4 +1,4 @@
-import type { AlbumPick, AlbumPickState, AlbumSummary, DjMessage, DjSession, ListenLaterEntry, QueueTrack, SharedMix, SharedMixRow, SharedMixTrack } from '../domain'
+import type { AlbumPick, AlbumPickState, AlbumSummary, DjMessage, DjSession, ListenLaterEntry, LiveTurn, QueueTrack, SharedMix, SharedMixRow, SharedMixTrack } from '../domain'
 import type {
   AlbumPickResponse,
   ApiAlbum,
@@ -59,12 +59,14 @@ export function toDjSession(
       ? session.durationMs
       : queue.reduce((total, track) => total + (track.durationMs ?? 0), 0)
 
-  const { pick, ...rest } = session as ApiSessionSummary
+  const { pick, turn: rawTurn, ...rest } = session as ApiSessionSummary
   const kind = session.kind ?? 'mix'
+  const turn = toLiveTurn(rawTurn)
 
   return {
     ...rest,
     kind,
+    ...(turn ? { turn } : {}),
     ...(kind === 'album' && pick !== undefined ? { pick: pick && toAlbumSummary(pick) } : {}),
     ageLabel: ageLabel(session.updatedAt),
     trackCount,
@@ -72,6 +74,14 @@ export function toDjSession(
     caseColor: session.caseColor ?? caseColor,
     stockColor,
   }
+}
+
+/** A session read's running turn, or undefined when it is absent or does not read as one. */
+export function toLiveTurn(value: unknown): LiveTurn | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { id, status, step } = value as Record<string, unknown>
+  if (typeof id !== 'string' || id === '' || (status !== 'queued' && status !== 'running')) return undefined
+  return { id, status, step: typeof step === 'string' && step !== '' ? step : null }
 }
 
 function flatArtwork(artwork: ApiAlbumArtwork | null) {
