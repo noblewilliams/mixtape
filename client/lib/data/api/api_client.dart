@@ -251,9 +251,16 @@ class ApiClient {
   }
 
   /// Returns the raw [http.Response] so callers can read response headers (e.g. set-auth-token).
-  Future<http.Response> postJson(String path, Object body) async {
+  ///
+  /// [extraHeaders] ride along (a mix turn's `Idempotency-Key`).
+  Future<http.Response> postJson(
+    String path,
+    Object body, {
+    Map<String, String>? extraHeaders,
+  }) async {
     final headers = await _headers();
     headers['content-type'] = 'application/json';
+    if (extraHeaders != null) headers.addAll(extraHeaders);
     final res = await _guard(
       () => _inner.post(
         Uri.parse(baseUrl).resolve(path),
@@ -275,14 +282,40 @@ class ApiClient {
   /// arrive for [idleTimeout]. Any other answer is read whole within
   /// [timeout]: a failed status throws [ApiException] (and reports a 401) as
   /// [postJson] does, and a success comes back as a [WholeReply].
+  ///
+  /// [extraHeaders] ride along (a mix turn's `Idempotency-Key`).
   Future<StreamingReply> postEventStream(
     String path,
     Object body, {
     required Duration idleTimeout,
+    Map<String, String>? extraHeaders,
+  }) => _eventStream(
+    'POST',
+    path,
+    body,
+    idleTimeout: idleTimeout,
+    extraHeaders: extraHeaders,
+  );
+
+  /// [postEventStream] as a GET with no body (attaching to a running turn,
+  /// `GET /sessions/:id/turn/stream`). A success that is not a stream (a
+  /// 204) comes back as a [WholeReply].
+  Future<StreamingReply> getEventStream(
+    String path, {
+    required Duration idleTimeout,
+  }) => _eventStream('GET', path, null, idleTimeout: idleTimeout);
+
+  Future<StreamingReply> _eventStream(
+    String method,
+    String path,
+    Object? body, {
+    required Duration idleTimeout,
+    Map<String, String>? extraHeaders,
   }) async {
     final headers = await _headers();
-    headers['content-type'] = 'application/json';
+    if (body != null) headers['content-type'] = 'application/json';
     headers['accept'] = 'text/event-stream';
+    if (extraHeaders != null) headers.addAll(extraHeaders);
     // Pulled when the wait times out: a client that honours it (IOClient)
     // tears the request down, and an answer that still turns up from one
     // that does not is let go of below, so no connection stays busy.
@@ -290,14 +323,12 @@ class ApiClient {
     final reply = await _guard<StreamingReply>(() async {
       // Built as http's own post() builds it, so only `accept` and the
       // abort trigger differ.
-      final request =
-          http.AbortableRequest(
-              'POST',
-              Uri.parse(baseUrl).resolve(path),
-              abortTrigger: abort.future,
-            )
-            ..headers.addAll(headers)
-            ..body = jsonEncode(body);
+      final request = http.AbortableRequest(
+        method,
+        Uri.parse(baseUrl).resolve(path),
+        abortTrigger: abort.future,
+      )..headers.addAll(headers);
+      if (body != null) request.body = jsonEncode(body);
       final res = await _inner.send(request);
       if (abort.isCompleted) {
         // Nobody is waiting for this answer any more.

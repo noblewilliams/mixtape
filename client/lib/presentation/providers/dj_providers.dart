@@ -25,6 +25,7 @@ import 'onboarding_provider.dart';
 import 'playlist_context_provider.dart';
 import 'playback_provider.dart';
 import 'first_run_funnel_provider.dart';
+import 'turn_seen_provider.dart';
 import 'working_step.dart';
 import '../widgets/energy_journey.dart' show EnergyArc;
 import 'funnel_provider.dart';
@@ -106,6 +107,7 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
     try {
       final sessions = await api.listSessions();
       if (generation != _generation) return sessions;
+      _followLiveTurns(sessions);
       return _mergeRead(sessions, revision);
     } catch (_) {
       // A PATCH can finish while this initial read is still outstanding.
@@ -135,10 +137,23 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
       state = next;
       return false;
     }
+    _followLiveTurns(next.requireValue);
     state = AsyncData(
       _mergeRead(next.requireValue, revision, preserveId: preserveId),
     );
     return true;
+  }
+
+  /// Rows whose turn the server is still running, after a relaunch or from
+  /// another device, follow it ([TurnFollower]), so they show the DJ at work
+  /// and read again once it lands.
+  void _followLiveTurns(List<DjSession> sessions) {
+    if (!sessions.any((session) => session.turn?.live ?? false)) return;
+    try {
+      ref.read(turnFollowerProvider).followAll(sessions);
+    } catch (_) {
+      // Never a reason to fail the list.
+    }
   }
 
   List<DjSession> _mergeRead(
@@ -324,6 +339,7 @@ class ChatState {
     this.suggestions,
     this.addMusic,
     this.workingStep,
+    this.workingTurn,
     this.shared = false,
     this.stopping = false,
     this.shape,
@@ -378,6 +394,12 @@ class ChatState {
   /// entry carries the same, for a conversation reopened mid-turn.
   final WorkingStep? workingStep;
 
+  /// The durable turn the mix turn out is (its stream's `turn` event, spec
+  /// 2026-11-21): null before the event, against an older server, for an
+  /// album turn, and once the turn ends. The Mixes activity's working entry
+  /// carries the same.
+  final TurnStarted? workingTurn;
+
   /// A [ChatNotifier.remake] is out: from its start until the re-reads after
   /// it (the session's `notPersonal`, the listener's `musicReady`) resolve,
   /// or until it fails. The conversation hides the music door meanwhile
@@ -421,6 +443,8 @@ class ChatState {
     bool clearAddMusic = false,
     WorkingStep? workingStep,
     bool clearWorkingStep = false,
+    TurnStarted? workingTurn,
+    bool clearWorkingTurn = false,
     bool? shared,
     bool? stopping,
     EnergyArc? shape,
@@ -452,6 +476,7 @@ class ChatState {
       suggestions: clearSuggestions ? null : (suggestions ?? this.suggestions),
       addMusic: clearAddMusic ? null : (addMusic ?? this.addMusic),
       workingStep: clearWorkingStep ? null : (workingStep ?? this.workingStep),
+      workingTurn: clearWorkingTurn ? null : (workingTurn ?? this.workingTurn),
       shared: shared ?? this.shared,
       stopping: stopping ?? this.stopping,
       shape: clearShape ? null : (shape ?? this.shape),
@@ -634,6 +659,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _followInheritedTurn();
     final detail = await api.getSession(sessionId);
     if (!_current(generation)) return _fromDetail(detail);
+    // The server is still running a turn on it that no request of this app
+    // holds (a relaunch, another device): follow it, and read again once
+    // it ends.
+    final running = detail.session.turn;
+    if (running != null &&
+        running.live &&
+        ref.read(turnFollowerProvider).follow(sessionId, running.id) != null) {
+      _followInheritedTurn();
+    }
     seedRead?.adopt(detail.playlistSeed);
     if (detail.session.kind == SessionKind.album) _pick = null;
     final loaded = _fromDetail(detail).copyWith(shape: _pick);
@@ -843,9 +877,19 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Once the stream has opened the server has the turn, whatever happens
     // to the connection after.
     var streamed = false;
+    // The durable turn this is, once its stream says (spec 2026-11-21).
+    TurnStarted? durable;
+    // The turn's result or error reached this device (not a drop): with
+    // the mix on screen, the server is told it was seen.
+    var answered = true;
     WorkingStep? step;
     void onProgress(TurnProgress progress) {
       streamed = true;
+      if (progress is TurnStarted) {
+        durable = progress;
+        endActivity.started(progress);
+        if (live()) _mergeCurrent((c) => c.copyWith(workingTurn: progress));
+      }
       final next = WorkingStep.after(step, progress);
       if (next == null || identical(next, step)) return;
       step = next;
@@ -1034,13 +1078,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     } on NetworkException catch (e) {
+      answered = false;
       if (!live()) return;
-      if (streamed) {
-        await _afterDroppedStream(
+      if (streamed || e is TurnAnswerGoneException) {
+        answered = await _afterDroppedStream(
           base: base,
           generation: generation,
           nameRevision: nameRevision,
           remake: remake,
+          turnId: durable?.turnId,
+          onProgress: onProgress,
         );
         return;
       }
@@ -1070,13 +1117,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // cleared it.
         release();
         endActivity(ready: landed, succeeded: succeeded);
+        final turnId = durable?.turnId;
+        if (landed && answered && turnId != null && ref.mounted) {
+          ref.read(turnSeenProvider).landed(sessionId, turnId);
+        }
         if (_current(generation)) {
           _mergeCurrent(
-            (c) => c.sending || c.remaking || c.workingStep != null
+            (c) =>
+                c.sending ||
+                    c.remaking ||
+                    c.workingStep != null ||
+                    c.workingTurn != null
                 ? c.copyWith(
                     sending: false,
                     remaking: false,
                     clearWorkingStep: true,
+                    clearWorkingTurn: true,
                   )
                 : c,
           );
@@ -1120,6 +1176,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         sending: false,
         remaking: false,
         clearWorkingStep: true,
+        clearWorkingTurn: true,
         // What the turn cleared as it went out comes back with it.
         suggestions: c.suggestions ?? base.suggestions,
         addMusic: c.addMusic ?? base.addMusic,
@@ -1178,6 +1235,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           remaking: c.remaking,
           stopping: c.stopping,
           workingStep: c.workingStep,
+          workingTurn: c.workingTurn,
           shape: c.shape,
           landedShape: c.landedShape,
           clearSuggestions: waiting != null,
@@ -1275,11 +1333,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Otherwise the turn's failure shows as a failure on the server's side
   /// does, and one more read [lateReadDelay] later can still land the reply
   /// in its place.
-  Future<void> _afterDroppedStream({
+  ///
+  /// A durable turn ([turnId], spec 2026-11-21) runs on whatever the
+  /// connection does: before any failure shows, this attaches to it
+  /// ([DjApiDurableTurns.attachTurn], the caption carrying on through
+  /// [onProgress]) and reads the session again once it ends. True when the
+  /// turn's answer reached this device after all (a reply landed, or the
+  /// attach saw the turn end).
+  Future<bool> _afterDroppedStream({
     required ChatState base,
     required int generation,
     required int nameRevision,
     required bool remake,
+    String? turnId,
+    void Function(TurnProgress progress)? onProgress,
   }) async {
     final turn = _turns;
     final known = {for (final m in base.messages) m.message.id};
@@ -1292,9 +1359,27 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       replacing: replacing,
     );
 
-    final reply = await _readReply(known, base);
-    if (!_current(generation)) return;
-    if (reply != null) return land(reply);
+    var reply = await _readReply(known, base);
+    if (!_current(generation)) return false;
+    var attached = false;
+    if (reply == null && turnId != null) {
+      try {
+        final end = await ref
+            .read(djApiProvider)
+            .attachTurn(sessionId, onProgress: onProgress);
+        attached = end != TurnAttachEnd.notRunning;
+      } catch (_) {
+        // Dropped again (the app is likely away): the failure below, and
+        // the late read, as without a durable turn.
+      }
+      if (!_current(generation)) return attached;
+      reply = await _readReply(known, base);
+      if (!_current(generation)) return attached;
+    }
+    if (reply != null) {
+      await land(reply);
+      return true;
+    }
     final failure = ChatMessage(
       _localMessage('dj', _genericApiErrorMessage),
       isError: true,
@@ -1311,6 +1396,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       final reply = await _readReply(known, base);
       if (reply != null && still()) await land(reply, replacing: failure);
     });
+    return attached;
   }
 
   /// The reply a fresh read of the session holds that this conversation has
@@ -1604,6 +1690,90 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 final chatProvider = AsyncNotifierProvider.autoDispose
     .family<ChatNotifier, ChatState, String>(ChatNotifier.new);
 
+/// Coming back to a running turn (spec 2026-11-21 durable mix turns, "iOS
+/// client"): a mix whose session read says the server is running its turn
+/// ([DjSession.turn]) while no request of this app holds it, after a
+/// relaunch or from another device.
+///
+/// [follow] attaches to it ([DjApiDurableTurns.attachTurn]) and shows it as
+/// any turn out shows: the Mixes activity's working entry, which the Mixes
+/// row and the conversation read, with its steps as the stream says them.
+/// Once it ends (its result or error, nothing running, or a drop) the entry
+/// ends, and the Mixes list is read again; a conversation open on it reads
+/// itself again ([ChatNotifier]'s inherited turn).
+class TurnFollower {
+  TurnFollower(this._ref);
+
+  final Ref _ref;
+
+  /// Turns followed this session: each once, so a read that still lists a
+  /// turn (a dropped attach) never loops.
+  final Set<String> _followed = {};
+
+  /// Follows [turnId] on [sessionId]: null when there is nothing to do (the
+  /// turn is already out on this device, or already followed), else how it
+  /// ended (null inside for a drop or failure).
+  Future<TurnAttachEnd?>? follow(String sessionId, String turnId) {
+    if (!_ref.mounted) return null;
+    final activity = _ref.read(mixActivityProvider);
+    // This app's own turn on it, or a new mix whose create has not named
+    // its mix yet (the list may already list it): its own request has it.
+    final pending = activity.pending;
+    if (activity.isWorking(sessionId) ||
+        (pending != null &&
+            (pending.sessionId == null || pending.sessionId == sessionId))) {
+      return null;
+    }
+    if (!_followed.add(turnId)) return null;
+    final end = _ref.read(mixActivityProvider.notifier).beginTurn(sessionId);
+    final api = _ref.read(djApiProvider);
+    WorkingStep? step;
+    var named = turnId;
+    void onProgress(TurnProgress progress) {
+      if (progress is TurnStarted) {
+        named = progress.turnId;
+        end.started(progress);
+      }
+      final next = WorkingStep.after(step, progress);
+      if (next == null || identical(next, step)) return;
+      step = next;
+      end.step(next);
+    }
+
+    return () async {
+      TurnAttachEnd? how;
+      try {
+        how = await api.attachTurn(sessionId, onProgress: onProgress);
+      } catch (_) {
+        // Dropped or refused: the next read shows what is there.
+      }
+      if (!_ref.mounted) return how;
+      end(ready: how != null, succeeded: how == TurnAttachEnd.result);
+      if (how == TurnAttachEnd.result || how == TurnAttachEnd.error) {
+        _ref.read(turnSeenProvider).landed(sessionId, named);
+      }
+      if (how != null && _ref.exists(sessionsProvider)) {
+        unawaited(_ref.read(sessionsProvider.notifier).refresh());
+      }
+      return how;
+    }();
+  }
+
+  /// [follow]s every running turn [sessions] lists.
+  void followAll(List<DjSession> sessions) {
+    for (final session in sessions) {
+      final turn = session.turn;
+      if (turn != null && turn.live) follow(session.id, turn.id);
+    }
+  }
+}
+
+/// User-scoped: a sign-out forgets the turns it followed.
+final turnFollowerProvider = Provider<TurnFollower>((ref) {
+  ref.watch(authProvider);
+  return TurnFollower(ref);
+});
+
 // ---------------------------------------------------------------------------
 // New-session flow
 // ---------------------------------------------------------------------------
@@ -1707,6 +1877,10 @@ final sessionStarterProvider =
         var succeeded = false;
         // A streamed create names the mix first, before its turn runs.
         String? named;
+        // The durable turn the first turn is (spec 2026-11-21), and whether
+        // its answer reached this device (not a drop).
+        TurnStarted? durable;
+        var answered = true;
         WorkingStep? step;
         void onProgress(TurnProgress progress) {
           if (stop?.stopped ?? false) return;
@@ -1714,6 +1888,10 @@ final sessionStarterProvider =
             named = progress.sessionId;
             endActivity.named(progress.sessionId);
             stop?._named(progress.sessionId);
+          }
+          if (progress is TurnStarted) {
+            durable = progress;
+            endActivity.started(progress);
           }
           final next = WorkingStep.after(step, progress);
           if (next == null || identical(next, step)) return;
@@ -1790,6 +1968,7 @@ final sessionStarterProvider =
           made = e.sessionId;
           rethrow;
         } on NetworkException {
+          answered = false;
           if (stop?.stopped ?? false) throw const NewMixStoppedException();
           final id = named;
           if (id == null) rethrow;
@@ -1808,6 +1987,12 @@ final sessionStarterProvider =
         } finally {
           stop?._ended();
           endActivity(sessionId: made, succeeded: succeeded);
+          final turnId = durable?.turnId;
+          final id = made;
+          if (answered && turnId != null && id != null && ref.mounted) {
+            // The create opens the mix it made: its answer is on screen.
+            ref.read(turnSeenProvider).landed(id, turnId, onScreen: true);
+          }
         }
       };
     });

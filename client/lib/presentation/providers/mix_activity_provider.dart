@@ -7,12 +7,15 @@
 /// screen (see [MixOperationGate]), and this only remembers what those
 /// requests are doing so a row can show it. A reply that lands while the
 /// app is closed is not known here; the list's own times still say when a
-/// mix last changed.
+/// mix last changed. A turn the server is still running after a relaunch
+/// (durable mix turns) comes back through the session reads' `turn` field:
+/// `TurnFollower` attaches to it and notes it here like any turn out.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
+import '../../data/dj/turn_stream.dart' show TurnStarted;
 import 'auth_provider.dart';
 import 'mix_background_provider.dart';
 import 'working_step.dart';
@@ -71,29 +74,36 @@ class PendingMix {
 /// What [MixActivityNotifier.beginTurn] hands back: call it, once, to end
 /// the turn; [step] notes where it has got to meanwhile.
 class TurnActivity {
-  TurnActivity._(this._end, this._step);
+  TurnActivity._(this._end, this._step, this._started);
 
   final void Function(bool ready, bool succeeded) _end;
   final void Function(WorkingStep step) _step;
+  final void Function(TurnStarted turn) _started;
 
   /// Ends the turn; `ready` is whether it left anything to look at (a
   /// reply, or a line saying it failed) rather than being taken back, and
-  /// `succeeded` whether the DJ's reply landed (a ping, if the app is away).
+  /// `succeeded` whether the DJ's reply landed (a ping, if the app is away,
+  /// unless the turn's stream said the server pushes it).
   void call({required bool ready, bool succeeded = false}) =>
       _end(ready, succeeded);
 
   /// The turn's stream reported [step]. Nothing once the turn has ended.
   void step(WorkingStep step) => _step(step);
+
+  /// The turn's stream named its durable turn ([TurnStarted]). Nothing once
+  /// the turn has ended.
+  void started(TurnStarted turn) => _started(turn);
 }
 
 /// What [MixActivityNotifier.beginNewMix] hands back: call it, once, to end
 /// the create; [step] and [named] note what its stream says meanwhile.
 class NewMixActivity {
-  NewMixActivity._(this._end, this._step, this._named);
+  NewMixActivity._(this._end, this._step, this._named, this._started);
 
   final void Function(String? sessionId, bool succeeded) _end;
   final void Function(WorkingStep step) _step;
   final void Function(String sessionId) _named;
+  final void Function(TurnStarted turn) _started;
 
   /// Ends it with the id the server gave it (also on a failure that still
   /// wrote the row), or none when nothing was made; `succeeded` when the
@@ -106,6 +116,9 @@ class NewMixActivity {
 
   /// The create's stream named the new mix [sessionId].
   void named(String sessionId) => _named(sessionId);
+
+  /// The create's stream named its durable turn ([TurnStarted]).
+  void started(TurnStarted turn) => _started(turn);
 }
 
 /// The steps live beside the rest rather than inside it: a step replaces
@@ -115,10 +128,19 @@ class MixActivity {
   const MixActivity({
     this.working = const {},
     this.steps = const {},
+    this.turns = const {},
     this.ready = const {},
     this.pending,
     this.pendingStep,
+    this.pendingTurn,
   });
+
+  /// The durable turn each working mix's stream named (spec 2026-11-21);
+  /// none against an older server.
+  final Map<String, TurnStarted> turns;
+
+  /// The durable turn the new mix's first turn named, once its stream did.
+  final TurnStarted? pendingTurn;
 
   /// Mixes with a turn out, and when each went.
   final Map<String, DateTime> working;
@@ -139,21 +161,26 @@ class MixActivity {
   bool isWorking(String id) => working.containsKey(id);
   DateTime? workingSince(String id) => working[id];
   WorkingStep? workingStep(String id) => steps[id];
+  TurnStarted? workingTurn(String id) => turns[id];
   bool isReady(String id) => ready.contains(id);
 
   MixActivity _copy({
     Map<String, DateTime>? working,
     Map<String, WorkingStep>? steps,
+    Map<String, TurnStarted>? turns,
     Set<String>? ready,
     PendingMix? pending,
     WorkingStep? pendingStep,
+    TurnStarted? pendingTurn,
     bool clearPending = false,
   }) => MixActivity(
     working: working ?? this.working,
     steps: steps ?? this.steps,
+    turns: turns ?? this.turns,
     ready: ready ?? this.ready,
     pending: clearPending ? null : (pending ?? this.pending),
     pendingStep: clearPending ? null : (pendingStep ?? this.pendingStep),
+    pendingTurn: clearPending ? null : (pendingTurn ?? this.pendingTurn),
   );
 }
 
@@ -184,8 +211,10 @@ class MixActivityNotifier extends Notifier<MixActivity> {
     state = state._copy(
       working: {...state.working, sessionId: since},
       steps: {...state.steps}..remove(sessionId),
+      turns: {...state.turns}..remove(sessionId),
     );
     var ended = false;
+    TurnStarted? turn;
     bool mine() =>
         !ended &&
         ref.mounted &&
@@ -197,18 +226,28 @@ class MixActivityNotifier extends Notifier<MixActivity> {
         final current = mine();
         ended = true;
         if (!ref.mounted || generation != _generation) return;
-        if (ready && succeeded) ref.read(mixBackgroundProvider.notifier).landed();
+        if (ready && succeeded) {
+          ref
+              .read(mixBackgroundProvider.notifier)
+              .landed(serverPushes: turn?.push ?? false);
+        }
         state = state._copy(
           working: current
               ? ({...state.working}..remove(sessionId))
               : state.working,
           steps: current ? ({...state.steps}..remove(sessionId)) : state.steps,
+          turns: current ? ({...state.turns}..remove(sessionId)) : state.turns,
           ready: ready ? {...state.ready, sessionId} : state.ready,
         );
       },
       (step) {
         if (!mine()) return;
         state = state._copy(steps: {...state.steps, sessionId: step});
+      },
+      (started) {
+        if (!mine()) return;
+        turn = started;
+        state = state._copy(turns: {...state.turns, sessionId: started});
       },
     );
   }
@@ -224,6 +263,7 @@ class MixActivityNotifier extends Notifier<MixActivity> {
     );
     state = state._copy(clearPending: true)._copy(pending: pending);
     var ended = false;
+    TurnStarted? turn;
     bool mine() =>
         !ended &&
         ref.mounted &&
@@ -236,7 +276,9 @@ class MixActivityNotifier extends Notifier<MixActivity> {
         ended = true;
         if (!ref.mounted || generation != _generation) return;
         if (sessionId != null && succeeded) {
-          ref.read(mixBackgroundProvider.notifier).landed();
+          ref
+              .read(mixBackgroundProvider.notifier)
+              .landed(serverPushes: turn?.push ?? false);
         }
         state = state._copy(
           ready: sessionId == null ? state.ready : {...state.ready, sessionId},
@@ -255,6 +297,11 @@ class MixActivityNotifier extends Notifier<MixActivity> {
           sessionId: sessionId,
         );
         state = state._copy(pending: pending);
+      },
+      (started) {
+        if (!mine()) return;
+        turn = started;
+        state = state._copy(pendingTurn: started);
       },
     );
   }

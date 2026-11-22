@@ -204,6 +204,27 @@ class FakeDjApi implements DjApi, DjSharedMixes {
   void close() {}
 }
 
+/// [FakeDjApi] that attaches to a running turn (durable mix turns): the
+/// attach reports [onAttachProgress] and ends when [attachEnd] does.
+class _AttachingDjApi extends FakeDjApi implements DjTurnAttacher {
+  final attachEnd = Completer<TurnAttachEnd>();
+  final attached = <String>[];
+  List<TurnProgress> onAttachProgress = const [];
+
+  @override
+  Future<TurnAttachEnd> attachTurn(
+    String sessionId, {
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    attached.add(sessionId);
+    onAttachProgress.forEach(onProgress ?? (_) {});
+    return attachEnd.future;
+  }
+
+  @override
+  Future<void> markTurnSeen(String sessionId, String turnId) async {}
+}
+
 /// authProvider settled at session — no keychain restore, no async auth
 /// transition mid-test (home_screen_test.dart's pattern).
 class TestAuthNotifier extends AuthNotifier {
@@ -337,6 +358,75 @@ void main() {
       expect(tileOf(tester, 'a').spinning, isFalse);
       expect(find.byKey(MixHomeRow.readyKey('a')), findsOneWidget);
       expect(find.byKey(MixHomeRow.readyKey('b')), findsNothing);
+    });
+
+    testWidgets('after a relaunch, a mix the server is still running shows '
+        'the DJ at work from the server, and stops once it lands', (
+      tester,
+    ) async {
+      var running = true;
+      final api = _AttachingDjApi()
+        ..onAttachProgress = const [TurnStreamOpened()]
+        ..onListSessions = () async => [
+          DjSession(
+            id: 'a',
+            title: 'Run club',
+            status: 'active',
+            queueVersion: 1,
+            updatedAt: DateTime.now(),
+            turn: running
+                ? const DjSessionTurn(
+                    id: '11111111-1111-4111-8111-111111111111',
+                    status: 'running',
+                    step: 'picking',
+                  )
+                : null,
+          ),
+          _session(id: 'b', title: 'Sunday'),
+        ];
+      final container = _makeContainer(api);
+      await _pump(tester, container, settle: false);
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
+
+      expect(tileOf(tester, 'a').spinning, isTrue);
+      expect(tileOf(tester, 'b').spinning, isFalse);
+      expect(find.text(MixHomeRow.workingSubtitle), findsOneWidget);
+      expect(api.attached, ['a']);
+
+      running = false;
+      api.attachEnd.complete(TurnAttachEnd.result);
+      await tester.pumpAndSettle();
+      expect(tileOf(tester, 'a').spinning, isFalse);
+      expect(find.text(MixHomeRow.workingSubtitle), findsNothing);
+      expect(find.byKey(MixHomeRow.readyKey('a')), findsOneWidget);
+    });
+
+    testWidgets('a running turn from the server shows even with no attach '
+        '(a stand-in that answers nothing running)', (tester) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [
+          DjSession(
+            id: 'a',
+            title: 'Run club',
+            status: 'active',
+            queueVersion: 1,
+            updatedAt: DateTime.now(),
+            turn: const DjSessionTurn(
+              id: '11111111-1111-4111-8111-111111111111',
+              status: 'queued',
+            ),
+          ),
+        ];
+      final container = _makeContainer(api);
+      await _pump(tester, container, settle: false);
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
+      // The read after the attach still says running: the row believes it.
+      expect(tileOf(tester, 'a').spinning, isTrue);
+      expect(find.text(MixHomeRow.workingSubtitle), findsOneWidget);
     });
 
     testWidgets('a turn landing re-reads the list, so its row moves up', (

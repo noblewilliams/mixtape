@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/background/mix_background.dart';
+import 'package:mixtape/data/dj/turn_stream.dart' show TurnStarted;
 import 'package:mixtape/data/push/push_ask_store.dart';
 import 'package:mixtape/data/push/push_service.dart';
 import 'package:mixtape/presentation/providers/push_provider.dart';
@@ -206,5 +207,66 @@ void main() {
     await pumpEventQueue();
     expect(alerts.shown, 0);
     expect(holder.calls.last, 'end');
+  });
+
+  // Durable mix turns (spec 2026-11-21, "Who notifies"): the stream's
+  // `turn` event says whether the server pushes the result.
+  group('the local ping beside the server push', () {
+    test('push: true from the stream means no local ping, for a turn and a '
+        'new mix', () async {
+      build();
+      final end = activity().beginTurn('a');
+      end.started(const TurnStarted('t1', push: true));
+      final made = activity().beginNewMix('rainy commute');
+      made.started(const TurnStarted('t2', push: true));
+      await pumpEventQueue();
+      foreground = false;
+
+      end(ready: true, succeeded: true);
+      made(sessionId: 'b', succeeded: true);
+      await pumpEventQueue();
+      expect(alerts.shown, 0);
+    });
+
+    test('push: false pings as the quick fix built', () async {
+      build();
+      final end = activity().beginTurn('a');
+      end.started(const TurnStarted('t1'));
+      await pumpEventQueue();
+      foreground = false;
+      end(ready: true, succeeded: true);
+      await pumpEventQueue();
+      expect(alerts.shown, 1);
+    });
+
+    test('no turn event (an older server) pings exactly as before', () async {
+      build();
+      final end = activity().beginTurn('a');
+      final made = activity().beginNewMix('rainy commute');
+      await pumpEventQueue();
+      foreground = false;
+      end(ready: true, succeeded: true);
+      made(sessionId: 'b', succeeded: true);
+      await pumpEventQueue();
+      expect(alerts.shown, 2);
+    });
+
+    test('the turn the stream named rides the working entry', () {
+      build();
+      final end = activity().beginTurn('a');
+      end.started(const TurnStarted('t1', push: true));
+      expect(
+        container.read(mixActivityProvider).workingTurn('a'),
+        const TurnStarted('t1', push: true),
+      );
+      final made = activity().beginNewMix('rainy commute');
+      made.started(const TurnStarted('t2'));
+      expect(
+        container.read(mixActivityProvider).pendingTurn,
+        const TurnStarted('t2'),
+      );
+      end(ready: true);
+      expect(container.read(mixActivityProvider).workingTurn('a'), isNull);
+    });
   });
 }

@@ -8,8 +8,8 @@ import '../api/api_client.dart';
 /// the response body of `POST /sessions` and `POST /sessions/:id/messages`
 /// when the client asked with `Accept: text/event-stream`.
 ///
-/// The server sends `session` (create only, first), any number of `step`
-/// events, then exactly one of `result` (today's success body) or `error`
+/// The server sends `session` (create only, first), `turn` (durable turns
+/// only, 2026-11-21), any number of `step` events, then exactly one of `result` (today's success body) or `error`
 /// (`{status, body}`: today's status and error body), with `: keepalive`
 /// comments between. A stream that ends before `result` or `error` is a
 /// dropped connection.
@@ -121,6 +121,40 @@ final class TurnSessionStarted extends TurnProgress {
 
   @override
   String toString() => 'TurnSessionStarted($sessionId)';
+}
+
+/// The durable turn's `turn` event (spec 2026-11-21 durable-mix-turns,
+/// "The new `turn` event"): which turn the stream follows, and whether the
+/// server will push this turn's end to the listener's devices. It comes
+/// after `session` on a create and first on a message turn or an attach. An
+/// older server never sends it.
+final class TurnStarted extends TurnProgress {
+  const TurnStarted(this.turnId, {this.push = false});
+
+  final String turnId;
+
+  /// True when the server pushes the result (this device has a live push
+  /// registration): the app's own "Your mix is ready" then stays quiet.
+  final bool push;
+
+  /// The `turn` event's data, or null when it carries no turn id. A missing
+  /// or mistyped `push` reads as false.
+  static TurnStarted? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = json['turnId'];
+    if (id is! String || id.isEmpty) return null;
+    return TurnStarted(id, push: json['push'] == true);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is TurnStarted && other.turnId == turnId && other.push == push;
+
+  @override
+  int get hashCode => Object.hash(turnId, push);
+
+  @override
+  String toString() => 'TurnStarted($turnId, push: $push)';
 }
 
 /// A `step` event: the DJ started a new kind of work.
@@ -256,11 +290,11 @@ final class TurnStreamMalformed extends TurnStreamEnd {
   const TurnStreamMalformed();
 }
 
-/// Reads a streamed turn from [bytes]: hands each `session` and `step`
-/// event to [onProgress] as it arrives, and answers with the `result` or
+/// Reads a streamed turn from [bytes]: hands each `session`, `turn` and
+/// `step` event to [onProgress] as it arrives, and answers with the `result` or
 /// `error` event as soon as it arrives (the rest of [bytes] is not read).
-/// Unknown events, and `session` or `step` events that do not parse, are
-/// skipped.
+/// Unknown events, and `session`, `turn` or `step` events that do not
+/// parse, are skipped.
 ///
 /// [onProgress] is called synchronously and is not guarded: the caller
 /// passes one that does not throw. Throws [NetworkException] when [bytes]
@@ -276,6 +310,10 @@ Future<TurnStreamEnd> readTurnStream(
         if (TurnSessionStarted.fromJson(_tryDecode(event.data))
             case final started?) {
           onProgress(started);
+        }
+      case 'turn':
+        if (TurnStarted.fromJson(_tryDecode(event.data)) case final turn?) {
+          onProgress(turn);
         }
       case 'step':
         if (TurnStep.fromJson(_tryDecode(event.data)) case final step?) {

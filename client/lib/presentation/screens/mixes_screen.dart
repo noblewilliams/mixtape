@@ -132,8 +132,15 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
   @override
   Set<String> get workingIds {
     final activity = ref.read(mixActivityProvider);
-    final adopted = activity.pending?.adopt(selectableSessions);
-    return {...activity.working.keys, ?adopted};
+    final sessions = selectableSessions;
+    final adopted = activity.pending?.adopt(sessions);
+    return {
+      ...activity.working.keys,
+      ?adopted,
+      // The server's own word, after a relaunch (durable mix turns).
+      for (final session in sessions)
+        if (session.turn?.live ?? false) session.id,
+    };
   }
 
   @override
@@ -618,9 +625,13 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
               isFirst: first,
               // No visible actions button: long-press and the swipe.
               showActionsButton: false,
+              // A turn out from this app, the new mix being made, or one
+              // the server says it is still running (a relaunch, another
+              // device: durable mix turns), until a read says it ended.
               working:
                   activity.working.containsKey(session.id) ||
-                  session.id == adopted,
+                  session.id == adopted ||
+                  (session.turn?.live ?? false),
               ready: activity.ready.contains(session.id),
               onOpen: () => _openConversation(session.id),
               onRename: (title) =>

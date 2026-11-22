@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import '../api/api_client.dart';
 import '../auth/token_store.dart';
@@ -7,7 +8,12 @@ import 'turn_stream.dart';
 import '../playlists/playlist_context_models.dart';
 
 export 'turn_stream.dart'
-    show TurnProgress, TurnSessionStarted, TurnStep, TurnStreamOpened;
+    show
+        TurnProgress,
+        TurnSessionStarted,
+        TurnStarted,
+        TurnStep,
+        TurnStreamOpened;
 
 /// Thrown for DJ-domain errors the server distinguishes with a `kind` (its
 /// `error` field): 502 (upstream LLM/curation hiccup) and 409 'conflict'
@@ -114,6 +120,40 @@ class EmptyMixException implements Exception {
 
   @override
   String toString() => 'EmptyMixException';
+}
+
+/// A retried mix turn (its `Idempotency-Key` already named a turn) that
+/// finished so long ago its answer is no longer kept: the server answered
+/// 204. The turn ran; the session holds what it left, so the caller reads
+/// it again, as after a dropped stream. A [NetworkException] so every
+/// caller that handles a drop handles this too.
+class TurnAnswerGoneException extends NetworkException {
+  TurnAnswerGoneException() : super('The turn finished; its answer is gone.');
+}
+
+/// How attaching to a session's running turn ended
+/// ([DjApiDurableTurns.attachTurn]). Every outcome means the same next
+/// move: read the session again.
+enum TurnAttachEnd {
+  /// Nothing was running (a 204): the turn finished before the attach.
+  notRunning,
+
+  /// The turn's `result` arrived.
+  result,
+
+  /// The turn's `error` arrived (or one that did not parse).
+  error,
+}
+
+/// A fresh random UUID v4: one mix turn's `Idempotency-Key`.
+String newIdempotencyKey() {
+  final random = Random.secure();
+  final b = List.generate(16, (_) => random.nextInt(256));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  final h = b.map((v) => v.toRadixString(16).padLeft(2, '0')).join();
+  return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-'
+      '${h.substring(16, 20)}-${h.substring(20)}';
 }
 
 /// The server's ANONYMOUS_MIX_CAP, used when a cap body omits `limit`.
@@ -425,6 +465,54 @@ class DjApi {
     }
   }
 
+  /// The wire half of [DjApiDurableTurns.attachTurn].
+  Future<TurnAttachEnd> _attachTurn(
+    String sessionId,
+    void Function(TurnProgress progress)? onProgress,
+  ) async {
+    void report(TurnProgress progress) {
+      try {
+        onProgress?.call(progress);
+      } catch (_) {
+        // A caption must never break the attach.
+      }
+    }
+
+    final StreamingReply reply;
+    try {
+      reply = await _client.getEventStream(
+        '/sessions/$sessionId/turn/stream',
+        idleTimeout: _streamIdleTimeout,
+      );
+    } on ApiException catch (e) {
+      throw _translate(e);
+    }
+    switch (reply) {
+      case WholeReply():
+        return TurnAttachEnd.notRunning;
+      case final EventStreamReply stream:
+        report(const TurnStreamOpened());
+        switch (await readTurnStream(stream.bytes, report)) {
+          case TurnStreamResult():
+            return TurnAttachEnd.result;
+          case TurnStreamError(:final status, :final body):
+            // Through the client, so an in-band 401 still signs out.
+            stream.failure(status, body);
+            return TurnAttachEnd.error;
+          case TurnStreamMalformed():
+            return TurnAttachEnd.error;
+        }
+    }
+  }
+
+  /// The wire half of [DjApiDurableTurns.markTurnSeen].
+  Future<void> _markTurnSeen(String sessionId, String turnId) => _callVoid(
+    () => _client.postJson(
+      '/sessions/$sessionId/turn/$turnId/seen',
+      const <String, Object?>{},
+    ),
+  );
+
   // Shared mixes (spec 2026-11-13 shared-mixes, API table). Reached through
   // [DjApiSharedMixes].
 
@@ -548,6 +636,16 @@ class DjApi {
   /// today's mapping; a `result` goes through today's parse; an `error`
   /// throws what today's status and body would have; a dropped or quiet
   /// stream is a [NetworkException], as a timeout is today.
+  ///
+  /// Set once any stream from this server carried a `turn` event: proof it
+  /// runs durable turns and so honours `Idempotency-Key` on a retry.
+  bool _serverHonoursTurnKeys = false;
+
+  /// It carries a fresh `Idempotency-Key` (spec 2026-11-21 durable mix
+  /// turns, "Retries"). A drop before the stream opened is asked once more
+  /// with the same key: a durable server attaches the retry to the turn the
+  /// first request started, rather than start a second. A 204 is that
+  /// retry finding the turn long finished ([TurnAnswerGoneException]).
   Future<T> _streamedTurn<T>(
     String path,
     Map<String, Object?> body,
@@ -555,6 +653,7 @@ class DjApi {
     void Function(TurnProgress progress) onProgress,
   ) async {
     void report(TurnProgress progress) {
+      if (progress is TurnStarted) _serverHonoursTurnKeys = true;
       try {
         onProgress(progress);
       } catch (_) {
@@ -562,17 +661,33 @@ class DjApi {
       }
     }
 
-    final StreamingReply reply;
+    final key = {'Idempotency-Key': newIdempotencyKey()};
+    Future<StreamingReply> open() async {
+      try {
+        return await _client.postEventStream(
+          path,
+          body,
+          idleTimeout: _streamIdleTimeout,
+          extraHeaders: key,
+        );
+      } on ApiException catch (e) {
+        throw _translate(e);
+      }
+    }
+
+    StreamingReply reply;
     try {
-      reply = await _client.postEventStream(
-        path,
-        body,
-        idleTimeout: _streamIdleTimeout,
-      );
-    } on ApiException catch (e) {
-      throw _translate(e);
+      reply = await open();
+    } on NetworkException {
+      // Only a server that has shown it honours the key (a `turn` event)
+      // gets the retry: an older or rolled-back server ignores the key, and
+      // a retry there would make a second mix if the first request landed.
+      if (!_serverHonoursTurnKeys) rethrow;
+      reply = await open();
     }
     switch (reply) {
+      case WholeReply(:final response) when response.statusCode == 204:
+        throw TurnAnswerGoneException();
       case WholeReply(:final response):
         return _parse(response.body, parse);
       case final EventStreamReply stream:
@@ -869,6 +984,53 @@ extension DjApiStopTurn on DjApi {
     final DjTurnStopper stopper => stopper.stopTurn(sessionId),
     _ when _builtByDjApi[this] == true => _stopTurn(sessionId),
     _ => Future.value(false),
+  };
+}
+
+/// What a [DjApi] stand-in implements to answer [DjApiDurableTurns] itself
+/// (the real [DjApi] does not need to).
+abstract interface class DjTurnAttacher {
+  Future<TurnAttachEnd> attachTurn(
+    String sessionId, {
+    void Function(TurnProgress progress)? onProgress,
+  });
+
+  Future<void> markTurnSeen(String sessionId, String turnId);
+}
+
+/// Durable mix turns (spec 2026-11-21 durable-mix-turns).
+///
+/// [attachTurn] follows the session's running turn
+/// (`GET /sessions/:id/turn/stream`) through the same parser as a turn's own
+/// stream: [onProgress] hears [TurnStreamOpened], the [TurnStarted] event and
+/// the latest step, then each step live. It answers once the turn ends, or
+/// at once when nothing is running (a 204); either way the caller reads the
+/// session again. A dropped attach is a [NetworkException]; other failures
+/// are [DjApi]'s usual exits.
+///
+/// [markTurnSeen] tells the server the turn's result was on screen, so it
+/// does not push it (`POST /sessions/:id/turn/:turnId/seen`).
+///
+/// An extension for the reason [DjApiRemake] gives. A stand-in implements
+/// [DjTurnAttacher]; any other stand-in answers as an older server's
+/// nothing-running would, and sees nothing.
+extension DjApiDurableTurns on DjApi {
+  Future<TurnAttachEnd> attachTurn(
+    String sessionId, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => switch (this) {
+    final DjTurnAttacher attacher => attacher.attachTurn(
+      sessionId,
+      onProgress: onProgress,
+    ),
+    _ when _builtByDjApi[this] == true => _attachTurn(sessionId, onProgress),
+    _ => Future.value(TurnAttachEnd.notRunning),
+  };
+
+  Future<void> markTurnSeen(String sessionId, String turnId) => switch (this) {
+    final DjTurnAttacher attacher => attacher.markTurnSeen(sessionId, turnId),
+    _ when _builtByDjApi[this] == true => _markTurnSeen(sessionId, turnId),
+    _ => Future.value(),
   };
 }
 

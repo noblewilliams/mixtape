@@ -58,6 +58,53 @@ class AlbumSummary {
   );
 }
 
+/// The session's current turn while the server runs it (spec 2026-11-21
+/// durable mix turns, "Session reads"): `GET /sessions` rows and
+/// `GET /sessions/:id`'s `session` carry it while the turn is queued or
+/// running, and omit it otherwise (and always on an older server).
+class DjSessionTurn {
+  const DjSessionTurn({required this.id, required this.status, this.step});
+
+  final String id;
+
+  /// `queued` or `running` (another value a newer server sends is kept).
+  final String status;
+
+  /// The latest step's name (`picking`), or null before the first.
+  final String? step;
+
+  /// Whether the DJ is still on it.
+  bool get live => status == 'queued' || status == 'running';
+
+  /// Null when [json] is not an object with a string `id` and `status`: a
+  /// malformed field never fails the read it rides on.
+  static DjSessionTurn? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = json['id'];
+    final status = json['status'];
+    if (id is! String || id.isEmpty || status is! String) return null;
+    final step = json['step'];
+    return DjSessionTurn(
+      id: id,
+      status: status,
+      step: step is String && step.isNotEmpty ? step : null,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is DjSessionTurn &&
+      other.id == id &&
+      other.status == status &&
+      other.step == step;
+
+  @override
+  int get hashCode => Object.hash(id, status, step);
+
+  @override
+  String toString() => 'DjSessionTurn($id, $status, step: $step)';
+}
+
 class DjSession {
   const DjSession({
     required this.id,
@@ -70,7 +117,12 @@ class DjSession {
     this.kind = SessionKind.mix,
     this.pick,
     this.shared = false,
+    this.turn,
   });
+
+  /// The turn the server is running on this mix, if one is (durable mix
+  /// turns); null otherwise and on an older server.
+  final DjSessionTurn? turn;
 
   /// The mix has a live, unrevoked share link (`GET /sessions`, added for
   /// select and delete mixes 2026-11-16). Older servers omit it: false.
@@ -110,6 +162,8 @@ class DjSession {
     SessionKind? kind,
     AlbumSummary? pick,
     bool? shared,
+    DjSessionTurn? turn,
+    bool clearTurn = false,
   }) => DjSession(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -121,6 +175,7 @@ class DjSession {
     kind: kind ?? this.kind,
     pick: pick ?? this.pick,
     shared: shared ?? this.shared,
+    turn: clearTurn ? null : (turn ?? this.turn),
   );
 
   factory DjSession.fromJson(Map<String, dynamic> json) => DjSession(
@@ -136,6 +191,7 @@ class DjSession {
         ? null
         : AlbumSummary.fromJson(json['pick'] as Map<String, dynamic>),
     shared: json['shared'] as bool? ?? false,
+    turn: DjSessionTurn.fromJson(json['turn']),
   );
 }
 

@@ -6,8 +6,9 @@
 /// 30 s more, the turn's stream stays open, and most turns land. One that
 /// lands while the app is in the background posts "Your mix is ready".
 ///
-/// A turn longer than that grace is still lost to a closed app; running
-/// turns off the request (a durable job + server push) is its own spec.
+/// A turn longer than that grace is carried by the server's durable turn and
+/// its push (spec 2026-11-21); a turn whose stream said the server pushes it
+/// posts no local ping ([MixBackgroundNotifier.landed]).
 library;
 
 import 'dart:async';
@@ -97,7 +98,13 @@ class MixBackgroundNotifier extends Notifier<bool> {
 
   /// A mix turn landed. Call before the turn stops counting as out, so the
   /// task outlives the ping.
-  void landed() {
+  ///
+  /// [serverPushes] is the turn's `turn` event saying `push: true` (spec
+  /// 2026-11-21 durable mix turns, "Who notifies"): the server tells the
+  /// listener itself, so no local ping. A turn with no `turn` event (an
+  /// older server) pings as it always did.
+  void landed({bool serverPushes = false}) {
+    if (serverPushes) return;
     if (ref.read(appInForegroundProvider)()) return;
     _posting++;
     final alerts = ref.read(mixReadyAlertsProvider);
