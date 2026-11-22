@@ -17,6 +17,7 @@ import { playlistEditDraftRoutes } from './routes/playlist-edit-drafts'
 import { enrichRoutes } from './routes/enrich'
 import { enrichSeedRoutes, type EnrichSeedDeps } from './routes/enrich-seed'
 import { sessionRoutes } from './routes/sessions'
+import type { DurableTurnsWiring } from './routes/turns'
 import { sharedRoutes } from './routes/shared'
 import { sharedMixesRoutes } from './routes/shared-mixes'
 import { listenLaterRoutes } from './routes/listen-later'
@@ -99,6 +100,7 @@ export function createApp({
   shares,
   aiConsent = 'off',
   djPaused = false,
+  durableTurns,
   allowedOrigins = [],
 }: {
   auth: AuthLike
@@ -118,6 +120,9 @@ export function createApp({
   // DJ_PAUSED in wrangler.jsonc: true refuses every request that would reach
   // the model (middleware/require-dj-open.ts) and reports it on /health.
   djPaused?: boolean
+  // DURABLE_TURNS in wrangler.jsonc: present, mix turns run in the session's
+  // TurnRunner object (routes/turns.ts). Absent, on the request as before.
+  durableTurns?: DurableTurnsWiring
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -264,7 +269,7 @@ export function createApp({
       app.use('/sessions/:id/messages', requireDjOpen(djPaused, autoPaused))
       app.use('/sessions', requireAiConsent(db, aiConsent))
       app.use('/sessions/:id/messages', requireAiConsent(db, aiConsent))
-      app.route('/sessions', sessionRoutes(db, dj.deps, albums?.deps, shares ? { baseUrl: shares.baseUrl } : undefined))
+      app.route('/sessions', sessionRoutes(db, dj.deps, albums?.deps, shares ? { baseUrl: shares.baseUrl } : undefined, undefined, durableTurns))
     }
 
     // Public: anyone with the link reads it; a session, when present, only

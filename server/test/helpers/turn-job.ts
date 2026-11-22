@@ -106,7 +106,7 @@ export async function queueMessageTurn(db: TestDb, sessionId: string, text: stri
   const userMessageSeq = await insertUserMessage(db, sessionId, text)
   const [turn] = await db.insert(djTurns).values({ sessionId, userId: 'u1', kind }).returning()
   await db.update(djSessions).set({ currentTurnId: turn.id }).where(eq(djSessions.id, sessionId))
-  return { turnId: turn.id, sessionId, userId: 'u1', kind, userMessageSeq, text, options: { surface: 'web' } }
+  return { turnId: turn.id, sessionId, userId: 'u1', kind, userMessageSeq, options: { surface: 'web' } }
 }
 
 export async function queueCreateTurn(db: TestDb, prompt: string): Promise<TurnJob> {
@@ -115,7 +115,7 @@ export async function queueCreateTurn(db: TestDb, prompt: string): Promise<TurnJ
   const userMessageSeq = await insertUserMessage(db, session.id, prompt)
   const [turn] = await db.insert(djTurns).values({ sessionId: session.id, userId: 'u1', kind: 'create' }).returning()
   await db.update(djSessions).set({ currentTurnId: turn.id }).where(eq(djSessions.id, session.id))
-  return { turnId: turn.id, sessionId: session.id, userId: 'u1', kind: 'create', userMessageSeq, text: prompt, fallbackTitle, options: { surface: 'web' } }
+  return { turnId: turn.id, sessionId: session.id, userId: 'u1', kind: 'create', userMessageSeq, options: { surface: 'web' } }
 }
 
 export async function turnRow(db: TestDb, id: string) {

@@ -46,6 +46,10 @@ export type TurnStreamTurn = { turnId: string; push: boolean }
 
 const frame = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
 
+// The create's first event. The durable path's Worker writes it ahead of the
+// object's stream (routes/turns.ts), so it is framed here, once.
+export const sessionFrame = (session: unknown) => frame('session', { session })
+
 // The headers every turn stream answers with.
 export function turnStreamResponse(readable: ReadableStream<Uint8Array>): Response {
   return new Response(readable, {
@@ -131,7 +135,7 @@ export class TurnStreamWriter {
   }
 
   session(session: unknown): void {
-    void this.send(frame('session', { session }))
+    void this.send(sessionFrame(session))
   }
 
   turn(turn: TurnStreamTurn): void {

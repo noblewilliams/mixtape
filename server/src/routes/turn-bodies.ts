@@ -5,6 +5,7 @@ import { runDjTurn, DjError, type DjDeps, type DjSessionRef, type DjTurnOptions 
 import { TurnStopped } from '../dj/turn-stop'
 import { generateMixTitle, generateSessionTitle, type MixTitleSong } from '../dj/title'
 import { readPlaylistSeed } from '../playlists/seed'
+import { sanitizeTitleText } from '../dj/sanitize'
 import type { TurnReply } from './turn-stream'
 
 // A mix turn and the body it answers with, shared by every way a turn is
@@ -41,6 +42,17 @@ export function djErrorBody(e: DjError, extra: Record<string, unknown> = {}) {
   // stale AppBar title until its next unrelated fetch self-heals it — see
   // dj/loop.ts's DjError.sessionTitle comment.
   return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, sessionTitle: e.sessionTitle, ...extra }
+}
+
+// Thin wrapper over sanitizeTitleText (dj/sanitize.ts) with a non-empty
+// fallback — the one thing that step doesn't itself decide, since PATCH
+// /sessions/:id and the rename_session tool both want a REJECTION on an
+// empty-after-sanitize title instead of a silent fallback. Exported for
+// scripts/retitle-sessions.ts (through routes/sessions.ts), which needs the exact same transform to
+// recognize a session whose title is still this fallback (never overwritten
+// by a generated title) as a backfill candidate.
+export function titleFromPrompt(prompt: string): string {
+  return sanitizeTitleText(prompt) || 'new session'
 }
 
 // The list-row shape: what GET /sessions returns per row, and what POST /

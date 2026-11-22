@@ -459,10 +459,10 @@ function buildRequestApp(db: Db, env: Bindings) {
   const transcribe = buildTranscribe(env)
   const accountDeletion = { apple: buildAppleRevoke(env) }
   const shares = buildShares(env)
-  // Checked on every request so a missing binding fails loudly. Nothing
-  // routes to the object yet: S5 hands the runner to the session routes.
-  buildDurableTurns(env)
-  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), djPaused: djPausedMode(env), allowedOrigins })
+  // Checked on every request so a missing binding fails loudly.
+  const durable = buildDurableTurns(env)
+  const durableTurns = durable ? { ...durable, push: { TURN_PUSH: env.TURN_PUSH } } : undefined
+  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), djPaused: djPausedMode(env), durableTurns, allowedOrigins })
 }
 
 // The Durable Object the platform instantiates, one per session (spec
@@ -522,6 +522,9 @@ export default {
           ? { catalog: musicKit.catalog, defaultStorefront: env.ITUNES_STOREFRONT ?? 'ng' }
           : undefined,
         spotifyArtwork,
+        // Lost durable turns (dj/turn-sweep.ts): swept whatever DURABLE_TURNS
+        // says, so a turn left behind by a flip back to off still ends.
+        turns: {},
       }) }))
       // While the DJ is paused for billing, one tiny call per run checks
       // whether credits are back and reopens it (dj/auto-pause.ts).

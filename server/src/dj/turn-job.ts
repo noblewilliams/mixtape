@@ -1,10 +1,10 @@
 import { and, eq, inArray, lt, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
-import { djSessions, djTurns } from '../db/schema'
+import { djMessages, djSessions, djTurns } from '../db/schema'
 import type { DjDeps, DjTurnOptions, PersistedTurnWrites } from './loop'
 import { rollbackTurn, type TurnStopTiming } from './turn-stop'
 import type { TurnStepEvent } from './turn-steps'
-import { createMixTurn, mixMessageTurn, type MixTurnEnd } from '../routes/turn-bodies'
+import { createMixTurn, mixMessageTurn, titleFromPrompt, type MixTurnEnd } from '../routes/turn-bodies'
 import { INTERNAL_TURN_REPLY, type TurnReply } from '../routes/turn-stream'
 
 // The durable mix turn, apart from any platform (spec 2026-11-21
@@ -20,23 +20,27 @@ export const MAX_ATTEMPTS = 2
 // heartbeat is older than 90 s reads as lost (spec, "Status rules").
 export const TURN_HEARTBEAT_MS = 15_000
 
-// What the object holds until the turn ends. The listener's message row is
-// already written (persist-first, by the Worker), so a re-run answers the
-// same row. `session` is the create's list row, the stream's first event.
-// `push` says whether the server will push this turn's end (the stream's
-// `turn` event); S6 computes it, absent is false.
-type TurnJobBase = {
+// A turn whose heartbeat (or, while queued, its created_at) is older than
+// this is lost: readers omit it and the maintenance sweep fails it.
+export const TURN_LOST_MS = 90_000
+
+// What the object holds until the turn ends: ids and switches only, never
+// the listener's words (they sit in dj_messages, written persist-first by
+// the Worker, and runTurnJob reads them from there by seq, so a re-run
+// answers the same row). A create's fallback title and its `session` list
+// row are derived from that row too, the latter by the Worker, which sends
+// the stream's `session` event itself. `push` says whether the server will
+// push this turn's end (the stream's `turn` event); S6 computes it, absent
+// is false.
+export type TurnJob = {
   turnId: string
   sessionId: string
   userId: string
+  kind: 'create' | 'message' | 'remake'
   userMessageSeq: number
-  text: string
   options: { energyArc?: DjTurnOptions['energyArc']; surface?: DjTurnOptions['surface']; remake?: boolean }
   push?: boolean
 }
-export type TurnJob =
-  | (TurnJobBase & { kind: 'create'; fallbackTitle: string; session?: unknown })
-  | (TurnJobBase & { kind: 'message' | 'remake' })
 
 // Who is watching the turn. onEnd resolves true when at least one watcher
 // took the last event (what notify reads as "the client saw it").
@@ -271,13 +275,26 @@ async function sessionExists(db: Db, sessionId: string): Promise<boolean> {
   return row !== undefined
 }
 
+// The listener's words for this turn: their message row, by seq.
+async function messageText(db: Db, job: TurnJob): Promise<string> {
+  const [row] = await db
+    .select({ content: djMessages.content })
+    .from(djMessages)
+    .where(and(eq(djMessages.sessionId, job.sessionId), eq(djMessages.seq, job.userMessageSeq), eq(djMessages.role, 'user')))
+  // Gone with its session (deleted under the turn): the finish then reads
+  // the session gone. Anything else is an internal failure.
+  if (!row) throw new Error('turn job message missing')
+  return row.content
+}
+
 // The turn exactly as the routes run it (routes/sessions.ts), through the
 // same builders, so the job's result and error bodies are the routes'.
-function runTurn(
+async function runTurn(
   job: TurnJob,
   io: TurnJobIo,
   hooks: Pick<DjTurnOptions, 'onStep' | 'recordWrites'>,
 ) {
+  const text = await messageText(io.db, job)
   const options: DjTurnOptions = {
     energyArc: job.options.energyArc,
     surface: job.options.surface,
@@ -287,7 +304,7 @@ function runTurn(
     ...(io.stopTiming ? { stopTiming: io.stopTiming } : {}),
   }
   if (job.kind === 'create') {
-    return createMixTurn(io.db, io.deps, { id: job.sessionId }, job.userId, job.text, job.fallbackTitle, options)
+    return createMixTurn(io.db, io.deps, { id: job.sessionId }, job.userId, text, titleFromPrompt(text), options)
   }
-  return mixMessageTurn(io.db, io.deps, { id: job.sessionId, userId: job.userId }, job.text, options)
+  return mixMessageTurn(io.db, io.deps, { id: job.sessionId, userId: job.userId }, text, options)
 }

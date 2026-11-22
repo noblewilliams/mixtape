@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { TAPE_CASE_COLORS } from '../dj/tape-colors'
 import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { mixHistoryRoutes } from './mix-history'
@@ -10,7 +11,7 @@ import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../d
 import { insertUserMessage, type DjDeps, type DjSessionRef, type DjTurnOptions } from '../dj/loop'
 import { requestStop, type TurnStopTiming } from '../dj/turn-stop'
 import { streamTurn, wantsTurnStream } from './turn-stream'
-import { createMixTurn, mixMessageTurn, sessionListColumns, sessionListRow } from './turn-bodies'
+import { createMixTurn, mixMessageTurn, sessionListColumns, sessionListRow, titleFromPrompt } from './turn-bodies'
 import { runAlbumTurn, AlbumTurnError, type AlbumDeps, type AlbumTurnResult } from '../albums/loop'
 import { AlbumStoreError, choosePick, goBack, readPickState, type AlbumPickState } from '../albums/store'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
@@ -19,6 +20,18 @@ import { generateSessionTitle } from '../dj/title'
 import { isUsableName } from '../auth/profile-name'
 import { createOrReuseShare, hasActiveShare, revokeShares } from '../shares/store'
 import { sanitizeTitleText } from '../dj/sanitize'
+import {
+  INVALID_IDEMPOTENCY_KEY,
+  isUniqueViolation,
+  liveTurnColumn,
+  queueTurnRow,
+  readIdempotencyKey,
+  readLiveTurn,
+  replayForKey,
+  startDurableTurn,
+  turnRoutes,
+  type DurableTurnsWiring,
+} from './turns'
 import { bodyLimit } from 'hono/body-limit'
 import { ANONYMOUS_MIX_CAP, countUserSessions, createSessionWithPlaylistSeed, initialSeedSchema, PlaylistSeedError, readPlaylistSeed, selectPlaylistSeed, seedSelectionSchema } from '../playlists/seed'
 
@@ -33,16 +46,10 @@ function isUuid(value: string): boolean {
   return UUID_RE.test(value)
 }
 
-// Thin wrapper over sanitizeTitleText (dj/sanitize.ts) with a non-empty
-// fallback — the one thing that step doesn't itself decide, since PATCH
-// /sessions/:id and the rename_session tool both want a REJECTION on an
-// empty-after-sanitize title instead of a silent fallback. Exported for
-// scripts/retitle-sessions.ts, which needs the exact same transform to
-// recognize a session whose title is still this fallback (never overwritten
-// by a generated title) as a backfill candidate.
-export function titleFromPrompt(prompt: string): string {
-  return sanitizeTitleText(prompt) || 'new session'
-}
+// titleFromPrompt lives beside the turn builders (turn-bodies.ts), since the
+// durable turn job derives a create's fallback title from the stored prompt
+// too; re-exported here for scripts/retitle-sessions.ts.
+export { titleFromPrompt }
 
 async function loadOwnedSession(db: Db, sessionId: string, userId: string) {
   if (!isUuid(sessionId)) return null
@@ -165,8 +172,28 @@ export function requestSurface(userAgent: string | undefined): 'ios' | 'web' {
 // share carries SHARE_BASE_URL; absent, the share routes are not mounted.
 
 // stopTiming is for tests: how a stop request waits for the turn to let go.
-export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share?: { baseUrl: string }, stopTiming?: TurnStopTiming) {
+// durable is present only with DURABLE_TURNS on (src/index.ts): mix turns
+// then run in the session's TurnRunner object (routes/turns.ts). Absent,
+// every path below is the in-request one.
+export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share?: { baseUrl: string }, stopTiming?: TurnStopTiming, durable?: DurableTurnsWiring) {
   const app = new Hono<{ Variables: AppVars }>()
+
+  // Reads the Idempotency-Key and attaches a replay to its turn (spec
+  // 2026-11-21 durable-mix-turns, "Start", 1). `response` answers the
+  // request (a 400, or the replay); otherwise `turnId` is the new turn's id.
+  async function keyedTurn(
+    c: Context<{ Variables: AppVars }>,
+    durable: DurableTurnsWiring,
+    scope: { userId: string; sessionId?: string },
+  ): Promise<{ response: Response } | { response?: undefined; turnId: string; keyed: boolean }> {
+    const read = readIdempotencyKey(c)
+    if (!read.ok) return { response: c.json(INVALID_IDEMPOTENCY_KEY, 400) }
+    if (read.key) {
+      const replay = await replayForKey(c, db, durable, read.key, scope)
+      if (replay) return { response: replay }
+    }
+    return { turnId: read.key ?? randomUUID(), keyed: read.key !== undefined }
+  }
 
   // Permanent delete of the listener's chosen mixes (select mode on the
   // Mixes list). Registered before mix history, whose '/:id/*' guard would
@@ -274,6 +301,8 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
     return c.json({ stopped: await requestStop(db, session.id, stopTiming) })
   })
 
+  if (durable) app.route('/', turnRoutes(db, durable, (id, userId) => loadOwnedSession(db, id, userId)))
+
   app.put('/:id/playlist-seed', bodyLimit({ maxSize: 2048 }), zValidator('json', seedSelectionSchema), async c => {
     const id = c.req.param('id')
     if (!isUuid(id)) return c.json({ error: 'not_found' }, 404)
@@ -295,6 +324,13 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
       if (isAnonymous) return c.json({ error: 'anonymous_albums' }, 403)
       return createAlbumSession(c, albumDeps, userId, prompt, playlistSeed)
     }
+    // A replay is answered before the cap: the mix it names already counts.
+    let keyed: { turnId: string; keyed: boolean } | undefined
+    if (durable) {
+      const read = await keyedTurn(c, durable, { userId })
+      if (read.response) return read.response
+      keyed = { turnId: read.turnId, keyed: read.keyed }
+    }
     // Checked before any insert or model call: a capped request costs one
     // count and nothing else. Only new mixes are capped; follow-ups, queue
     // ops and edits on an existing session are not.
@@ -302,6 +338,41 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
       return c.json({ error: 'anonymous_cap', limit: ANONYMOUS_MIX_CAP }, 403)
     }
     const fallbackTitle = titleFromPrompt(prompt)
+
+    // Durable: the session, the listener's message, the queued turn and the
+    // session's pointer to it, in one transaction, then the object runs it.
+    if (durable && keyed) {
+      const turnId = keyed.turnId
+      let created
+      try {
+        created = await db.transaction(async (raw) => {
+          const tx = raw as unknown as Db
+          const row = await createSessionWithPlaylistSeed(tx, userId, fallbackTitle, playlistSeed)
+          const userMessageSeq = await insertUserMessage(tx, row.id, prompt)
+          const previousTurnId = await queueTurnRow(tx, { id: turnId, sessionId: row.id, userId, kind: 'create' })
+          return { row, userMessageSeq, previousTurnId }
+        })
+      } catch (e) {
+        if (e instanceof PlaylistSeedError) return c.json({ error: e.kind }, e.kind === 'not_found' ? 404 : 409)
+        // Two requests raced one key: this one's rows rolled back; answer
+        // with the winner's turn.
+        if (keyed.keyed && isUniqueViolation(e)) {
+          const replay = await replayForKey(c, db, durable, turnId, { userId })
+          if (replay) return replay
+        }
+        throw e
+      }
+      return startDurableTurn(c, db, durable, {
+        id: turnId,
+        sessionId: created.row.id,
+        userId,
+        kind: 'create',
+        userMessageSeq: created.userMessageSeq,
+        options: { energyArc, surface: requestSurface(c.req.header('User-Agent')) },
+        previousTurnId: created.previousTurnId,
+        session: sessionListRow(created.row),
+      })
+    }
 
     // Persist-first: the session row and the user's own message exist
     // before the first turn runs — a failure below still leaves the
@@ -365,6 +436,8 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
           ORDER BY ap.version DESC
           LIMIT 1
         )`,
+        // Durable turns: the current turn while it runs (routes/turns.ts).
+        ...(durable ? { turn: liveTurnColumn() } : {}),
       })
       .from(djSessions)
       .leftJoin(
@@ -377,7 +450,12 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
       .orderBy(desc(djSessions.updatedAt))
       .limit(50)
     return c.json({
-      sessions: sessions.map(({ pick, ...row }) => (row.kind === 'album' ? { ...row, pick: pick ?? null } : row)),
+      sessions: sessions.map(({ pick, ...listed }) => {
+        // `turn` is present only while a turn runs, never null.
+        const { turn, ...row } = listed as typeof listed & { turn?: unknown }
+        const withTurn = turn ? { ...row, turn } : row
+        return row.kind === 'album' ? { ...withTurn, pick: pick ?? null } : withTurn
+      }),
     })
   })
 
@@ -411,12 +489,14 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
     // strictly. A client talking to an older deploy simply never sees the
     // key and keeps Undo hidden.
     // shared: an active share exists, for the Stop sharing menu item.
-    const [playlistSeed, shared] = await Promise.all([
+    const [playlistSeed, shared, turn] = await Promise.all([
       readPlaylistSeed(db, session.id, userId),
       hasActiveShare(db, session.id),
+      durable ? readLiveTurn(db, session.currentTurnId) : null,
     ])
     return c.json({
-      session,
+      // The current turn while it runs (durable turns), never null.
+      session: turn ? { ...session, turn } : session,
       messages,
       queue,
       supportsInsert: true,
@@ -515,6 +595,42 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
         if (e instanceof AlbumTurnError) return c.json(albumErrorBody(e), albumErrorStatus(e.kind))
         throw e
       }
+    }
+    // Durable: the listener's message, the queued turn and the session's
+    // pointer in one transaction, then the session's object runs it.
+    if (durable) {
+      const read = await keyedTurn(c, durable, { userId, sessionId: session.id })
+      if (read.response) return read.response
+      const turnId = read.turnId
+      const kind = remake === true ? 'remake' : 'message'
+      let queued
+      try {
+        queued = await db.transaction(async (raw) => {
+          const tx = raw as unknown as Db
+          const userMessageSeq = await insertUserMessage(tx, session.id, text)
+          const previousTurnId = await queueTurnRow(tx, { id: turnId, sessionId: session.id, userId, kind })
+          return { userMessageSeq, previousTurnId }
+        })
+      } catch (e) {
+        if (read.keyed && isUniqueViolation(e)) {
+          const replay = await replayForKey(c, db, durable, turnId, { userId, sessionId: session.id })
+          if (replay) return replay
+        }
+        throw e
+      }
+      return startDurableTurn(c, db, durable, {
+        id: turnId,
+        sessionId: session.id,
+        userId,
+        kind,
+        userMessageSeq: queued.userMessageSeq,
+        options: {
+          energyArc,
+          surface: requestSurface(c.req.header('User-Agent')),
+          ...(remake === true ? { remake: true } : {}),
+        },
+        previousTurnId: queued.previousTurnId,
+      })
     }
     // Persist-first, after every refusal: the listener's words are kept
     // whatever the turn does.

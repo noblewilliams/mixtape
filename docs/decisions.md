@@ -2298,3 +2298,58 @@ separately.
 
 **Reopens if:** turns routinely outlast the grace (logs or listener
 reports), or the first-mix permission prompt hurts first-run completion.
+
+## 2026-11-22 — Mix turns run off the request in a Durable Object per session
+
+A mix turn takes 20 to 50 s (159 s seen), and it ran on the request that
+asked for it. A client that dropped left the turn `waitUntil`'s 30 s, and
+iOS suspends a backgrounded app within seconds, so a listener who locked the
+phone could lose the mix halfway with nothing to say so (the founder's
+report on 2026-11-21 met the turn-steps spec's reopen clause). Spec
+`superpowers/specs/2026-11-21-durable-mix-turns-design.md`, plan
+`superpowers/plans/2026-11-22-durable-mix-turns.md`.
+
+- **A `TurnRunner` Durable Object per session runs the turn on its alarm**
+  (15-minute wall clock). Chosen over Workflows and Queues because only the
+  object can hold the live stream: the Worker returns the object's watch
+  stream as its own, so clients get today's bytes plus one `turn` event, and
+  a relaunched app can attach to a running turn. One object per session also
+  serialises turns, as the stop claim does.
+- **Gate 0 (2026-11-22, a throwaway Worker):** APNs over HTTP/2 from a
+  Worker works; a deploy during a 60 s and a 170 s alarm let both finish on
+  the old version with no retry; a watch proxied Worker → object streamed
+  live, and a client drop failed the object's next write about 1 s later
+  while the job ran on.
+- **`dj_turns` holds one row per turn**: status, step name, heartbeat,
+  attempt, the writes a rollback must undo, `watched_result`, `seen_at`.
+  The client's `Idempotency-Key` (a UUID) is the turn id, so a retried POST
+  attaches to the same turn rather than making a second mix; another
+  listener's key, another session's, or a non-UUID is a 400. Old builds
+  send none and the server mints one. Persist-first is one transaction: the
+  session (create), the listener's message, the queued turn and
+  `current_turn_id`.
+- **One automatic re-run** (`MAX_ATTEMPTS = 2`): a platform retry claims the
+  next attempt with a conditional UPDATE, rolls back the dead attempt's
+  persisted writes (keeping the listener's message), and runs clean. A
+  second death, or a turn whose heartbeat is 90 s stale, is `failed('lost')`.
+  Our own errors are caught and answered, never rethrown into a retry.
+- **Behind `DURABLE_TURNS`** (exact `"on"`; the binding is required then,
+  as `buildShares` requires its own). Off, every path is the in-request one.
+  Album turns stay on the request either way.
+- **Implementation choices (S4/S5):** an outcome `'gone'` for a turn whose
+  session was deleted under it (nothing to tell anyone); lost turns roll back
+  best effort, and the hourly maintenance cron sweeps them; the start's own
+  watch uses `?replay=1`, so a turn that finished before it attached still
+  sends its last event for 60 s; a cleanup alarm then strips the cached
+  reply (the only stored copy of the listener's words in the object); the
+  object's job holds ids and switches only, and the job reads the words from
+  `dj_messages` by seq; `watched_result` means a watcher read the final
+  event within 2 s; a busy object answers today's 409 conflict body and
+  fails the queued row. Session reads carry `turn: { id, status, step }`
+  while a turn is queued or running and not lost, and omit it otherwise.
+
+**Reopens if:** turn logs show `attempt > 1` or `lost` often enough that one
+re-run is the wrong number; a turn ever needs more than the alarm's 15
+minutes; the turn is split into replayable steps (Workflows then become the
+better runner); or the object's placement, near the first caller, proves
+slow against Neon (`locationHint`, on the backlog).

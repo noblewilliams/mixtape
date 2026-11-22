@@ -415,6 +415,44 @@ describe('runTurnJob', () => {
     expect(await turnRow(db, job.turnId)).toBeUndefined()
   })
 
+  it('reads the listener\'s words from their message row by seq, never from the job', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 'u1', 4)
+    const sessionId = await mixSession(db)
+    const job = await queueMessageTurn(db, sessionId, 'a rainy drive')
+    expect(JSON.stringify(job)).not.toMatch(/rainy/)
+    const seen: string[] = []
+    const llm: LlmClient = async (req) => {
+      if (req.tools.length > 0) seen.push(JSON.stringify(req.messages))
+      return scriptedLlm([{ text: 'on it.' }])(req)
+    }
+
+    const result = await runTurnJob(job, { db, deps: { embed, llm }, watchers: watchers() })
+
+    expect(result).toMatchObject({ outcome: 'done' })
+    expect(seen[0]).toMatch(/a rainy drive/)
+  })
+
+  it('a job whose message row is missing fails internal, without running', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const sessionId = await mixSession(db)
+    const job = await queueMessageTurn(db, sessionId, 'hello')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    let calls = 0
+    const llm: LlmClient = async () => {
+      calls += 1
+      throw new Error('never')
+    }
+
+    const result = await runTurnJob({ ...job, userMessageSeq: job.userMessageSeq + 50 }, { db, deps: { embed, llm }, watchers: watchers() })
+
+    expect(result).toMatchObject({ outcome: 'failed', status: 500, errorKind: 'internal' })
+    expect(calls).toBe(0)
+    expect(await turnRow(db, job.turnId)).toMatchObject({ status: 'failed', errorKind: 'internal' })
+  })
+
   it('watchedResult is false when no watcher took the last event', async () => {
     const db = await createTestDb()
     await seedUser(db)

@@ -5,7 +5,6 @@ import { embed, generate, mixSession, queueCreateTurn, queueMessageTurn, scripte
 import { eventsOnly, parseSse, readEvents } from '../helpers/sse'
 import { FINAL_REPLAY_MS, TurnRunnerCore, type TurnRunnerShell, type TurnRunnerStorage } from '../../src/dj/turn-runner'
 import type { DjDeps } from '../../src/dj/loop'
-import type { TurnJob } from '../../src/dj/turn-job'
 import type { TurnStepEvent } from '../../src/dj/turn-steps'
 import { streamTurn, TurnStreamWriter } from '../../src/routes/turn-stream'
 import { buildDurableTurns, durableTurnsEnabled } from '../../src/index'
@@ -99,25 +98,27 @@ describe('TurnRunnerCore', () => {
     expect((await turnRow(db, job.turnId)).status).toBe('done')
   })
 
-  it('a create turn streams session first, then turn', async () => {
+  it('a create turn streams turn first (the Worker sends session), and the object holds no words', async () => {
     const db = await createTestDb()
     await seedUser(db)
     await seedLibrary(db, 'u1', 4)
     const job = await queueCreateTurn(db, 'a rainy drive')
     const runner = fakeRunner(db, { embed, llm: scriptedLlm(generate(3)) })
-    const session = { id: job.sessionId, title: 'a rainy drive' }
 
-    await runner.core.start({ ...job, kind: 'create', fallbackTitle: 'a rainy drive', session } as TurnJob)
+    await runner.core.start(job)
+    // Ids and switches only: the prompt is read from its message row.
+    expect(JSON.stringify(runner.storage.map.get('job'))).not.toMatch(/rainy/)
     const res = await watch(runner.core, job.turnId)
     const text = res.text()
-    await runner.core.alarm()
+    const result = await runner.core.alarm()
 
     const events = eventsOnly(parseSse(await text))
-    expect(events.slice(0, 2).map((e) => [e.event, e.data])).toEqual([
-      ['session', { session }],
-      ['turn', { turnId: job.turnId, push: false }],
-    ])
+    expect(events[0]).toMatchObject({ event: 'turn', data: { turnId: job.turnId, push: false } })
+    expect(events.some((e) => e.event === 'session')).toBe(false)
     expect(events[events.length - 1].event).toBe('result')
+    expect(result).toMatchObject({ outcome: 'done', status: 200 })
+    // The fallback title came from the stored prompt.
+    expect((result as { body: { messages: Array<{ content: string }> } }).body.messages[0].content).toBe('a rainy drive')
   })
 
   it('answers busy while another turn is held, and started again for the same turn', async () => {

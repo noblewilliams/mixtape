@@ -1,6 +1,7 @@
 import type { Db } from '../db/types'
 import type { DjDeps } from './loop'
 import type { TurnStepEvent } from './turn-steps'
+import type { TurnStopTiming } from './turn-stop'
 import { abandonTurn, runTurnJob, type TurnJob, type TurnJobResult } from './turn-job'
 import { INTERNAL_TURN_REPLY, TurnStreamWriter, turnStreamResponse, type TurnReply } from '../routes/turn-stream'
 
@@ -33,13 +34,15 @@ export type TurnRunnerShell = {
   // read the last event before it counts as not seen.
   keepaliveMs?: number
   endTimeoutMs?: number
+  // For tests: how fast the turn's stop guard polls.
+  stopTiming?: TurnStopTiming
 }
 
 // What the Worker gets back from start: `busy` while another turn of this
 // session is unfinished (the route answers today's 409 conflict).
 export type TurnStartAnswer = 'started' | 'busy'
 
-// The Worker's view of the binding (S5 routes through these).
+// The Worker's view of the binding (routes/turns.ts goes through these).
 export type TurnRunnerStub = {
   start(job: TurnJob): Promise<TurnStartAnswer>
   fetch(input: Request | string): Promise<Response>
@@ -57,10 +60,10 @@ const FINAL_KEY = 'final'
 export const FINAL_REPLAY_MS = 60_000
 const END_TIMEOUT_MS = 2_000
 
-// A finished turn, for watches that come after it. `reply` (and the create's
-// list row) go once FINAL_REPLAY_MS has passed; the id stays until the next
-// turn's end replaces it.
-type FinalRecord = { turnId: string; at: number; reply?: TurnReply; session?: unknown; push?: boolean }
+// A finished turn, for watches that come after it. `reply` (the only part
+// that carries the listener's words) goes once FINAL_REPLAY_MS has passed;
+// the id stays until the next turn's end replaces it.
+type FinalRecord = { turnId: string; at: number; reply?: TurnReply; push?: boolean }
 
 // The reply as it went down the wire (JSON), so a replay sends the same
 // bytes and storage never holds anything its clone could refuse. A body
@@ -76,7 +79,6 @@ function finalRecord(job: TurnJob, reply: TurnReply, at: number): FinalRecord {
     turnId: job.turnId,
     at,
     reply: wire,
-    ...(job.kind === 'create' && job.session !== undefined ? { session: job.session } : {}),
     push: job.push === true,
   }
 }
@@ -144,6 +146,7 @@ export class TurnRunnerCore {
           db: opened.db,
           deps,
           watchers: { onStep: (event) => this.step(live, event), onEnd: (reply) => this.end(live, reply) },
+          ...(this.shell.stopTiming ? { stopTiming: this.shell.stopTiming } : {}),
         })
       } else {
         // Nothing to run the turn with: an answer, not a retry.
@@ -204,7 +207,6 @@ export class TurnRunnerCore {
     if (final?.turnId !== turnId) return new Response(null, { status: 404 })
     if (url.searchParams.get('replay') === '1' && final.reply && this.now() - final.at < FINAL_REPLAY_MS) {
       const writer = this.writer()
-      if (final.session !== undefined) writer.session(final.session)
       writer.turn({ turnId, push: final.push === true })
       void this.endOne(writer, final.reply)
       return turnStreamResponse(writer.readable)
@@ -221,13 +223,13 @@ export class TurnRunnerCore {
     return new TurnStreamWriter({ keepaliveMs: this.shell.keepaliveMs, onGone })
   }
 
-  // session (create), then turn, then the latest step so a late attacher's
-  // caption resumes, then live. A write that fails drops the watcher
-  // (gate 0: about a second after the client goes).
+  // turn, then the latest step so a late attacher's caption resumes, then
+  // live. A create's `session` event comes before all of it, from the Worker
+  // (routes/turns.ts): the job holds no list row. A write that fails drops
+  // the watcher (gate 0: about a second after the client goes).
   private attach(live: Live): Response {
     const { job } = live
     const writer: TurnStreamWriter = this.writer(() => live.watchers.delete(writer))
-    if (job.kind === 'create' && job.session !== undefined) writer.session(job.session)
     writer.turn({ turnId: job.turnId, push: job.push === true })
     if (live.latestStep) writer.step(live.latestStep)
     live.watchers.add(writer)
@@ -274,7 +276,8 @@ export class TurnRunnerCore {
   }
 
   // The cleanup alarm: the last event's body (the listener's words) goes;
-  // its turn id stays, so a late attach still answers 204.
+  // its turn id stays, so a late attach still answers 204. The job itself
+  // holds only ids, so nothing else needs stripping.
   private async expireFinal(): Promise<void> {
     try {
       const final = await this.shell.storage.get<FinalRecord>(FINAL_KEY)

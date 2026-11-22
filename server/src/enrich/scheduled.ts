@@ -21,6 +21,7 @@ import {
   type ListeningImportCleanupResult,
 } from '../listening/cleanup'
 import { expireAnonymousUsers } from '../jobs/anonymous-retention'
+import { sweepLostTurns, type LostTurnSweepDeps } from '../dj/turn-sweep'
 import { runPlaylistCatalogBatch, type PlaylistCatalogResult } from '../playlists/catalog-resolution'
 import { runTwinCopy, type TwinCopyResult } from './twin-copy'
 import { runAppleIsrcBatch, type AppleIsrcDeps, type AppleIsrcResult } from './apple-isrc'
@@ -82,6 +83,8 @@ export type ScheduledDeps = {
   artwork?: ArtworkDeps
   appleIsrc?: AppleIsrcDeps
   spotifyArtwork?: SpotifyArtworkDeps
+  // Present: maintenance fails lost durable mix turns (dj/turn-sweep.ts).
+  turns?: LostTurnSweepDeps
 }
 
 // Two hourly triggers, two minutes apart, so Postgres wakes once per hour and
@@ -125,6 +128,8 @@ export type ScheduledResult = {
   listeningCleanup?: ListeningImportCleanupResult | FailedRun
   // A bare count so the cron line reads `anonymous_expired` (spec 2026-10-20).
   anonymous_expired?: number | FailedRun
+  // A bare count of turns failed as lost.
+  lostTurns?: number | FailedRun
 }
 
 type ScheduledRunners = {
@@ -139,6 +144,7 @@ type ScheduledRunners = {
   libraryCleanup: typeof cleanupLibrarySyncStaging
   listeningCleanup: typeof cleanupListeningImportStaging
   anonymousRetention: typeof expireAnonymousUsers
+  lostTurns: typeof sweepLostTurns
 }
 
 export async function handleScheduled(
@@ -189,6 +195,15 @@ async function runMaintenance(
     result.anonymous_expired = (await runAnonymousRetention(db)).expired
   } catch {
     result.anonymous_expired = { error: 'failed' }
+  }
+
+  // Database only, no outbound fetch until S6's push.
+  if (deps.turns) {
+    try {
+      result.lostTurns = await (runners.lostTurns ?? sweepLostTurns)(db, deps.turns)
+    } catch {
+      result.lostTurns = { error: 'failed' }
+    }
   }
 
   // Reuse the existing server-only catalog client. The resolver selects each
