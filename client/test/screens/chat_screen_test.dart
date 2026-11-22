@@ -805,6 +805,31 @@ void main() {
       expect(find.textContaining('>'), findsNothing);
     });
 
+    // Founder, 2026-11-22: the quoted songs start at the panel's left edge,
+    // not indented past the + to where the field begins.
+    testWidgets('quoted songs start at the left edge, level with the +', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [_msg('m1', 'dj', 'here you go', queueVersion: 2)],
+        queue: [_track(0)],
+      );
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      container
+          .read(mixDraftProvider('s1'))
+          .quote(const QuotedSong(title: '4EVER', artist: 'Clairo', trackId: 't1'));
+      await tester.pump();
+
+      expect(find.byKey(QuoteChips.rowKey), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(QuoteChips.rowKey)).dx,
+        tester.getTopLeft(find.byKey(ChatScreen.plusKey)).dx,
+      );
+    });
+
     testWidgets('the energy line wears the shape it names', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(

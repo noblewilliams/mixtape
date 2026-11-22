@@ -307,7 +307,11 @@ class _SwipeActionRowState extends State<SwipeActionRow>
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(999),
+              // Loose both ways: the capsule's own size must not reach the
+              // glyph (a drawn glyph like QuoteGlyph fills what it is given).
               child: OverflowBox(
+                minWidth: 0,
+                minHeight: 0,
                 maxWidth: double.infinity,
                 child: Opacity(
                   opacity: width < 28 ? 0 : 1,

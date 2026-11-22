@@ -1335,6 +1335,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           ),
                       ],
                     ),
+                  // Songs quoted on the tape, from the panel's leading edge
+                  // (level with the +), not indented to the field.
+                  QuoteChips(draft: _draft),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -1355,8 +1358,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           key: _composerKey,
                           controller: _draft.controller,
                           focusNode: _promptFocus,
-                          // Songs quoted on the tape, over the field.
-                          attachment: QuoteChips(draft: _draft),
                           busy: locked,
                           working: working,
                           paused: ref.watch(djPausedProvider),
