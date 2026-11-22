@@ -2269,6 +2269,7 @@ pattern, so the whole app's feel is one table:
 **Reopens if:** the founder finds a kind too strong or too samey on device
 (retune the table; the native column needs no binary to change), or a
 settings toggle to turn haptics off is wanted.
+
 ## 2026-11-21 — A mix keeps going when the listener leaves the app, and pings when it lands
 
 Today a turn whose client drops gets only about 30 s more on the server
@@ -2400,3 +2401,46 @@ re-run is the wrong number; a turn ever needs more than the alarm's 15
 minutes; the turn is split into replayable steps (Workflows then become the
 better runner); or the object's placement, near the first caller, proves
 slow against Neon (`locationHint`, on the backlog).
+
+## 2026-11-22 — Talk to the DJ from the tape, and quote songs
+
+Asking for a change meant leaving the songs: the composer lived only in the
+conversation. Now, on iOS:
+
+- **The tape has the composer.** Under Play and Create playlist, the same
+  composer the conversation has. A turn sent there stays on the tape: the
+  working cassette shows over the field, the new version lands in the list,
+  and the DJ's answer to it sits over the composer (three lines, tap to open
+  the conversation). While the keyboard is up, the actions step aside so the
+  songs keep the room. Album sessions have no tape, so no change there.
+- **One draft per mix.** Both composers bind to one shared draft (text and
+  quotes, `mixDraftProvider`), so nothing typed on one screen is lost going
+  to the other. The send path (guards, AI consent, the shape that rides
+  along, putting a stopped or refused turn back) is one mixin both screens
+  use, `MixTurnSender`.
+- **Swipe actions, Apple Music style.** A swipe lifts the row into a rounded
+  card and grows a capsule behind it: quote (deep plum, quote bubble) to the
+  right, remove (rose, eject, the transport glyph) to the left. The glyph pops
+  and a haptic fires once the swipe would count. A part swipe rests open
+  with the capsule showing until it is tapped (or the row is tapped, the
+  list scrolls, or another row opens); a full swipe acts at once. The
+  hairlines above and below a lifted row step aside. Quote springs back;
+  remove slides off and folds closed. Each leaves a small frosted toast above the
+  bar ("Quoted", "Removed · Undo"), replacing the remove snackbar.
+- **Quotes.** Swipe a song right (or VoiceOver's Quote action) to pin it over
+  the composer as "Title · Artist". The keyboard stays down so several can be
+  quoted; they sit on one row that scrolls sideways and slides to the newest. A quote goes
+  out as a leading `> Title — Artist` line in the message text, so the DJ
+  reads it with no server or schema change and the transcript stores it as
+  any turn. The conversation draws those lines as quotes, never as markup.
+- **Song notes, compact.** A tapped song's note opens in place from the
+  art's edge as one small italic line (11 pt); no band, label or actions.
+- **The energy line wears its own shape.** It drew the arc glyph whatever
+  the shape; it now draws the same curve the Shape chip and menu draw for
+  that shape.
+
+Web keeps its composer as it is for now.
+
+**Reopens if:** the DJ misreads quote lines (then send quotes as a
+structured field with track ids), or a title containing " — " splits wrong
+often enough to matter.

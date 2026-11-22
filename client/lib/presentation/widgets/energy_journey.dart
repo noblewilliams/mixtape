@@ -56,16 +56,16 @@ String energyLineVerdict(String status) => switch (status) {
   _ => 'limited coverage',
 };
 
-/// "Build, then settle · as asked" — the whole line, or null when the version
-/// detail carries no shape to speak of.
-String? energyLine(Map<String, dynamic> detail) {
+/// "Build, then settle · as asked" — the whole line and the shape it speaks
+/// of, or null when the version detail carries no shape to speak of.
+({EnergyArc arc, String text})? energyLine(Map<String, dynamic> detail) {
   final arc = EnergyArc.values
       .where((a) => a.name == detail['energyArc'])
       .firstOrNull;
   final journey = detail['energyJourney'];
   if (arc == null || journey is! Map) return null;
   final status = journey['status'] as String? ?? 'limited';
-  return '${arc.label} · ${energyLineVerdict(status)}';
+  return (arc: arc, text: '${arc.label} · ${energyLineVerdict(status)}');
 }
 
 /// The menu's last entry, offered only while a shape is set.
@@ -362,80 +362,6 @@ class _ShapeGlyphPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ShapeGlyphPainter oldDelegate) =>
-      arc != oldDelegate.arc || color != oldDelegate.color;
-}
-
-/// The earlier board's `.preset svg.w` path for one arc, drawn on a 44 × 28
-/// box and scaled to whatever size it is given: the energy line's glyph. The
-/// chip and the shape menu draw [EnergyShapeGlyph] instead.
-class EnergyWave extends StatelessWidget {
-  const EnergyWave({
-    super.key,
-    required this.arc,
-    this.width = 44,
-    this.height = 28,
-    this.color,
-  });
-
-  final EnergyArc arc;
-  final double width;
-  final double height;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: width,
-    height: height,
-    child: CustomPaint(
-      painter: _WavePainter(arc, color ?? context.tokens.plum),
-    ),
-  );
-}
-
-class _WavePainter extends CustomPainter {
-  const _WavePainter(this.arc, this.color);
-
-  final EnergyArc arc;
-  final Color color;
-
-  /// The board's viewBox.
-  static const Size _viewBox = Size(44, 28);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path();
-    switch (arc) {
-      case EnergyArc.steady:
-        path.moveTo(3, 14);
-        path.lineTo(41, 14);
-      case EnergyArc.rise:
-        path.moveTo(3, 24);
-        path.quadraticBezierTo(22, 24, 41, 4);
-      case EnergyArc.fall:
-        path.moveTo(3, 4);
-        path.quadraticBezierTo(22, 4, 41, 24);
-      case EnergyArc.arc:
-        path.moveTo(3, 24);
-        path.quadraticBezierTo(22, -8, 41, 24);
-    }
-    final scaleX = size.width / _viewBox.width;
-    final scaleY = size.height / _viewBox.height;
-    canvas.save();
-    canvas.scale(scaleX, scaleY);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2 / ((scaleX + scaleY) / 2)
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_WavePainter oldDelegate) =>
       arc != oldDelegate.arc || color != oldDelegate.color;
 }
 

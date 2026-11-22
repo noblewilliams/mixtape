@@ -28,11 +28,13 @@ import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
     show
+        CupertinoIcons,
         CupertinoAlertDialog,
         CupertinoDialogAction,
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import '../widgets/foundation/alert_field_box.dart';
 import '../widgets/open_tape_settings.dart';
 import '../widgets/mix_share.dart';
@@ -42,6 +44,7 @@ import '../../data/dj/dj_models.dart';
 import '../providers/dj_providers.dart';
 import '../providers/dj_status_provider.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/mix_activity_provider.dart';
 import '../providers/mix_operation_gate.dart';
 import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
@@ -50,13 +53,19 @@ import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
-import '../widgets/foundation/remove_band.dart';
+import '../widgets/foundation/mini_toast.dart';
+import '../widgets/foundation/quote_glyph.dart';
+import '../widgets/foundation/swipe_action_row.dart';
+import '../widgets/lyric_turn.dart' show LyricTurn, WorkingCassette;
 import '../widgets/mix_handoff.dart';
+import '../widgets/mix_prompt_input.dart';
+import '../widgets/mix_quote.dart';
+import '../widgets/mix_turn_sender.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/music_door.dart';
 import '../widgets/tape_header.dart';
 import '../widgets/track_row.dart';
-import 'chat_screen.dart' show remakeInConversation;
+import 'chat_screen.dart' show openConversation, remakeInConversation;
 import 'mix_history_screen.dart';
 import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/foundation/haptics.dart';
@@ -86,13 +95,12 @@ class QueueScreen extends ConsumerStatefulWidget {
 }
 
 class _QueueScreenState extends ConsumerState<QueueScreen>
-    with MixHandoff<QueueScreen> {
+    with MixHandoff<QueueScreen>, MixTurnSender<QueueScreen> {
   final Set<String> _expandedTrackIds = {};
 
   /// Rows filtered out of the render even though the server still has them.
-  /// [Dismissible] requires a swiped item to be gone from the underlying
-  /// list by the very next build or it asserts ("A dismissed Dismissible
-  /// widget is still part of the tree") — but this screen is
+  /// A swiped-away row has already folded closed ([SwipeActionRow]) and must
+  /// not spring back while its removal is in flight — but this screen is
   /// server-canonical (no optimistic data edits), so the REAL removal only
   /// lands once the queue-ops response comes back.
   ///
@@ -100,8 +108,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   /// enqueues an intent and removed in that intent's `finally`, whatever
   /// the outcome. Never cleared wholesale on a version change — a version
   /// bump from an unrelated source (a concurrent DJ turn) would otherwise
-  /// resurrect a just-dismissed row in the same frame it was dismissed,
-  /// tripping exactly the assertion above; and a non-stale applyOps failure
+  /// resurrect a just-dismissed row in the same frame it was dismissed;
+  /// and a non-stale applyOps failure
   /// leaves the version UNCHANGED, so version-triggered clearing would
   /// strand the row invisible forever while it still exists server-side.
   final Set<String> _hiddenTrackIds = {};
@@ -118,15 +126,29 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   final _headerKey = GlobalKey();
   bool _titleShown = false;
 
+  /// The tape's composer (the mix's shared [MixDraft], read in [build]):
+  /// the listener keeps talking to the DJ without going back.
+  late MixDraft _draft;
+  final _promptFocus = FocusNode();
+
+  /// How long the transcript was when the listener last sent from here: the
+  /// DJ's answer past it shows over the composer. Null until they do, so the
+  /// tape never opens on a stale reply.
+  int? _sentFrom;
+
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_syncTitle);
+    // A row resting open closes once the list scrolls.
+    _scroll.addListener(SwipeActionRow.closeAll);
   }
 
   @override
   void dispose() {
+    _toast.dispose();
     _scroll.dispose();
+    _promptFocus.dispose();
     super.dispose();
   }
 
@@ -148,6 +170,49 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info}) =>
       _showSnack(context, message, kind: kind);
 
+  /// The row being swiped (or resting open), whose hairlines step aside.
+  String? _slidingId;
+
+  /// The toast a swipe action leaves over the bottom of the list.
+  final _toast = MiniToastController();
+
+  /// The quote and remove glyphs, shared by the capsules and their toasts.
+  /// The quote glyph is drawn in code (the release's icon font lacks it);
+  /// eject is from the font, which the release already carries.
+  static const Widget quoteIcon = QuoteGlyph(
+    size: 18,
+    color: Color(0xFFFFFFFF),
+    filled: true,
+  );
+  static const Widget removeIcon = Icon(
+    CupertinoIcons.eject_fill,
+    size: 17,
+    color: Color(0xFFFFFFFF),
+  );
+
+  /// The capsules' colours: the tape's deep plum for quote, a rose red for
+  /// remove, both carrying white glyphs in either theme.
+  static const Color quoteColor = Color(0xFF5A4957);
+  static const Color removeColor = Color(0xFFC4566F);
+
+  /// Pins [track] over the composer and says so in a toast. The keyboard
+  /// stays down, so several songs can be quoted in a row.
+  void _quote(QueueTrack track) {
+    _draft.quote(QuotedSong.fromTrack(track));
+    _toast.show(
+      MiniToastData(icon: quoteIcon, message: 'Quoted "${track.title}"'),
+    );
+  }
+
+  /// Send from the tape: the turn goes to the conversation's DJ, the tape
+  /// stays, and the new version lands in this list.
+  void _sendFromTape(ChatState state) {
+    final outgoing = _draft.outgoing;
+    if (outgoing.isEmpty) return;
+    setState(() => _sentFrom = state.messages.length);
+    unawaited(sendTurn(outgoing, fromComposer: true));
+  }
+
   void _toggleReason(String trackId) {
     setState(() {
       if (!_expandedTrackIds.add(trackId)) _expandedTrackIds.remove(trackId);
@@ -167,7 +232,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   ///   the wrong track. If the intent's track is gone by then (a DJ turn
   ///   removed it, say), the intent is skipped rather than mis-targeted.
   /// * **Hiding is settle-based.** The gesture hides its row immediately
-  ///   (Dismissible's hard requirement) and the intent un-hides that
+  ///   (it has already folded away) and the intent un-hides that
   ///   specific id when it settles, so a failed removal reappears.
   void _enqueue(_QueueIntent intent) {
     _intents.add(intent);
@@ -238,21 +303,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     _enqueue(_RemoveIntent(track.trackId));
 
     final canUndo = supportsInsert && oldPosition >= 0;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        mixtapeSnackBar(
-          message: 'Removed "${track.title}"',
-          kind: FeedbackKind.info,
-          duration: QueueScreen.undoDuration,
-          actionLabel: canUndo ? 'Undo' : null,
-          onAction: canUndo
-              ? () => _enqueue(
-                  _InsertIntent(track.trackId, beforeTrackId: followerId),
-                )
-              : null,
-        ),
-      );
+    _toast.show(
+      MiniToastData(
+        icon: removeIcon,
+        message: 'Removed "${track.title}"',
+        duration: canUndo ? QueueScreen.undoDuration : MiniToast.shortDuration,
+        actionLabel: canUndo ? 'Undo' : null,
+        onAction: canUndo
+            ? () => _enqueue(
+                _InsertIntent(track.trackId, beforeTrackId: followerId),
+              )
+            : null,
+      ),
+    );
   }
 
   /// [newIndex] arrives in [ReorderableListView]'s own pre-removal indexing:
@@ -463,6 +526,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   @override
   Widget build(BuildContext context) {
     final chatAsync = ref.watch(chatProvider(widget.sessionId));
+    // The mix's one draft, shared with the conversation's composer.
+    _draft = ref.watch(mixDraftProvider(widget.sessionId));
     final operation = ref.watch(mixOperationProvider(widget.sessionId));
     // Kick off the /me fetch as soon as the screen opens so the account
     // name is (usually) resolved by the time the save dialog reads it
@@ -600,10 +665,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
               child: _EmptyState(),
             )
           else ...[
+            // Edge to edge: each row pads its own content, so a swiped row's
+            // card and capsule run to the screen's edges.
             SliverPadding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: MixtapeMetrics.screenSidePadding,
-              ),
+              padding: EdgeInsets.zero,
               sliver: SliverReorderableList(
                 itemCount: visibleQueue.length,
                 // The row lifts off the list, and settles back with a tick
@@ -696,7 +761,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
                 child: SafeArea(
                   top: false,
                   bottom: bottomBar == null,
-                  child: body,
+                  // A swipe action's toast floats over the list's foot,
+                  // just clear of the bar.
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: body),
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 14,
+                        child: Center(child: MiniToast(controller: _toast)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -713,6 +790,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     const keys = MixHandoffKeys.arrangement;
     return TapeBar(
       reason: MixPlayReason(keys: keys, queue: visibleQueue),
+      composer: _composer(state),
       primary: MixActions(
         keys: keys,
         queue: visibleQueue,
@@ -733,6 +811,104 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         sharing: sharingMix,
         sendingToMusic: sendingToMusic,
       ),
+    );
+  }
+
+  static const Key composerKey = Key('tape-composer');
+  static const Key replyKey = Key('tape-reply');
+
+  /// The DJ's side of the exchange started here, over the composer: the
+  /// working cassette while a turn is out (this tape's or the
+  /// conversation's), then the answer to what was sent from here, which
+  /// opens the conversation when tapped.
+  Widget? _reply(ChatState state) {
+    final since = ref.watch(
+      mixActivityProvider.select((a) => a.workingSince(widget.sessionId)),
+    );
+    if (state.sending || since != null) {
+      return WorkingCassette(
+        caseColor: watchMixTapeColour(
+          ref,
+          widget.sessionId,
+          saved: state.session.caseColor,
+        ),
+        startedAt: since,
+        step:
+            state.workingStep ??
+            ref.watch(
+              mixActivityProvider.select(
+                (a) => a.workingStep(widget.sessionId),
+              ),
+            ),
+      );
+    }
+    final from = _sentFrom;
+    if (from == null) return null;
+    final answer = state.messages
+        .skip(from)
+        .where((m) => m.message.role != 'user')
+        .lastOrNull;
+    if (answer == null) return null;
+    final tokens = context.tokens;
+    return Semantics(
+      button: true,
+      hint: 'Opens the conversation',
+      child: GestureDetector(
+        key: replyKey,
+        behavior: HitTestBehavior.opaque,
+        onTap: () => openConversation(context, widget.sessionId),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Text(
+            answer.message.content,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: answer.isError
+                ? tokens.meta.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: tokens.errInk,
+                  )
+                : LyricTurn.djStyle(tokens).copyWith(fontSize: 15),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The conversation's composer, on the tape: the same draft, quotes and
+  /// all, with stop in send's place while the DJ works.
+  Widget _composer(ChatState state) {
+    final operation = ref.watch(mixOperationProvider(widget.sessionId));
+    final working =
+        state.sending ||
+        ref.watch(
+              mixActivityProvider.select(
+                (a) => a.workingSince(widget.sessionId),
+              ),
+            ) !=
+            null;
+    final reply = _reply(state);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (reply != null)
+          Padding(padding: const EdgeInsets.only(bottom: 8), child: reply),
+        MixPromptInput(
+          key: composerKey,
+          controller: _draft.controller,
+          focusNode: _promptFocus,
+          // Locked only while the arrangement itself is being edited; a turn
+          // out keeps it open for the next message, as in the conversation.
+          busy: operation != null && !working && !state.stopping,
+          working: working,
+          paused: ref.watch(djPausedProvider),
+          onStop: state.sending ? stopTurn : null,
+          placeholder: 'Ask for a change…',
+          attachment: QuoteChips(draft: _draft),
+          onSubmit: () => _sendFromTape(state),
+        ),
+      ],
     );
   }
 
@@ -759,6 +935,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       expanded: _expandedTrackIds.contains(track.trackId),
       onTap: () => _toggleReason(track.trackId),
       isFirst: index == 0,
+      // The line above belongs to this row, the one below to the next: both
+      // step aside while this row is lifted.
+      showHairline:
+          _slidingId != track.trackId &&
+          (index == 0 || _slidingId != visibleQueue[index - 1].trackId),
       lifted: lifted,
       dragIndex: (lifted || opensInSpotify) ? null : index,
       onOpenInSpotify: opensInSpotify
@@ -771,27 +952,53 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
           ? null
           : () => _moveTo(visibleQueue, index, index + 1),
     );
-    if (lifted) {
-      return KeyedSubtree(key: ValueKey('lifted-${track.trackId}'), child: row);
-    }
-    return Dismissible(
-      key: ValueKey('dismissible-${track.trackId}'),
-      direction: DismissDirection.endToStart,
-      movementDuration: reducedMotion
-          ? Duration.zero
-          : const Duration(milliseconds: 200),
-      background: const RemoveBand(),
-      // Felt as the swipe arms, then again as the song goes.
-      onUpdate: (details) {
-        if (details.reached && !details.previousReached) {
-          unawaited(Haptics.play(HapticKind.threshold));
-        }
-      },
-      onDismissed: (_) {
-        unawaited(Haptics.play(HapticKind.destructive));
-        _handleDismiss(track, supportsInsert: state.supportsInsert);
-      },
+    final padded = Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: MixtapeMetrics.screenSidePadding,
+      ),
       child: row,
+    );
+    if (lifted) {
+      return KeyedSubtree(
+        key: ValueKey('lifted-${track.trackId}'),
+        child: padded,
+      );
+    }
+    // Swipe right quotes the song into the composer (the row springs back);
+    // swipe left removes it.
+    return SwipeActionRow(
+      key: ValueKey('dismissible-${track.trackId}'),
+      reducedMotion: reducedMotion,
+      liftColor: TrackRow.liftColorFor(Theme.of(context).brightness),
+      onActiveChanged: (active) => setState(() {
+        if (active) {
+          _slidingId = track.trackId;
+        } else if (_slidingId == track.trackId) {
+          _slidingId = null;
+        }
+      }),
+      leading: SwipeAction(
+        icon: quoteIcon,
+        label: 'Quote',
+        color: quoteColor,
+        onTrigger: () => _quote(track),
+      ),
+      trailing: SwipeAction(
+        icon: removeIcon,
+        label: 'Remove',
+        color: removeColor,
+        removes: true,
+        onTrigger: () =>
+            _handleDismiss(track, supportsInsert: state.supportsInsert),
+      ),
+      child: Semantics(
+        customSemanticsActions: {
+          const CustomSemanticsAction(label: 'Quote'): () => _quote(track),
+          const CustomSemanticsAction(label: 'Remove'): () =>
+              _handleDismiss(track, supportsInsert: state.supportsInsert),
+        },
+        child: padded,
+      ),
     );
   }
 }

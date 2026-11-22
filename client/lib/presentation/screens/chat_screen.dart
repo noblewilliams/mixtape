@@ -21,7 +21,6 @@ import 'package:flutter/cupertino.dart'
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
-import '../widgets/ai_consent_sheet.dart';
 import '../widgets/open_tape_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -58,6 +57,8 @@ import '../widgets/keep_sheet.dart';
 import '../widgets/mix_energy_summary.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
+import '../widgets/mix_quote.dart';
+import '../widgets/mix_turn_sender.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/music_door.dart';
 import '../widgets/playlist_inspiration.dart';
@@ -139,6 +140,28 @@ Future<void>? openMixFromNotification(NavigatorState navigator, PushTap tap) {
   );
 }
 
+/// Shows [sessionId]'s conversation from a screen over it (the tape): back to
+/// it when it is below in this navigator, else opened over the caller.
+void openConversation(BuildContext context, String sessionId) {
+  final navigator = Navigator.of(context);
+  for (final open in _ChatScreenState._open.reversed) {
+    if (!open.mounted || open.widget.sessionId != sessionId) continue;
+    final route = ModalRoute.of(open.context);
+    if (route == null ||
+        !route.isActive ||
+        !identical(route.navigator, navigator)) {
+      continue;
+    }
+    navigator.popUntil((candidate) => identical(candidate, route));
+    return;
+  }
+  unawaited(
+    navigator.push(
+      MaterialPageRoute<void>(builder: (_) => ChatScreen(sessionId: sessionId)),
+    ),
+  );
+}
+
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({
     super.key,
@@ -187,12 +210,14 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen>
-    with MixHandoff<ChatScreen> {
+    with MixHandoff<ChatScreen>, MixTurnSender<ChatScreen> {
   final _scrollController = ScrollController();
-  final _textController = TextEditingController();
   final _promptFocus = FocusNode();
   final _composerKey = GlobalKey();
   final _panelKey = GlobalKey();
+
+  /// The mix's shared draft ([mixDraftProvider]), read in [build].
+  late MixDraft _draft;
 
   bool _seededInitialError = false;
   bool _keepSheetChecked = false;
@@ -202,8 +227,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Read in [initState]: [dispose] cannot use `ref`.
   late final VisibleMixNotifier _visibleMix;
 
-  /// A send waiting on the AI-consent sheet.
-  bool _askingConsent = false;
   bool _changingStatus = false;
 
   /// Every conversation on screen or under another route, oldest first: the
@@ -238,7 +261,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final visibleMix = _visibleMix;
     scheduleMicrotask(() => visibleMix.hide(this));
     _scrollController.dispose();
-    _textController.dispose();
     _promptFocus.dispose();
     super.dispose();
   }
@@ -267,110 +289,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     });
   }
 
-  /// Unforeseen-exception guard: [ChatNotifier.send] already resolves every
-  /// error type it knows about into an error turn and never rethrows — this
-  /// catch-all exists purely so an entirely unanticipated exception can't
-  /// become an unhandled async error with a bricked composer.
-  ///
-  /// [fromComposer] gates clearing the draft: true when the composer's own
-  /// send fired this (the just-sent text IS the draft, safe to clear), false
-  /// for a resend (which resends a DIFFERENT, already-sent turn's text —
-  /// clearing the controller here would silently wipe whatever new draft the
-  /// user has since started typing).
-  ///
-  /// [remake] posts the turn through [ChatNotifier.remake] ([text] is then
-  /// [remakeText]): the door's Remake, the tape's, a Resend of a failed
-  /// remake, and the consent retry of a refused one all go that way, since
-  /// the text alone would post a plain turn. [countTap] is a Remake tap's:
-  /// the notifier counts it as the remake goes out, so Not now, a guard or a
-  /// second tap counts nothing, and the retry after a refusal (the same tap,
-  /// already counted) drops it.
-  Future<void> _send(
-    String text, {
-    bool fromComposer = false,
-    bool remake = false,
-    bool countTap = false,
-  }) async {
-    final trimmed = text.trim();
-    final chat = ref.read(chatProvider(widget.sessionId)).value;
-    // A stop still undoing the last turn holds the mix's gate; a send then
-    // goes ahead and waits for it (see [ChatNotifier.stop]).
-    final operation = ref.read(mixOperationProvider(widget.sessionId));
-    final heldByStop =
-        operation == MixOperation.sending && (chat?.stopping ?? false);
-    if (trimmed.isEmpty ||
-        (operation != null && !heldByStop) ||
-        ref.read(sessionPlaylistContextProvider(widget.sessionId)).writing ||
-        chat?.sending == true ||
-        _askingConsent ||
-        // The DJ is paused: nothing goes out, and the draft stays put.
-        ref.read(djPausedProvider)) {
-      return;
-    }
-    // Nothing reaches the DJ before the listener has agreed; Not now keeps
-    // the draft in the composer.
-    _askingConsent = true;
-    final agreed = await confirmAiConsent(context);
-    _askingConsent = false;
-    if (!agreed || !mounted) return;
-    if (fromComposer) _textController.clear();
-    try {
-      final notifier = ref.read(chatProvider(widget.sessionId).notifier);
-      // The shape the control shows goes with every mix message.
-      final mixShape = _mixShape(
-        ref.read(chatProvider(widget.sessionId)).value,
-        watch: false,
-      );
-      await (remake
-          ? notifier.remake(countTap: countTap, mixShape: mixShape)
-          : notifier.send(trimmed, mixShape: mixShape));
-    } on AiConsentRequiredException {
-      // Enforcement is on and `/me` was out of date: the turn was taken
-      // back. The text goes back in the composer, the sheet asks, and
-      // Agree sends it again.
-      if (!mounted) return;
-      if (fromComposer && _textController.text.isEmpty) {
-        _textController.text = trimmed;
-      }
-      _askingConsent = true;
-      final again = await confirmAiConsentAfterRefusal(context);
-      _askingConsent = false;
-      if (!again || !mounted) return;
-      await _send(
-        fromComposer ? _textController.text : trimmed,
-        fromComposer: fromComposer,
-        remake: remake,
-      );
-    } on DjPausedException {
-      // Paused server-wide while this went out: the turn was taken back and
-      // the app paused. The text goes back in the composer, which now shows
-      // the paused state; no error, no toast.
-      if (!mounted) return;
-      if (fromComposer && _textController.text.isEmpty) {
-        _textController.text = trimmed;
-      }
-    } catch (_) {
-      if (!mounted) return;
-      _snack('something unexpected happened', kind: FeedbackKind.error);
-    }
-  }
-
-  /// The stop key: the turn goes at once, and what the listener sent goes
-  /// back in the composer unless they have started typing something else
-  /// meanwhile (stop a turn, 2026-11-15).
-  void _stop() {
-    final text = ref.read(chatProvider(widget.sessionId).notifier).stop();
-    if (text == null || !mounted) return;
-    if (_textController.text.isEmpty) {
-      _textController.value = TextEditingValue(
-        text: text,
-        selection: TextSelection.collapsed(offset: text.length),
-      );
-    }
-  }
-
   /// A failed turn's push opened this mix: the listener's last words go back
-  /// in the composer, the same way [_stop] puts them, unless they have
+  /// in the composer, the same way [stopTurn] puts them, unless they have
   /// started typing. Only when the transcript ends on their line (the DJ
   /// never answered it), and never a remake's fixed line, which the text
   /// alone would send as a plain turn.
@@ -388,11 +308,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (last.message.role != 'user' || last.remake || text == remakeText) {
       return;
     }
-    if (_textController.text.isNotEmpty) return;
-    _textController.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
+    // Unless the listener has started another (quotes and all).
+    mixDraft.restore(text);
   }
 
   /// Tells `mixtape/push` whether this conversation is what the listener
@@ -408,12 +325,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     });
   }
 
-  /// The remake turn (see [_send]'s `remake` and `countTap`).
+  /// The remake turn (see [sendTurn]'s `remake` and `countTap`).
   Future<void> _remake({bool countTap = false}) =>
-      _send(remakeText, remake: true, countTap: countTap);
+      sendTurn(remakeText, remake: true, countTap: countTap);
 
   /// The door's "Remake with my music". A second tap is refused by
-  /// [_send]'s guards, which are checked before its first await: the consent
+  /// [sendTurn]'s guards, which are checked before its first await: the consent
   /// check in progress, then the turn itself sending.
   void _onRemake() => unawaited(_remake(countTap: true));
 
@@ -694,6 +611,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   @override
   Widget build(BuildContext context) {
+    // The mix's one draft, shared with the tape's composer.
+    _draft = ref.watch(mixDraftProvider(widget.sessionId));
     ref.listen(
       sessionPlaylistContextProvider(widget.sessionId),
       _toastInspiration,
@@ -1214,7 +1133,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 : ConversationTurnKind.dj),
       // A failed remake is resent as a remake, flag and all.
       onResend: message.isError && precedingText.isNotEmpty
-          ? () => preceding!.remake ? _remake() : _send(precedingText)
+          ? () => preceding!.remake ? _remake() : sendTurn(precedingText)
           : null,
       resendEnabled: !busy && !ref.watch(djPausedProvider),
     );
@@ -1327,7 +1246,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       Navigator.of(context).popUntil((route) => route.isFirst);
       return;
     }
-    _send(suggestion);
+    sendTurn(suggestion);
   }
 
   /// The bottom panel, top to bottom: the tape strip once a mix exists, any
@@ -1434,8 +1353,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       Expanded(
                         child: MixPromptInput(
                           key: _composerKey,
-                          controller: _textController,
+                          controller: _draft.controller,
                           focusNode: _promptFocus,
+                          // Songs quoted on the tape, over the field.
+                          attachment: QuoteChips(draft: _draft),
                           busy: locked,
                           working: working,
                           paused: ref.watch(djPausedProvider),
@@ -1446,7 +1367,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                               state != null &&
                                   state.sending &&
                                   state.kind != SessionKind.album
-                              ? _stop
+                              ? stopTurn
                               : null,
                           // An album session's composer suggests the
                           // refinements once there is a pick (board A2),
@@ -1460,7 +1381,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                     ? 'Ask for a change…'
                                     : null),
                           onSubmit: () =>
-                              _send(_textController.text, fromComposer: true),
+                              sendTurn(_draft.outgoing, fromComposer: true),
                         ),
                       ),
                     ],
@@ -1559,29 +1480,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Widget _shapeControl(ChatState state) => EnergyControl(
     key: ChatScreen.shapeKey,
     compact: true,
-    selectedArc: state.shape ?? _mixShape(state, watch: true),
+    selectedArc: state.shape ?? mixShapeOf(state, watch: true),
     clearable: state.shape != null,
     onArcChanged: (arc) =>
         ref.read(chatProvider(widget.sessionId).notifier).setShape(arc),
   );
-
-  /// The shape the mix itself has: its current version's, once that detail
-  /// is read; until then (or if it cannot be), the one its last turn carried.
-  EnergyArc? _mixShape(ChatState? state, {required bool watch}) {
-    if (state == null || state.kind == SessionKind.album) return null;
-    final version = state.queueVersion;
-    if (version <= 0) return state.landedShape;
-    final provider = mixEnergyProvider((
-      id: widget.sessionId,
-      version: version,
-    ));
-    final detail = watch ? ref.watch(provider) : ref.read(provider);
-    final read = detail.value;
-    if (read == null) return state.landedShape;
-    return EnergyArc.values
-        .where((arc) => arc.name == read['energyArc'])
-        .firstOrNull;
-  }
 
   /// What rides over the field: the attached playlist's tile, and beside it
   /// the line (and the Reload) for a selection that cannot be used as is.

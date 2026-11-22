@@ -41,18 +41,22 @@ class MixEnergySummary extends ConsumerWidget {
         data: (detail) {
           final line = energyLine(detail);
           if (line == null) return const SizedBox.shrink();
-          return EnergyLine(text: line);
+          return EnergyLine(arc: line.arc, text: line.text);
         },
         loading: () => const SizedBox.shrink(),
         error: (_, _) => const SizedBox.shrink(),
       );
 }
 
-/// `.energy`: the wave glyph and the verdict in meta muted, flush left.
+/// `.energy`: the shape's own curve — the same glyph the Shape chip and its
+/// menu draw for it — and the verdict in meta muted, flush left.
 class EnergyLine extends StatelessWidget {
-  const EnergyLine({super.key, required this.text});
+  const EnergyLine({super.key, required this.arc, required this.text});
 
+  final EnergyArc arc;
   final String text;
+
+  static const Key glyphKey = Key('energy-line-glyph');
 
   @override
   Widget build(BuildContext context) {
@@ -65,19 +69,16 @@ class EnergyLine extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: EnergyWave(
-              arc: EnergyArc.arc,
-              width: 16,
-              height: 11,
+            child: EnergyShapeGlyph(
+              arc,
+              key: glyphKey,
+              size: const Size(16, 11),
               color: tokens.muted,
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              text,
-              style: tokens.meta.copyWith(color: tokens.muted),
-            ),
+            child: Text(text, style: tokens.meta.copyWith(color: tokens.muted)),
           ),
         ],
       ),
