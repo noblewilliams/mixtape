@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { djMessages, djSessions, queueTracks } from '../db/schema'
 import { restoreMixVersion } from './mix-history'
@@ -188,22 +188,59 @@ export class TurnGuard {
   }
 }
 
-// What a turn wrote, for its rollback: the seqs of its own messages, and
-// whether it renamed the session or offered the music pill.
+// What a turn wrote, for its rollback: the seqs of its own messages (the
+// listener's first, then the DJ's), and whether it renamed the session or
+// offered the music pill.
 export type TurnWrites = { messageSeqs: number[]; renamed: boolean; historyOffered: boolean }
 
-// Undoes a stopped turn and lets go of the claim. A first turn takes its
-// session with it. When a later turn already holds the claim, only this
-// turn's own messages go: the queue and title are that turn's now.
+// TurnWrites plus what a rollback puts back, flattened so it can be stored
+// (dj_turns.writes, spec 2026-11-21 durable-mix-turns "Retries without a
+// second mix") and handed to rollbackTurn by a later attempt that never saw
+// the in-memory objects. The claim fields are null for a turn that ran
+// without a claim (claimTurn failed): nothing of the title or the claim is
+// then put back, only messages and the queue. claimTurnId says whose claim
+// to let go of, and whether a later turn has taken the session since.
+export type PersistedTurnWrites = {
+  messageSeqs: number[]
+  renamed: boolean
+  historyOffered: boolean
+  startingVersion: number
+  claimTitle: string | null
+  claimNotPersonal: boolean | null
+  claimTurnId: string | null
+}
+
+// A snapshot, never a view: messageSeqs is copied, so a turn that writes on
+// after handing it out cannot change what was handed out.
+export function persistTurnWrites(claim: TurnClaim | null, startingVersion: number, writes: TurnWrites): PersistedTurnWrites {
+  return {
+    messageSeqs: [...writes.messageSeqs],
+    renamed: writes.renamed,
+    historyOffered: writes.historyOffered,
+    startingVersion,
+    claimTitle: claim?.title ?? null,
+    claimNotPersonal: claim?.notPersonal ?? null,
+    claimTurnId: claim?.turnId ?? null,
+  }
+}
+
+// 'stop': the listener stopped the turn; everything it wrote goes, the
+// listener's own message included, and a first turn takes its session with
+// it. 'rerun': an attempt died mid turn and the turn runs again; the
+// listener's message (the first seq) stays, since the re-run answers it,
+// and the session always stays.
+export type RollbackMode = { mode: 'stop'; firstTurn?: boolean } | { mode: 'rerun' }
+
+// Undoes a turn's writes and lets go of its claim. When a later turn already
+// holds the claim, only this turn's own messages go: the queue and title are
+// that turn's now.
 export async function rollbackTurn(
   db: Db,
   session: { id: string; userId: string },
-  claim: TurnClaim,
-  startingVersion: number,
-  writes: TurnWrites,
-  options: { firstTurn?: boolean } = {},
+  writes: PersistedTurnWrites,
+  options: RollbackMode,
 ): Promise<void> {
-  if (options.firstTurn) {
+  if (options.mode === 'stop' && options.firstTurn) {
     await db.delete(djSessions).where(eq(djSessions.id, session.id))
     return
   }
@@ -212,16 +249,18 @@ export async function rollbackTurn(
     .from(djSessions)
     .where(eq(djSessions.id, session.id))
   if (!row) return
-  if (writes.messageSeqs.length > 0) {
-    await db.delete(djMessages).where(and(eq(djMessages.sessionId, session.id), inArray(djMessages.seq, writes.messageSeqs)))
+  const doomedSeqs = options.mode === 'rerun' ? writes.messageSeqs.slice(1) : writes.messageSeqs
+  if (doomedSeqs.length > 0) {
+    await db.delete(djMessages).where(and(eq(djMessages.sessionId, session.id), inArray(djMessages.seq, doomedSeqs)))
   }
-  const superseded = row.activeTurnId !== null && row.activeTurnId !== claim.turnId
+  const superseded = row.activeTurnId !== null && row.activeTurnId !== writes.claimTurnId
   if (superseded) return
 
+  const { startingVersion } = writes
   if (row.queueVersion !== startingVersion) {
     if (startingVersion >= 1) {
       // A restore, so the version still only moves forward: a client that
-      // saw the stopped version reads the old songs as a newer one.
+      // saw the undone version reads the old songs as a newer one.
       await restoreMixVersion(db, session.id, session.userId, {
         version: startingVersion,
         expectedVersion: row.queueVersion,
@@ -233,7 +272,10 @@ export async function rollbackTurn(
         await tx.delete(queueTracks).where(and(eq(queueTracks.sessionId, session.id), eq(queueTracks.state, 'active')))
         await tx
           .update(djSessions)
-          .set({ queueVersion: sql`${djSessions.queueVersion} + 1`, notPersonal: claim.notPersonal })
+          .set({
+            queueVersion: sql`${djSessions.queueVersion} + 1`,
+            ...(writes.claimNotPersonal !== null ? { notPersonal: writes.claimNotPersonal } : {}),
+          })
           .where(eq(djSessions.id, session.id))
       })
     }
@@ -244,9 +286,21 @@ export async function rollbackTurn(
       activeTurnId: null,
       activeTurnAt: null,
       turnStopRequested: false,
-      ...(writes.renamed ? { title: claim.title } : {}),
+      ...(writes.renamed && writes.claimTitle !== null ? { title: writes.claimTitle } : {}),
       ...(writes.historyOffered ? { musicChipAt: null } : {}),
       updatedAt: sql`${djSessions.updatedAt}`,
     })
-    .where(and(eq(djSessions.id, session.id), eq(djSessions.activeTurnId, claim.turnId)))
+    .where(and(eq(djSessions.id, session.id), claimHeldBy(writes.claimTurnId, options.mode)))
+}
+
+// Whose claim the closing UPDATE lets go of. A stop only ever undoes the
+// turn still holding its claim (finishTurn left it in place). A re-run also
+// accepts a session nobody holds: no later turn has taken it (the
+// superseded check), so the dead attempt's title and pill are still its own
+// to put back.
+function claimHeldBy(turnId: string | null, mode: RollbackMode['mode']) {
+  const free = isNull(djSessions.activeTurnId)
+  if (turnId === null) return free
+  const ours = eq(djSessions.activeTurnId, turnId)
+  return mode === 'rerun' ? or(ours, free) : ours
 }

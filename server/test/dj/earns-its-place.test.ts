@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { djMessages, djSessions, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
 import {
-  runDjTurn,
   blendedNotice,
   CORPUS_NOTICE,
   HONEST_LISTING_PERSONA_LINE,
@@ -20,6 +19,7 @@ import {
   TURN_APPLE_BUDGET,
   type DjDeps,
 } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { PROPOSE_EXTRA, PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL, titleKey } from '../../src/dj/propose'
 import { NAMED_ARTISTS_RULE_PREFIX } from '../../src/dj/curate'
 import { artistKey, creditedKeys } from '../../src/dj/artist-keys'

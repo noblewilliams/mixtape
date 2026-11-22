@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { djSessions, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
-import { runDjTurn, type DjDeps } from '../../src/dj/loop'
+import { type DjDeps } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL } from '../../src/dj/propose'
 import {
   ARTIST_ASK,

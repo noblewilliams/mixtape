@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { djSessions, trackFeatureFallbacks, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
 import {
-  runDjTurn,
   blendedNotice,
   corpusProposeShare,
   personalBlendNotice,
@@ -19,6 +18,7 @@ import {
   PROPOSE_SHARE,
   type DjDeps,
 } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { PROPOSE_EXTRA, PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL, VERIFY_MAX } from '../../src/dj/propose'
 import { DJ_TOOLS_WITH_OUTSIDE } from '../../src/dj/contracts'
 import { proposeFirstEnabled } from '../../src/index'

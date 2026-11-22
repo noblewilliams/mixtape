@@ -3,13 +3,13 @@ import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { djSessions, trackFeatures, trackMeanings, tracks, user, userTracks } from '../../src/db/schema'
 import {
-  runDjTurn,
   CORPUS_NOTICE,
   onlyArtistExhaustedNotice,
   onlyArtistNotFoundNotice,
   onlyArtistShortNotice,
   resolveOnlyArtist,
 } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { PROPOSE_SYSTEM_PROMPT } from '../../src/dj/propose'
 import { fillForArtist, FILL_BUDGET, FILL_PER_ARTIST, ONLY_ARTIST_FILL, type FillDeps } from '../../src/dj/catalogue-fill'
 import { creditedKeys } from '../../src/dj/artist-keys'

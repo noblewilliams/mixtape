@@ -11,7 +11,8 @@ import {
   userPlaylists,
   userTracks,
 } from '../../src/db/schema'
-import { runDjTurn, type DjDeps, type DjTurnOptions } from '../../src/dj/loop'
+import { type DjDeps, type DjTurnOptions } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { briefArtists, briefWithoutArtist, cleanStepEvent, STEP_NAME_MAX, turnStepReporter, type TurnStepEvent } from '../../src/dj/turn-steps'
 import { PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL } from '../../src/dj/propose'
 import { GENRE_CHECK_SYSTEM } from '../../src/dj/genre-check'
@@ -136,7 +137,7 @@ function genreComplete(): { complete: LlmComplete; genreCalls: () => number } {
 }
 
 // Runs one turn with a recording onStep.
-async function recordTurn(db: TestDb, deps: DjDeps, sessionId: string, text: string, userId = 'u1', options: DjTurnOptions = {}) {
+async function recordTurn(db: TestDb, deps: DjDeps, sessionId: string, text: string, userId = 'u1', options: Omit<DjTurnOptions, 'userMessageSeq'> = {}) {
   const steps: TurnStepEvent[] = []
   const result = await runDjTurn(db, deps, { id: sessionId, userId }, text, { ...options, onStep: (e) => { steps.push(e) } })
   return { steps, result }

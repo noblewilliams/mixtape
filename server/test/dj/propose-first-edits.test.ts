@@ -3,7 +3,6 @@ import { createTestDb, type TestDb } from '../helpers/db'
 import { eq } from 'drizzle-orm'
 import { djSessions, trackFeatures, trackMeanings, tracks, user, userTracks } from '../../src/db/schema'
 import {
-  runDjTurn,
   editOutsideShortNotice,
   genreCheckNotice,
   namedArtistsNotFoundNotice,
@@ -11,6 +10,7 @@ import {
   type DjDeps,
   editAddedNotice,
 } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL } from '../../src/dj/propose'
 import type { FillDeps } from '../../src/dj/catalogue-fill'
 import type { CatalogSong } from '../../src/musickit/catalog'

@@ -69,7 +69,8 @@ import {
   type QueueTrackView,
   type ReplacementsProvider,
 } from './queue-store'
-import { claimTurn, finishTurn, rollbackTurn, TurnGuard, TurnStopped, type TurnClaim, type TurnStopTiming, type TurnWrites } from './turn-stop'
+import { claimTurn, finishTurn, persistTurnWrites, rollbackTurn, TurnGuard, TurnStopped, type PersistedTurnWrites, type TurnClaim, type TurnStopTiming, type TurnWrites } from './turn-stop'
+export type { PersistedTurnWrites } from './turn-stop'
 
 // titleComplete is optional: session titling (routes/sessions.ts) degrades to
 // its truncated-prompt fallback with no titleComplete wired, same as any
@@ -3326,7 +3327,11 @@ type RenameTracker = { title?: string }
 // `historyOffered` marks the history pill claimed this turn
 // (offerHistoryPill): the turn result carries addMusic, and a conflict
 // retry's generate tells the model again without a second claim or row.
-type TurnChanges = { summaries: string[]; remakeMade?: true; historyOffered?: true }
+// `record` tells runDjTurn's recordWrites hook that the turn's writes
+// changed (set by runClaimedTurn); called right after a write lands, from
+// wherever in an attempt it lands, so a turn that dies before its finally
+// has still reported it.
+type TurnChanges = { summaries: string[]; remakeMade?: true; historyOffered?: true; record?: () => Promise<void> }
 
 function recordChange(changes: TurnChanges, outcome: { queueChanged: boolean; changeSummary?: string }, replacesQueue: boolean): void {
   if (!outcome.queueChanged || !outcome.changeSummary) return
@@ -3371,6 +3376,7 @@ async function offerHistoryPill(db: Db, session: DjSessionRef, surface: Surface,
     .returning({ id: djSessions.id })
   if (claimed.length === 0) return false
   changes.historyOffered = true
+  await changes.record?.()
   try {
     await db.insert(funnelEvents).values({ userId: session.userId, type: 'music_chip_offered', surface })
   } catch {
@@ -3606,7 +3612,10 @@ async function attemptTurn(
           // rather than a local var — the write must survive even if a LATER
           // tool call this same round (or a later round) throws and this
           // whole attempt gets discarded.
-          if (outcome.newTitle) renameState.title = outcome.newTitle
+          if (outcome.newTitle) {
+            renameState.title = outcome.newTitle
+            await changes.record?.()
+          }
           // Once saved, so the step carries the title the mix now has.
           deps.step?.({ step: 'labelling', title: outcome.newTitle })
         } else {
@@ -3675,6 +3684,13 @@ function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjErr
 // names already cleaned. Absent (the JSON route), nothing is reported.
 // firstTurn: the turn that created its session (POST /sessions); stopped,
 // it deletes the session rather than rolling it back. stopTiming is for tests.
+// userMessageSeq: the listener's message row for this turn, which the caller
+// inserted (insertUserMessage) before calling, so their words are kept
+// whatever the turn does, and a re-run of the turn answers the same row.
+// recordWrites receives what a rollback would have to undo each time that
+// changes (spec 2026-11-21 durable-mix-turns), for a caller that stores it
+// so a later attempt can undo a dead one. Awaited, so the snapshot is stored
+// before the turn writes on; a failure in it never fails the turn.
 export type DjTurnOptions = {
   energyArc?: Intent['energyArc']
   surface?: Surface
@@ -3682,6 +3698,33 @@ export type DjTurnOptions = {
   onStep?: (event: TurnStepEvent) => void
   firstTurn?: boolean
   stopTiming?: TurnStopTiming
+  userMessageSeq: number
+  recordWrites?: (snapshot: PersistedTurnWrites) => void | Promise<void>
+}
+
+// Persist-first: the listener's own words go into the transcript before the
+// turn runs, so a turn that fails or dies still leaves them there to retry
+// from. Returns the row's seq for DjTurnOptions.userMessageSeq.
+export async function insertUserMessage(db: Db, sessionId: string, text: string): Promise<number> {
+  const [row] = await db
+    .insert(djMessages)
+    .values({ sessionId, role: 'user', content: text })
+    .returning({ seq: djMessages.seq })
+  return row.seq
+}
+
+// The recordWrites hook, made safe to call from anywhere in the turn: a
+// snapshot each time, and nothing it throws reaches the turn.
+function writesRecorder(options: DjTurnOptions, snapshot: () => PersistedTurnWrites): () => Promise<void> {
+  const hook = options.recordWrites
+  if (!hook) return async () => {}
+  return async () => {
+    try {
+      await hook(snapshot())
+    } catch {
+      // Recording is for a later attempt's rollback; this attempt carries on.
+    }
+  }
 }
 
 // Why a remake turn has nothing to do, or null when it should run: the
@@ -3697,7 +3740,7 @@ async function remakeRefusalText(db: Db, session: DjSessionRef): Promise<string 
 // claims its session, every model call checks for a stop (and is abandoned
 // within a second of one), and a stopped turn is undone before TurnStopped
 // is thrown. Finished or stopped is decided once, by finishTurn.
-export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string, options: DjTurnOptions = {}): Promise<DjTurnResult> {
+export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string, options: DjTurnOptions): Promise<DjTurnResult> {
   const startingVersion = await getSessionQueueVersion(db, session.id)
   // Stopping is a nicety on top of the turn, never a way for it to fail: a
   // claim that cannot be written leaves this one turn unstoppable.
@@ -3708,12 +3751,13 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     claim = null
   }
   const writes: TurnWrites = { messageSeqs: [], renamed: false, historyOffered: false }
-  if (!claim) return runClaimedTurn(db, deps, session, userText, options, startingVersion, writes)
+  const record = writesRecorder(options, () => persistTurnWrites(claim, startingVersion, writes))
+  if (!claim) return runClaimedTurn(db, deps, session, userText, options, startingVersion, writes, record)
   const guard = new TurnGuard(db, session.id, claim.turnId, options.stopTiming)
   const guarded: DjDeps = { ...deps, llm: guard.wrap(deps.llm), embed: guard.wrap(deps.embed), turnStopped: () => guard.stopped }
   let outcome: { ok: true; value: DjTurnResult } | { ok: false; error: unknown }
   try {
-    outcome = { ok: true, value: await runClaimedTurn(db, guarded, session, userText, options, startingVersion, writes) }
+    outcome = { ok: true, value: await runClaimedTurn(db, guarded, session, userText, options, startingVersion, writes, record) }
   } catch (error) {
     outcome = { ok: false, error }
   }
@@ -3727,7 +3771,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     if (outcome.ok) return outcome.value
     throw outcome.error
   }
-  await rollbackTurn(db, session, claim, startingVersion, writes, { firstTurn: options.firstTurn })
+  await rollbackTurn(db, session, persistTurnWrites(claim, startingVersion, writes), { mode: 'stop', firstTurn: options.firstTurn })
   logTurnStopped(session.id)
   throw new TurnStopped()
 }
@@ -3744,23 +3788,24 @@ async function runClaimedTurn(
   options: DjTurnOptions,
   startingVersion: number,
   writes: TurnWrites,
+  recordWrites: () => Promise<void>,
 ): Promise<DjTurnResult> {
-  // Read before anything else: (a) fails fast on a missing session before any
-  // insert, and (b) is the "before this turn" baseline that both the success
-  // path and the error path compare against to decide whether the queue
-  // moved THIS TURN — across retries too (see below), not just within
-  // whichever attempt happens to be the one that finally returns. Read by
-  // runDjTurn, before its claim.
+  // Read before anything else: (a) fails fast on a missing session before
+  // any write of the turn's own, and (b) is the "before this turn" baseline
+  // that both the success path and the error path compare against to decide
+  // whether the queue moved THIS TURN — across retries too (see below), not
+  // just within whichever attempt happens to be the one that finally
+  // returns. Read by runDjTurn, before its claim.
 
-  // Persisted first and unconditionally — the listener's own words stay in
-  // the transcript no matter what happens next in this turn. The returned
-  // seq is threaded into history loading so this same row can never also be
-  // read back as "history" and sent to the model a second time.
-  const [userRow] = await db
-    .insert(djMessages)
-    .values({ sessionId: session.id, role: 'user', content: userText })
-    .returning({ seq: djMessages.seq })
-  writes.messageSeqs.push(userRow.seq)
+  // The listener's own words were persisted by the caller before this turn
+  // (insertUserMessage). Their seq is threaded into history loading so this
+  // same row can never also be read back as "history" and sent to the model
+  // a second time, and it is the first of this turn's writes, so a stop
+  // still takes it back (a re-run's rollback keeps it).
+  const userRowSeq = options.userMessageSeq
+  writes.messageSeqs.push(userRowSeq)
+  // The first record: the listener's seq, the starting version and the claim.
+  await recordWrites()
 
   // A remake with nothing to do, answered with a fixed reply before any
   // model call; the mix stands as it was (no version, no label change, no
@@ -3775,6 +3820,7 @@ async function runClaimedTurn(
       .values({ sessionId: session.id, role: 'dj', content: remakeRefusal, queueVersion: null })
       .returning()
     writes.messageSeqs.push(djMessageRow.seq)
+    await recordWrites()
     const queue = await getActiveQueue(db, session.id)
     logTurn(session.id, null, null)
     return { djMessage: djMessageRow, queue, queueVersion: startingVersion }
@@ -3791,6 +3837,14 @@ async function runClaimedTurn(
   const renameState: RenameTracker = {}
   const fillTracker: FillTracker = { ran: false, turnStartedAt: (deps.fill?.now ?? Date.now)() }
   const changes: TurnChanges = { summaries: [] }
+  // Brings writes up to date from the turn's shared boxes before recording,
+  // so a rename or pill claim is reported the moment its write lands.
+  const record = async () => {
+    writes.renamed = renameState.title !== undefined
+    writes.historyOffered = changes.historyOffered === true
+    await recordWrites()
+  }
+  changes.record = record
   const timing: TurnTiming = []
   // One reporter per turn, so its brief and its dedupe span a conflict retry.
   const step = options.onStep ? turnStepReporter(options.onStep) : undefined
@@ -3798,7 +3852,7 @@ async function runClaimedTurn(
 
   let attempt: AttemptResult
   try {
-    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState, fillTracker, options, changes)
+    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRowSeq, renameState, fillTracker, options, changes)
   } catch (e) {
     const failure = e instanceof AttemptTurnFailure ? e : null
     const djError = normalizeError(failure ? failure.originalError : e)
@@ -3825,6 +3879,7 @@ async function runClaimedTurn(
             .values({ sessionId: session.id, role: 'dj', content: changes.summaries.join(' '), queueVersion: currentVersion })
             .returning()
           writes.messageSeqs.push(djMessageRow.seq)
+          await record()
           logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log, true, timing, fillTracker.spend?.verifyMs)
           // A pill this turn claimed rides the recovered reply too: its
           // music_chip_at and funnel row are already written.
@@ -3903,6 +3958,7 @@ async function runClaimedTurn(
     })
     .returning()
   writes.messageSeqs.push(djMessageRow.seq)
+  await record()
 
   const queue = await getActiveQueue(db, session.id)
   logTurn(session.id, attempt.stats, null, undefined, fillTracker.log, fillTracker.spend?.log, undefined, timing, fillTracker.spend?.verifyMs)

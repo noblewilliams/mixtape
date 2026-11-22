@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest'
 import { and, asc, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
-  runDjTurn,
   DjError,
   FALLBACK_TEXT,
   FALLBACK_UNCHANGED_TEXT,
@@ -24,6 +23,7 @@ import {
   type DjDeps,
   type DjSessionRef,
 } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { LlmError, type LlmClient, type LlmMessage, type LlmRequest, type LlmTurn, type LlmAssistantBlock, type LlmToolCall } from '../../src/dj/llm'
 import { replaceQueue, applyOps, getActiveQueue } from '../../src/dj/queue-store'
 import { restoreMixVersion } from '../../src/dj/mix-history'

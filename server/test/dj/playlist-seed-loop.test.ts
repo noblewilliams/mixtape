@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { runDjTurn, type DjSessionRef } from '../../src/dj/loop'
+import { type DjSessionRef } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import type { LlmClient, LlmRequest, LlmTurn } from '../../src/dj/llm'
 import { applyOps, getActiveQueue, QueueVersionConflict, replaceQueue } from '../../src/dj/queue-store'
 import {

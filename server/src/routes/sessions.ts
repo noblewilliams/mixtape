@@ -7,7 +7,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../db/schema'
-import { runDjTurn, DjError, type DjDeps, type DjSessionRef, type DjTurnOptions } from '../dj/loop'
+import { insertUserMessage, runDjTurn, DjError, type DjDeps, type DjSessionRef, type DjTurnOptions } from '../dj/loop'
 import { requestStop, TurnStopped, type TurnStopTiming } from '../dj/turn-stop'
 import { streamTurn, wantsTurnStream, type TurnReply } from './turn-stream'
 import { runAlbumTurn, AlbumTurnError, type AlbumDeps, type AlbumTurnResult } from '../albums/loop'
@@ -525,10 +525,10 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
     }
     const fallbackTitle = titleFromPrompt(prompt)
 
-    // Persist-first: the session row (and, inside runDjTurn, the user's own
-    // message) exist before the first turn runs — a failure below still
-    // leaves the listener with a session they can reopen and retry, rather
-    // than losing their prompt to an LLM hiccup. Starts with the durable
+    // Persist-first: the session row and the user's own message exist
+    // before the first turn runs — a failure below still leaves the
+    // listener with a session they can reopen and retry, rather than losing
+    // their prompt to an LLM hiccup. Starts with the durable
     // truncated-prompt title; replaced below only once the Haiku-generated
     // name (run concurrently with the turn) resolves.
     let session
@@ -538,7 +538,8 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
       if (e instanceof PlaylistSeedError) return c.json({ error: e.kind }, e.kind === 'not_found' ? 404 : 409)
       throw e
     }
-    const options: DjTurnOptions = { energyArc, surface: requestSurface(c.req.header('User-Agent')) }
+    const userMessageSeq = await insertUserMessage(db, session.id, prompt)
+    const options: DjTurnOptions = { energyArc, surface: requestSurface(c.req.header('User-Agent')), userMessageSeq }
 
     // Every refusal above answered JSON; the stream starts only now, with
     // the row in hand, so its first event can name the session.
@@ -737,10 +738,14 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
         throw e
       }
     }
+    // Persist-first, after every refusal: the listener's words are kept
+    // whatever the turn does.
+    const userMessageSeq = await insertUserMessage(db, session.id, text)
     const options: DjTurnOptions = {
       energyArc,
       surface: requestSurface(c.req.header('User-Agent')),
       ...(remake === true ? { remake: true } : {}),
+      userMessageSeq,
     }
     // A mix turn only: an album session answered JSON above.
     if (wantsTurnStream(c)) return streamTurn(c, (onStep) => mixMessageTurn(sessionRef, text, { ...options, onStep }))

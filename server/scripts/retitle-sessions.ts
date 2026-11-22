@@ -74,7 +74,7 @@ async function main() {
   for (const session of sessions) {
     try {
       // The first USER message by seq is always the session's opening prompt
-      // (runDjTurn's persist-first contract inserts it before anything else),
+      // (the routes' persist-first insert writes it before the turn runs),
       // so this is the exact text titleFromPrompt derived the fallback from.
       const [firstUserMessage] = await db
         .select({ content: djMessages.content })

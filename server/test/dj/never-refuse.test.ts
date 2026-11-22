@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { djSessions, funnelEvents, trackFeatureFallbacks, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
 import {
-  runDjTurn,
   CORPUS_NOTICE,
   CORPUS_PROPOSE_SHARE,
   blendedNotice,
@@ -20,6 +19,7 @@ import {
   type DjDeps,
   type FeaturesTracker,
 } from '../../src/dj/loop'
+import { runDjTurn } from '../helpers/turn'
 import { PROPOSED_NOTICE, PROPOSE_SYSTEM_PROMPT, ROUND_TWO_CUTOFF_MS, VERIFY_CONCURRENCY, VERIFY_MAX, type VerifiedProposal } from '../../src/dj/propose'
 import { FILL_QUEUE_BOOST, type FillDeps } from '../../src/dj/catalogue-fill'
 import { neverRefuseEnabled } from '../../src/index'
