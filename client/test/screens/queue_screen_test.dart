@@ -30,6 +30,8 @@ import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
+import 'package:mixtape/presentation/providers/push_provider.dart';
+import 'package:mixtape/presentation/widgets/push_permission_popup.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
@@ -51,6 +53,7 @@ import '../data/playback/playback_controller_test.dart'
     as playback
     show FakeApi, FakeBridge;
 import '../helpers/fake_listening_api.dart';
+import '../helpers/fake_push_channel.dart';
 import '../helpers/fake_clipboard_writer.dart';
 import '../helpers/onboarding_harness.dart' show FakeLinkOpener;
 
@@ -433,9 +436,11 @@ ProviderContainer _makeContainer(
   FakeClipboardWriter? clipboard,
   MusicPlatformStore? destinations,
   PlaybackController? player,
+  FakePushChannel? push,
 }) {
   final container = ProviderContainer(
     overrides: [
+      pushChannelProvider.overrideWithValue(push ?? FakePushChannel()),
       musicPlatformStoreProvider.overrideWithValue(
         destinations ?? InMemoryMusicPlatformStore(),
       ),
@@ -2781,5 +2786,64 @@ void main() {
       expect(find.text('Title 5'), findsOneWidget);
       expect(find.text('Title 1'), findsNothing);
     });
+  });
+
+  // Durable mix turns: the tape composer sends turns too, so the tape
+  // reports itself as the visible mix (a push for it is hidden, a result
+  // landing here counts as seen) and carries the Mix ready pop-up's
+  // working ask, as the conversation does.
+  group('push hooks on the tape', () {
+    testWidgets('reports itself as the visible mix, and lets go when covered', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      final channel = FakePushChannel();
+      final scoped = _makeContainer(api, push: channel);
+      await _pump(tester, scoped);
+
+      expect(scoped.read(visibleMixProvider), 's1');
+      expect(channel.visible.last, 's1');
+
+      // Another route on top: the tape is no longer what the listener sees.
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('over')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(scoped.read(visibleMixProvider), isNull);
+
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(scoped.read(visibleMixProvider), 's1');
+
+      // Leaving the tape clears it.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      expect(scoped.read(visibleMixProvider), isNull);
+    });
+
+    testWidgets(
+      'wraps the tape in the pop-up trigger, idle until a turn is out',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(),
+          messages: [],
+          queue: [_track(0)],
+        );
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        final trigger = tester.widget<PushAskTrigger>(
+          find.byType(PushAskTrigger),
+        );
+        expect(trigger.working, isFalse);
+        expect(trigger.onArrival, isFalse);
+      },
+    );
   });
 }

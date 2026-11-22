@@ -48,6 +48,8 @@ import '../providers/mix_activity_provider.dart';
 import '../providers/mix_operation_gate.dart';
 import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
+import '../providers/push_provider.dart';
+import '../providers/shell_providers.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/cassette_tile.dart';
@@ -63,10 +65,12 @@ import '../widgets/mix_quote.dart';
 import '../widgets/mix_turn_sender.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/music_door.dart';
+import '../widgets/push_permission_popup.dart';
 import '../widgets/tape_header.dart';
 import '../widgets/track_row.dart';
 import 'chat_screen.dart' show openConversation, remakeInConversation;
 import 'mix_history_screen.dart';
+import 'shell/shell_route_observer.dart' show ShellTabScope;
 import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/foundation/haptics.dart';
 
@@ -136,9 +140,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   /// tape never opens on a stale reply.
   int? _sentFrom;
 
+  /// Read in [initState]: [dispose] cannot use `ref`.
+  late final VisibleMixNotifier _visibleMix;
+
   @override
   void initState() {
     super.initState();
+    _visibleMix = ref.read(visibleMixProvider.notifier);
     _scroll.addListener(_syncTitle);
     // A row resting open closes once the list scrolls.
     _scroll.addListener(SwipeActionRow.closeAll);
@@ -146,10 +154,37 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
 
   @override
   void dispose() {
+    // After the frame: providers are not changed while the tree is torn
+    // down.
+    final visibleMix = _visibleMix;
+    scheduleMicrotask(() => visibleMix.hide(this));
     _toast.dispose();
     _scroll.dispose();
     _promptFocus.dispose();
     super.dispose();
+  }
+
+  /// Tells `mixtape/push` whether this tape is what the listener sees, as
+  /// the conversation does: a push for the mix is then not shown, and a
+  /// result landing here counts as seen (spec 2026-11-21 durable mix turns,
+  /// "Who notifies"). The tape composer sends turns too, so it needs this.
+  void _reportVisible(bool onScreen) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (onScreen) {
+        _visibleMix.show(this, widget.sessionId);
+      } else {
+        _visibleMix.hide(this);
+      }
+    });
+  }
+
+  /// The top route of its navigator, in the selected tab (every tab's stack
+  /// stays built behind the others).
+  bool _onScreen() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+    final tab = ShellTabScope.maybeOf(context);
+    return tab == null || ref.watch(selectedTabProvider) == tab;
   }
 
   void _syncTitle() {
@@ -539,6 +574,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     // read has landed. The service gate has normally loaded it long before
     // this screen opens; watching keeps it loaded and current here too.
     ref.watch(onboardingProvider);
+    _reportVisible(_onScreen());
 
     ref.listen(chatProvider(widget.sessionId), (previous, next) {
       final state = next.value;
@@ -731,52 +767,63 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     Widget? bottomBar,
   }) {
     final theme = Theme.of(context);
-    return GradientBackground(
-      child: Theme(
-        data: theme.copyWith(
-          snackBarTheme: theme.snackBarTheme.copyWith(
-            behavior: SnackBarBehavior.floating,
-            insetPadding: const EdgeInsets.all(16),
+    // A turn sent from the tape composer gets the Mix ready pop-up's working
+    // ask too, about 3 s in, as the conversation's does.
+    final sending = ref.watch(
+      chatProvider(widget.sessionId).select((c) => c.value?.sending ?? false),
+    );
+    final workingSince = ref.watch(
+      mixActivityProvider.select((a) => a.workingSince(widget.sessionId)),
+    );
+    return PushAskTrigger(
+      working: sending || workingSince != null,
+      child: GradientBackground(
+        child: Theme(
+          data: theme.copyWith(
+            snackBarTheme: theme.snackBarTheme.copyWith(
+              behavior: SnackBarBehavior.floating,
+              insetPadding: const EdgeInsets.all(16),
+            ),
           ),
-        ),
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          // As the bottom bar, so floating toasts land above it rather than
-          // over Play.
-          bottomNavigationBar: bottomBar,
-          body: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SafeArea(
-                bottom: false,
-                child: _TopBar(
-                  title: title,
-                  // No cassette header (loading, empty, failed): the bar carries it.
-                  titleShown: _titleShown || bottomBar == null,
-                  onBack: () => Navigator.of(context).maybePop(),
-                  onMore: hasContent ? _openMore : null,
-                ),
-              ),
-              Expanded(
-                child: SafeArea(
-                  top: false,
-                  bottom: bottomBar == null,
-                  // A swipe action's toast floats over the list's foot,
-                  // just clear of the bar.
-                  child: Stack(
-                    children: [
-                      Positioned.fill(child: body),
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        bottom: 14,
-                        child: Center(child: MiniToast(controller: _toast)),
-                      ),
-                    ],
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            // As the bottom bar, so floating toasts land above it rather than
+            // over Play.
+            bottomNavigationBar: bottomBar,
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SafeArea(
+                  bottom: false,
+                  child: _TopBar(
+                    title: title,
+                    // No cassette header (loading, empty, failed): the bar carries it.
+                    titleShown: _titleShown || bottomBar == null,
+                    onBack: () => Navigator.of(context).maybePop(),
+                    onMore: hasContent ? _openMore : null,
                   ),
                 ),
-              ),
-            ],
+                Expanded(
+                  child: SafeArea(
+                    top: false,
+                    bottom: bottomBar == null,
+                    // A swipe action's toast floats over the list's foot,
+                    // just clear of the bar.
+                    child: Stack(
+                      children: [
+                        Positioned.fill(child: body),
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          bottom: 14,
+                          child: Center(child: MiniToast(controller: _toast)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
