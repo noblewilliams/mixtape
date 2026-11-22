@@ -21,6 +21,7 @@
 		C13A91D6B75A4B64A69E4132 /* PlaylistSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */; };
 		B7C21D04E5A3419F8D6C2A17 /* ShellDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A44F0C3B7D48A6B9052D63 /* ShellDock.swift */; };
 		A7D30B94E1C64F28A5D19E07 /* SpeechTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4F18A62D93B45E7B0A61F5D /* SpeechTranscriber.swift */; };
+		5D1E7A3C9B2F4C08A6E1D901 /* PushChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1E7A3C9B2F4C08A6E1D902 /* PushChannel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,6 +77,7 @@
 		D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlaylistSnapshotStore.swift; sourceTree = "<group>"; };
 		E1A44F0C3B7D48A6B9052D63 /* ShellDock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellDock.swift; sourceTree = "<group>"; };
 		C4F18A62D93B45E7B0A61F5D /* SpeechTranscriber.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeechTranscriber.swift; sourceTree = "<group>"; };
+		5D1E7A3C9B2F4C08A6E1D902 /* PushChannel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PushChannel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,6 +179,7 @@
 				D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */,
 				E1A44F0C3B7D48A6B9052D63 /* ShellDock.swift */,
 				C4F18A62D93B45E7B0A61F5D /* SpeechTranscriber.swift */,
+				5D1E7A3C9B2F4C08A6E1D902 /* PushChannel.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -418,6 +421,7 @@
 				C13A91D6B75A4B64A69E4132 /* PlaylistSnapshotStore.swift in Sources */,
 				B7C21D04E5A3419F8D6C2A17 /* ShellDock.swift in Sources */,
 				A7D30B94E1C64F28A5D19E07 /* SpeechTranscriber.swift in Sources */,
+				5D1E7A3C9B2F4C08A6E1D901 /* PushChannel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -11,6 +11,7 @@ import '../../data/auth/sign_in_preference_store.dart';
 import 'device_providers.dart';
 import 'library_sync_provider.dart' show authorStoreProvider;
 import 'name_page_provider.dart' show namePageSettledProvider;
+import 'push_provider.dart' show currentPushServiceProvider;
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => SecureTokenStore());
 
@@ -220,6 +221,7 @@ class AuthNotifier extends Notifier<AuthStatus> {
     final operation = ++_operation;
     _busy = true;
     try {
+      await _unregisterPush();
       await ref.read(authRepositoryProvider).signOut();
       if (!ref.mounted || operation != _operation) return;
       // Reset protected state before slower, best-effort device cleanup.
@@ -230,6 +232,25 @@ class AuthNotifier extends Notifier<AuthStatus> {
       if (operation == _operation) _busy = false;
     }
   }
+
+  /// This device stops receiving the departing listener's mix-ready pushes:
+  /// `DELETE /push/devices/:token`, sent while the bearer is still stored
+  /// (spec 2026-11-21 durable mix turns → Device registration). Bounded, so
+  /// an unreachable server never holds up a sign-out; the service swallows
+  /// its own failures. Account deletion needs none: the rows cascade.
+  Future<void> _unregisterPush() async {
+    try {
+      await ref
+          .read(currentPushServiceProvider)
+          .unregister()
+          .timeout(pushUnregisterTimeout, onTimeout: () {});
+    } catch (_) {
+      if (kDebugMode) debugPrint('push unregister failed');
+    }
+  }
+
+  /// How long sign-out waits for [_unregisterPush].
+  static const Duration pushUnregisterTimeout = Duration(seconds: 5);
 
   /// Deletes the account on the server (`DELETE /me`), then forgets it here
   /// the way [signOut] does. No sign-out request: the deletion already ended

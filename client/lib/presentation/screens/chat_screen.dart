@@ -38,6 +38,8 @@ import '../providers/playlist_context_provider.dart';
 import '../providers/shell_providers.dart';
 import '../providers/mix_activity_provider.dart';
 import '../providers/mix_operation_gate.dart';
+import '../providers/push_provider.dart';
+import '../../data/push/push_service.dart';
 import '../providers/working_step.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/album_card.dart';
@@ -107,15 +109,50 @@ void remakeInConversation(BuildContext context, String sessionId) {
   );
 }
 
+/// Opens the mix a tapped push is about (spec 2026-11-21 durable mix turns
+/// → iOS client), on [navigator] through the route the Mixes list uses. A
+/// `failed` turn's push puts the listener's last words back in the
+/// composer, ready to resend.
+///
+/// When that conversation is already what [navigator] shows, it is not
+/// opened twice: a failed turn's words go into its composer instead.
+/// Returns the pushed route's future (null when nothing was pushed), so the
+/// caller can refresh on the way back as the Mixes list does.
+Future<void>? openMixFromNotification(NavigatorState navigator, PushTap tap) {
+  for (final open in _ChatScreenState._open.reversed) {
+    if (!open.mounted || open.widget.sessionId != tap.sessionId) continue;
+    final route = ModalRoute.of(open.context);
+    if (route == null ||
+        !route.isCurrent ||
+        !identical(route.navigator, navigator)) {
+      continue;
+    }
+    if (tap.failed) open._restoreLastMessage();
+    return null;
+  }
+  return navigator.push(
+    MaterialPageRoute<void>(
+      builder: (_) =>
+          ChatScreen(sessionId: tap.sessionId, restoreLastMessage: tap.failed),
+    ),
+  );
+}
+
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({
     super.key,
     required this.sessionId,
     this.initialError,
     this.startRemake = false,
+    this.restoreLastMessage = false,
   });
 
   final String sessionId;
+
+  /// Set when a failed turn's push opens this conversation
+  /// ([openMixFromNotification]): once the transcript is on screen, the
+  /// listener's last words go back in the composer, as a stop puts them.
+  final bool restoreLastMessage;
 
   /// Set when the tape's Remake opens this conversation (see
   /// [remakeInConversation]): the remake starts once the transcript is on
@@ -159,6 +196,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _seededInitialError = false;
   bool _keepSheetChecked = false;
   bool _startedRemake = false;
+  bool _restoredLastMessage = false;
+
+  /// Read in [initState]: [dispose] cannot use `ref`.
+  late final VisibleMixNotifier _visibleMix;
 
   /// A send waiting on the AI-consent sheet.
   bool _askingConsent = false;
@@ -172,6 +213,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void initState() {
     super.initState();
     _open.add(this);
+    _visibleMix = ref.read(visibleMixProvider.notifier);
   }
 
   @override
@@ -190,6 +232,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   @override
   void dispose() {
     _open.remove(this);
+    // After the frame: providers are not changed while the tree is torn
+    // down.
+    final visibleMix = _visibleMix;
+    scheduleMicrotask(() => visibleMix.hide(this));
     _scrollController.dispose();
     _textController.dispose();
     _promptFocus.dispose();
@@ -320,6 +366,45 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         selection: TextSelection.collapsed(offset: text.length),
       );
     }
+  }
+
+  /// A failed turn's push opened this mix: the listener's last words go back
+  /// in the composer, the same way [_stop] puts them, unless they have
+  /// started typing. Only when the transcript ends on their line (the DJ
+  /// never answered it), and never a remake's fixed line, which the text
+  /// alone would send as a plain turn.
+  void _restoreLastMessage() {
+    final messages = ref.read(chatProvider(widget.sessionId)).value?.messages;
+    if (messages == null || !mounted) return;
+    ChatMessage? last;
+    for (final message in messages.reversed) {
+      if (message.isError) continue;
+      last = message;
+      break;
+    }
+    if (last == null) return;
+    final text = last.message.content;
+    if (last.message.role != 'user' || last.remake || text == remakeText) {
+      return;
+    }
+    if (_textController.text.isNotEmpty) return;
+    _textController.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  /// Tells `mixtape/push` whether this conversation is what the listener
+  /// sees, so a push for it is not shown while it is.
+  void _reportVisible(bool onScreen) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (onScreen) {
+        _visibleMix.show(this, widget.sessionId);
+      } else {
+        _visibleMix.hide(this);
+      }
+    });
   }
 
   /// The remake turn (see [_send]'s `remake` and `countTap`).
@@ -622,6 +707,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // non-blocking (see [_createPlaylist]). Any failure resolves to null.
     ref.watch(accountNameProvider);
     _measurePanel();
+    _reportVisible(_onScreen());
 
     ref.listen(sessionPlaylistContextProvider(widget.sessionId), (
       previous,
@@ -714,6 +800,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _startedRemake = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_remake(countTap: true));
+      });
+    }
+
+    // Opened by a failed turn's push: the words go back once, over the
+    // loaded transcript, for the same reasons as the seed above.
+    if (!_restoredLastMessage &&
+        widget.restoreLastMessage &&
+        chatAsync.hasValue) {
+      _restoredLastMessage = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _restoreLastMessage();
       });
     }
 

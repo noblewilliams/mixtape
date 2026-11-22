@@ -32,6 +32,9 @@ import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
+import 'package:mixtape/presentation/providers/push_provider.dart';
+import 'package:mixtape/data/push/push_service.dart';
+import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/providers/shell_providers.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/mixes_screen.dart';
@@ -45,6 +48,7 @@ import 'package:mixtape/presentation/widgets/foundation/side_rail.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
 
 import '../helpers/fake_listening_api.dart';
+import '../helpers/fake_push_channel.dart';
 import '../data/playback/playback_controller_test.dart' show FakeApi, song;
 import '../presentation/providers/app_update_provider_test.dart'
     show FakeAppUpdater;
@@ -1328,6 +1332,50 @@ void main() {
 
       expect(find.byType(SideRail), findsNothing);
       expect(find.byType(FrostedDock), findsOneWidget);
+    });
+  });
+
+  group('a tapped mix-ready push', () {
+    testWidgets('a warm tap opens the mix inside Mixes', (tester) async {
+      final push = FakePushChannel();
+      final container = shellContainer(
+        extra: [pushChannelProvider.overrideWithValue(push)],
+      );
+      container.listen(pendingPushTapProvider, (_, _) {});
+      await pumpShell(tester, container);
+      expect(stackIndex(tester), AppTab.home.index);
+
+      push.tap(const PushTap(sessionId: 's9', turnId: 't1', kind: 'ready'));
+      await tester.pumpAndSettle();
+
+      expect(stackIndex(tester), AppTab.mixes.index);
+      expect(
+        find.descendant(
+          of: find.byKey(ShellScreen.tabKey(AppTab.mixes)),
+          matching: find.byWidgetPredicate(
+            (w) => w is ChatScreen && w.sessionId == 's9',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(container.read(pendingPushTapProvider), isNull);
+    });
+
+    testWidgets('a cold-start tap opens once the shell is up', (tester) async {
+      final push = FakePushChannel(
+        launchTap: const PushTap(sessionId: 's8', turnId: 't1', kind: 'failed'),
+      );
+      final container = shellContainer(
+        extra: [pushChannelProvider.overrideWithValue(push)],
+      );
+      // As the app root does from launch.
+      container.listen(pendingPushTapProvider, (_, _) {});
+      await pumpShell(tester, container);
+
+      expect(stackIndex(tester), AppTab.mixes.index);
+      final chat = tester.widget<ChatScreen>(find.byType(ChatScreen));
+      expect(chat.sessionId, 's8');
+      expect(chat.restoreLastMessage, isTrue);
     });
   });
 }

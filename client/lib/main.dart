@@ -17,6 +17,7 @@ import 'presentation/screens/debug/mixes_preview.dart';
 import 'presentation/screens/debug/update_preview.dart';
 import 'presentation/screens/first_run/first_run_flow.dart';
 import 'presentation/screens/first_run/name_screen.dart';
+import 'presentation/providers/push_provider.dart';
 import 'presentation/screens/shell/shell_screen.dart';
 import 'presentation/widgets/foundation/glass_occlusion.dart';
 import 'presentation/widgets/foundation/gradient_background.dart';
@@ -83,6 +84,10 @@ class MixtapeApp extends ConsumerWidget {
     ref.listen(djStatusMonitorProvider, (_, _) {});
     // Over-the-air updates: looked for from launch, whatever the root.
     ref.listen(appUpdateMonitorProvider, (_, _) {});
+    // Mix-ready pushes: the device registers from launch (and again at every
+    // sign-in), and a tapped push waits here until the shell opens its mix.
+    ref.listen(pushServiceProvider, (_, _) {});
+    ref.listen(pendingPushTapProvider, (_, _) {});
     final root = switch (auth) {
       AuthStatus.unknown => _Root.unknown,
       AuthStatus.noSession => _Root.firstRun,

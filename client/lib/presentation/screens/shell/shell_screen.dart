@@ -25,6 +25,7 @@ import '../../../data/shell/shell_channel.dart';
 import '../../providers/dj_providers.dart';
 import '../../providers/first_run_provider.dart';
 import '../../providers/playback_provider.dart';
+import '../../providers/push_provider.dart';
 import '../../providers/shell_providers.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/ai_consent_sheet.dart';
@@ -166,6 +167,41 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       if (!mounted) return;
       _announceIfResolved();
       _openPendingConversation();
+    });
+    // A tapped push: the launch tap (already waiting) and any while running.
+    ref.listenManual(pendingPushTapProvider, (_, tap) {
+      if (tap != null) _schedulePushTap();
+    }, fireImmediately: true);
+  }
+
+  bool _pushTapScheduled = false;
+
+  /// After the frame, so nothing is pushed while a navigator builds, and the
+  /// tab navigators exist on a cold start.
+  void _schedulePushTap() {
+    if (_pushTapScheduled) return;
+    _pushTapScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _pushTapScheduled = false;
+      if (mounted) _openPushTap();
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Opens the tapped push's mix in Mixes, the way the Mixes list opens a
+  /// row, and refreshes the list on the way back as it does.
+  void _openPushTap() {
+    final navigator = _navigatorOf(AppTab.mixes.index);
+    if (navigator == null) return _schedulePushTap();
+    // Taking the tap is what makes it open once.
+    final tap = ref.read(pendingPushTapProvider.notifier).take();
+    if (tap == null) return;
+    if (_currentIndex != AppTab.mixes.index) {
+      ref.read(selectedTabProvider.notifier).select(AppTab.mixes.index);
+    }
+    openMixFromNotification(navigator, tap)?.then((_) {
+      if (!mounted) return;
+      ref.read(sessionsProvider.notifier).refresh();
     });
   }
 

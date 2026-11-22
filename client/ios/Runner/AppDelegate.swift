@@ -42,6 +42,12 @@ import UIKit
   private var backgroundChannel: FlutterMethodChannel?
   private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
+  /// `mixtape/push`: the APNs token, permission and taps for mix-ready
+  /// pushes. Also the notification-center delegate, as a proxy chained in
+  /// front of the one local notifications use (see `PushChannel`). Lives for
+  /// the app: the center holds its delegate weakly.
+  fileprivate lazy var pushChannel = PushChannel(fallback: self)
+
   /// The scene's window, once it connects: where the idiom is read from, so
   /// the answer describes the scene the app renders in, not the hardware.
   fileprivate weak var sceneWindow: UIWindow? {
@@ -67,7 +73,26 @@ import UIKit
     // Anything left from a previous launch is dead: the import that would
     // have read it went with the process.
     purgeOpenedArchives()
+    // Before launch finishes: a cold start's tap goes to the delegate set by
+    // then. Chained again once the plugins have registered.
+    pushChannel.install()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+  ) {
+    pushChannel.didRegister(deviceToken: deviceToken)
+    super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: Error
+  ) {
+    pushChannel.didFailToRegister(error)
+    super.application(application, didFailToRegisterForRemoteNotificationsWithError: error)
   }
 
   /// Everything the app registers with Flutter. Under the UIScene lifecycle
@@ -115,6 +140,14 @@ import UIKit
       sceneHooks = hooks
     }
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    pushChannel.attach(binaryMessenger: messenger)
+    // After the plugins: one that set its own delegate is chained, not lost.
+    pushChannel.install()
+  }
+
+  /// A cold start's tap, as the scene's connection options carry it.
+  fileprivate func receiveLaunchNotification(_ response: UNNotificationResponse) {
+    pushChannel.receiveLaunch(response)
   }
 
   /// The approved dock, in genuine Liquid Glass, on iOS 26 only.
@@ -355,6 +388,9 @@ private final class SceneHooks: NSObject, FlutterSceneLifeCycleDelegate {
     options connectionOptions: UIScene.ConnectionOptions?
   ) -> Bool {
     installDock(on: scene)
+    if let response = connectionOptions?.notificationResponse {
+      app?.receiveLaunchNotification(response)
+    }
     guard let contexts = connectionOptions?.urlContexts else { return false }
     return app?.receiveFiles(contexts) ?? false
   }
