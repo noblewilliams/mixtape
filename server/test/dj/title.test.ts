@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { generateMixTitle, generateSessionTitle, TITLE_MODEL, type MixTitleSong } from '../../src/dj/title'
+import { generateMixTitle, generateSessionTitle, NAMING_MODEL, carryingArtists, type MixTitleSong } from '../../src/dj/title'
+import { DJ_MODEL } from '../../src/dj/llm'
 import type { LlmComplete } from '../../src/dj/llm'
 
 const FALLBACK = 'rainy night drive — moody but not sad, k'
@@ -11,15 +12,43 @@ describe('generateSessionTitle', () => {
     expect(title).toBe('Rainy Night Drive')
   })
 
-  it('calls the model with the TITLE_MODEL constant, not the curation model', async () => {
+  // Founder 2026-11-22: wordplay is where the fast model is weakest, so
+  // naming moved to the curation model (a fraction of a cent per name).
+  it('names on the curation model, not the fast model', async () => {
     let capturedModel: string | undefined
     const complete: LlmComplete = async (opts) => {
       capturedModel = opts.model
       return 'Late Night Drive'
     }
     await generateSessionTitle(complete, 'x', FALLBACK)
-    expect(capturedModel).toBe(TITLE_MODEL)
-    expect(capturedModel).toBe('claude-haiku-4-5-20251001')
+    expect(capturedModel).toBe(NAMING_MODEL)
+    expect(NAMING_MODEL).toBe(DJ_MODEL)
+  })
+
+  it('turns thinking off on both namers so the token budget goes to the names', async () => {
+    const seen: Parameters<LlmComplete>[0][] = []
+    const complete: LlmComplete = async (o) => (seen.push(o), 'Fine')
+    await generateSessionTitle(complete, 'x', FALLBACK)
+    await generateMixTitle(complete, 'x', [{ title: 'A', artist: 'B', album: null }], FALLBACK)
+    expect(seen.map((o) => o.thinking)).toEqual(['off', 'off'])
+  })
+
+  // Founder 2026-11-22: the model writes five candidates and picks one, since
+  // the first idea is rarely the witty one.
+  it('returns the picked candidate when the model lists several', async () => {
+    const complete: LlmComplete = async () => '1. Kanye rest\n2. Bey watch\n3. Sunset in Pretoria\n4. Hit the Drake\n5. Ships in the rain\nPick: Bey watch'
+    expect(await generateSessionTitle(complete, 'x', FALLBACK)).toBe('Bey watch')
+    expect(await generateMixTitle(complete, 'x', [{ title: 'A', artist: 'B', album: null }], FALLBACK)).toBe('Bey watch')
+  })
+
+  it('falls back to the first candidate when the pick line is missing, stripping its number', async () => {
+    const complete: LlmComplete = async () => '1. Kanye rest\n2. Bey watch'
+    expect(await generateSessionTitle(complete, 'x', FALLBACK)).toBe('Kanye rest')
+  })
+
+  it('strips quotes around a picked candidate', async () => {
+    const complete: LlmComplete = async () => '1. A b\nPick: "Bey watch"'
+    expect(await generateSessionTitle(complete, 'x', FALLBACK)).toBe('Bey watch')
   })
 
   it('falls back when the model throws', async () => {
@@ -79,9 +108,9 @@ describe('generateSessionTitle', () => {
     expect(capturedTimeoutMs).toBe(5000)
   })
 
-  // Founder 2026-11-17: names run 3 to 6 words, in sentence case, in the
-  // voice of the music asked for rather than describing a scene.
-  it('asks for a 3 to 6 word name in sentence case and the voice of the genre, with filler words banned and no em dashes in its rules', async () => {
+  // Founder 2026-11-22: 2 to 6 words (puns run short), sentence case, the
+  // music's own world, filler banned.
+  it('asks for five 2 to 6 word candidates in sentence case and the genre\'s world, with filler words banned and no em dashes in its rules', async () => {
     let system = ''
     let maxTokens: number | undefined
     const complete: LlmComplete = async (opts) => {
@@ -90,13 +119,14 @@ describe('generateSessionTitle', () => {
       return 'Fine'
     }
     await generateSessionTitle(complete, 'x', FALLBACK)
-    expect(system).toMatch(/3 to 6 words/)
+    expect(system).toMatch(/2 to 6 words/)
+    expect(system).toMatch(/5 candidates/i)
+    expect(system).toMatch(/Pick:/)
     expect(system).toMatch(/sentence case/i)
     expect(system).toMatch(/genre/i)
-    expect(system).not.toMatch(/2-5 word/)
     expect(system).toMatch(/Vibes/)
     expect(system).not.toContain('—')
-    expect(maxTokens).toBeGreaterThanOrEqual(30)
+    expect(maxTokens).toBeGreaterThanOrEqual(120)
   })
 
   it('treats a sentence-length answer (the model replying to the brief instead of titling it) as no title', async () => {
@@ -164,10 +194,10 @@ describe('generateMixTitle', () => {
     }
   })
 
-  it('stays on the fast title model with a hard 5s bound: no retry, since the mix waits on it', async () => {
+  it('names on the curation model with a hard 5s bound: no retry, since the mix waits on it', async () => {
     let opts: Parameters<LlmComplete>[0] | undefined
     await generateMixTitle(async (o) => ((opts = o), 'Fine'), 'x', SONGS, FALLBACK)
-    expect(opts?.model).toBe(TITLE_MODEL)
+    expect(opts?.model).toBe(NAMING_MODEL)
     expect(opts?.timeoutMs).toBe(5000)
     expect(opts?.maxRetries).toBe(0)
   })
@@ -183,39 +213,60 @@ describe('generateMixTitle', () => {
     expect(system).not.toContain('—')
   })
 
-  it('asks for 3 to 6 words in sentence case, in the voice of the genre', async () => {
+  it('asks for 2 to 6 words in sentence case, in the world of the genre', async () => {
     const { seen, complete } = capture()
     await generateMixTitle(complete, 'x', SONGS, FALLBACK)
-    expect(seen.system).toMatch(/3 to 6 words/)
+    expect(seen.system).toMatch(/2 to 6 words/)
     expect(seen.system).toMatch(/sentence case/i)
     expect(seen.system).toMatch(/genre/i)
   })
 
-  // Founder 2026-11-17: names mostly read as an action, "Move your legs
-  // faster than your doubt", not "Legs moving faster than your doubt".
-  it('asks both namers for an imperative action most of the time', async () => {
+  // Founder 2026-11-22: the forced verb-first shape read like a
+  // motivational poster ("Chasing bars faster than breath"); names now aim
+  // for wit: puns and wordplay on titles, artists and well-known phrases.
+  it('asks both namers for wordplay, not a forced verb-first slogan', async () => {
     const { seen, complete } = capture()
     await generateMixTitle(complete, 'x', SONGS, FALLBACK)
     let briefSystem = ''
     await generateSessionTitle(async (o) => ((briefSystem = o.system), 'Fine'), 'x', FALLBACK)
     for (const system of [seen.system ?? '', briefSystem]) {
-      expect(system).toMatch(/imperative/i)
-      expect(system).toMatch(/Move your legs faster than your doubt/)
-      expect(system).not.toMatch(/string of "-ing" verbs/)
+      expect(system).toMatch(/pun/i)
+      expect(system).toMatch(/wordplay/i)
+      expect(system).toMatch(/at least two puns/i)
+      expect(system).toMatch(/at most one song or album title lifted/i)
+      expect(system).toMatch(/at least two that use an artist name/i)
+      expect(system).not.toMatch(/This time use/)
+      expect(system).not.toMatch(/opens with a verb/)
+      expect(system).not.toMatch(/Move your legs faster than your doubt/)
+      expect(system).not.toMatch(/never name an artist/i)
     }
   })
 
-  // Founder 2026-11-17: some names open in the present continuous
-  // ("Floating through ..."). The model ignores a ratio, so the code picks
-  // the form per name (about one in three) and says which.
-  it('picks the verb form in code: present continuous about one time in three, imperative otherwise', async () => {
-    const systems: Record<string, string> = {}
-    for (const [label, roll] of [['ing', 0.1], ['imp', 0.9]] as const) {
-      await generateMixTitle(async (o) => ((systems[`mix-${label}`] = o.system), 'Fine'), 'x', SONGS, FALLBACK, () => roll)
-      await generateSessionTitle(async (o) => ((systems[`brief-${label}`] = o.system), 'Fine'), 'x', FALLBACK, () => roll)
-    }
-    for (const k of ['mix-ing', 'brief-ing']) expect(systems[k]).toMatch(/This time use the present continuous/)
-    for (const k of ['mix-imp', 'brief-imp']) expect(systems[k]).toMatch(/This time use the imperative/)
+  // Founder 2026-11-22: "this should've had J. Cole or Eminem in the name".
+  it('tells the model which artists carry the mix so it can name or pun on them', async () => {
+    const songs: MixTitleSong[] = [
+      { title: 'Middle Child', artist: 'J. Cole', album: null },
+      { title: 'No Role Modelz', artist: 'J. Cole', album: '2014 Forest Hills Drive' },
+      { title: 'ATM', artist: 'J. Cole', album: 'KOD' },
+      { title: 'Rap God', artist: 'Eminem', album: 'The Marshall Mathers LP2' },
+      { title: 'Business', artist: 'Eminem', album: 'The Eminem Show' },
+      { title: 'Criminal', artist: 'Eminem', album: null },
+      { title: 'm.A.A.d city', artist: 'Kendrick Lamar & MC Eiht', album: null },
+      { title: 'X', artist: 'Xzibit', album: null },
+      { title: 'Y', artist: 'Baby Keem', album: null },
+      { title: 'Z', artist: 'Lil Wayne', album: null },
+    ]
+    const { seen, complete } = capture()
+    await generateMixTitle(complete, 'Cole and Eminem I can rap to', songs, FALLBACK)
+    expect(seen.prompt).toMatch(/Artists carrying this mix: .*J\. Cole/)
+    expect(seen.prompt).toMatch(/Artists carrying this mix: .*Eminem/)
+    expect(seen.prompt).not.toMatch(/Artists carrying this mix: .*Xzibit/)
+  })
+
+  it('names no carrying artist for a mix spread across many artists', async () => {
+    const { seen, complete } = capture()
+    await generateMixTitle(complete, 'lofi afro house', SONGS, FALLBACK)
+    expect(seen.prompt).not.toMatch(/Artists carrying this mix/)
   })
 
   it('sanitizes song fields so a crafted track title cannot break out of its line', async () => {
@@ -245,5 +296,30 @@ describe('generateMixTitle', () => {
     }
     expect(await generateMixTitle(spy, 'x', [], FALLBACK)).toBe(FALLBACK)
     expect(called).toBe(false)
+  })
+})
+
+describe('carryingArtists', () => {
+  const song = (artist: string): MixTitleSong => ({ title: 't', artist, album: null })
+
+  it('counts an artist with a quarter or more of the songs (and at least two)', () => {
+    const songs = [song('Eminem'), song('Eminem'), song('Eminem'), song('A'), song('B'), song('C'), song('D'), song('E')]
+    expect(carryingArtists('rap', songs)).toEqual(['Eminem'])
+  })
+
+  it('splits joint credits and features into their artists', () => {
+    const songs = [song('J. Cole & Kendrick Lamar'), song('J. Cole, 21 Savage'), song('Drake feat. J. Cole'), song('A'), song('B'), song('C')]
+    expect(carryingArtists('x', songs)).toEqual(['J. Cole'])
+  })
+
+  it('counts an artist the brief names, even by surname alone, once they are in the mix', () => {
+    const songs = [song('J. Cole'), song('A'), song('B'), song('C'), song('D'), song('E'), song('F'), song('G')]
+    expect(carryingArtists('Cole and Eminem I can rap to', songs)).toEqual(['J. Cole'])
+    expect(carryingArtists('something to rap to', songs)).toEqual([])
+  })
+
+  it('caps the list at three artists', () => {
+    const songs = ['A', 'B', 'C', 'D'].flatMap((a) => [song(a), song(a)])
+    expect(carryingArtists('A B C D', songs).length).toBe(3)
   })
 })

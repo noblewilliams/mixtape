@@ -1,6 +1,6 @@
 /**
  * retitle-sessions — one-off backfill: regenerate session titles via the
- * Haiku session-titling helper (dj/title.ts) for any session whose title is
+ * session-titling helper (dj/title.ts) for any session whose title is
  * still exactly the truncated-prompt fallback (routes/sessions.ts's
  * titleFromPrompt) — i.e. it predates this feature, or its own concurrent
  * title call at creation time failed/wasn't wired.

@@ -161,13 +161,13 @@ export async function createMixTurn(
 
   // A rename_session call within this very first turn (unusual, but the
   // listener COULD open with "call this tape Lagos Nights") wins over the
-  // concurrently-generated Haiku title — an explicit rename is a stronger
+  // concurrently-generated title — an explicit rename is a stronger
   // signal than the auto-naming pass, and the auto-generated title must
   // never clobber it on the write below. Checked on the REJECTED branch
   // too (DjError.sessionTitle, dj/loop.ts) — the rename's DB write already
   // landed before whatever later failed this turn (a conflict that
   // persisted through the retry, a curation error, ...), so a failed turn
-  // must never overwrite that persisted rename with the Haiku title here.
+  // must never overwrite that persisted rename with the generated title here.
   const renamedTitle =
     turnResult.status === 'fulfilled'
       ? turnResult.value.sessionTitle
@@ -178,7 +178,7 @@ export async function createMixTurn(
 
   // Decision 2026-11-16 (mix titles from the songs): a first turn that
   // came back with songs is named from them, so this call waits for the
-  // picks (about 0.6 s on the fast model, 5 s cap). The brief-only title
+  // picks (about 1.3 to 2.6 s since 2026-11-22, 5 s cap). The brief-only title
   // above is its fallback; a rename or a chat-only turn skips it.
   const title =
     renamedTitle ??

@@ -1,54 +1,49 @@
-import type { LlmComplete } from './llm'
+import { DJ_MODEL, type LlmComplete } from './llm'
 import { sanitizeForPrompt } from './sanitize'
 
-// Naming call, not curation — deliberately NOT DJ_MODEL (see llm.ts): a
-// session title costs fractions of a cent and doesn't need Sonnet's
-// judgment, so it's pinned to Haiku instead.
+// The fast model for cheap one-shot calls that borrow it (genre check,
+// auto-pause probe). Names no longer use it: see NAMING_MODEL.
 export const TITLE_MODEL = 'claude-haiku-4-5-20251001'
 
-// The voice rules both namers share (founder 2026-11-17): a name in the
-// music's own voice, an action that opens with a verb: mostly imperative
-// ("Move your legs faster than your doubt"), sometimes present continuous
-// ("Floating through ..."), never noun-first description, in sentence case.
+// The model that writes names (founder 2026-11-22). Wordplay is where the
+// fast model is weakest, and a name is a fraction of a cent on the curation
+// model, so both namers use it. TITLE_MODEL stays the fast model for the
+// other cheap calls that borrow it (genre check, auto-pause probe).
+export const NAMING_MODEL = DJ_MODEL
+
+// The voice rules both namers share (founder 2026-11-22, replacing the
+// 2026-11-17 verb-first rule, which read like a motivational poster:
+// "Chasing bars faster than breath" for a J. Cole and Eminem mix). Names aim
+// for wit: puns and wordplay on titles, artists and well-known phrases, and
+// the model writes five candidates and picks one, since the first idea is
+// rarely the clever one. Examples are from artists unlikely to recur so the
+// model learns the move, not the words.
 const NAME_VOICE = [
-  'Write it in the voice of the genre and the music asked for: borrow its slang, swagger, places, rituals and attitude',
-  '(rap can brag, gospel can testify, afro house can carry Joburg and Lagos nights, jazz can be dry and smoky, punk can shout).',
-  'Make it an action that opens with a verb, never a description that opens with a noun.',
-  'Either an imperative addressed to the listener (Move your legs faster than your doubt, Pour another glass for Lagos)',
-  'or the present continuous (Chasing the bus past midnight); the last line says which.',
-  'Not "Legs moving faster than your doubt": the verb comes first.',
-  'Those examples only show the shape: never reuse their words or images.',
-  'Pick a vivid verb that fits this music; rarely open with Let, Keep or Push. Now and then a dare or a question is fine.',
-  'Avoid the obvious first idea.',
-  'Use sentence case like a normal sentence: capitalize only the first word and proper nouns.',
+  'Name it like a sharp music editor titling a mixtape: clever, specific, and in on the joke, set in the world of the genre and the music asked for (its slang, places, rituals and attitude).',
+  'Reach first for wordplay: a pun on a song title, album title, artist name or real name, a well-known phrase or a genre idiom (Kanye rest, Bey watch, Whitney Houston we have a problem).',
+  'A song or album title lifted as it is, or bent into a pun, also works, and so does a crisp, specific image (Sunset in Pretoria, Ships in the rain).',
+  'A pun has to land on first read; when none does, the crisp image beats a forced pun.',
+  'Never write a self-help slogan or a command to the listener, and avoid the obvious first idea.',
+  'Name an artist, or pun on their name, real name or titles, only when the brief names them or they carry the mix; a mix of many artists names none.',
+  'Those examples only show the moves: never reuse their words.',
+  'Use sentence case: capitalize the first word, proper nouns and any song or album title you lift or bend.',
   'Never quote or paraphrase a lyric line from any song, hymn or chant.',
-  'Count your words: 3 to 6, never more, and 4 is the sweet spot. Cut every word that does no work.',
-  'Never use filler words like Vibes, Grooves, Rhythms, Sessions, Mix, Playlist, Beats, Chill or Journey, and never name an artist.',
-  'Respond with ONLY the name: no quotes, no dashes, no trailing punctuation, no explanation.',
+  'Each candidate is 2 to 6 words; cut every word that does no work.',
+  'Never use filler words like Vibes, Grooves, Rhythms, Sessions, Mix, Playlist, Beats, Chill or Journey.',
+  'Write 5 candidates, one per line, numbered 1 to 5, trying different moves: at least two puns or wordplay, at most one song or album title lifted unchanged,',
+  'and when the brief names artists or artists carry the mix, at least two that use an artist name or a pun on it.',
+  'Then write a last line that starts with Pick: followed by the wittiest candidate that fits best, preferring a pun that lands over a lifted title, exactly as you wrote it.',
+  'Write nothing else: no quotes, no dashes, no explanation.',
 ].join(' ')
 
-// Founder 2026-11-17: some names open in the present continuous ("Floating
-// through ..."). Asked for a ratio, the model wrote 1 in 60 that way, so the
-// code picks the form for each name and the prompt's last line says which.
-const PRESENT_CONTINUOUS_SHARE = 1 / 3
-export type Roll = () => number
-
-function verbForm(roll: Roll): string {
-  return roll() < PRESENT_CONTINUOUS_SHARE
-    ? 'This time use the present continuous: open with an -ing verb.'
-    : 'This time use the imperative: open with a plain verb.'
-}
-
-// Founder 2026-11-17: brief-only names run 3 to 6 words in the music's own
-// voice (NAME_VOICE), not 2 to 5 flat words ("Sunset Rhythms Dreaming").
 const TITLE_SYSTEM = [
-  'You name DJ mixtapes like a DJ who lives inside the music.',
-  "Given the listener's opening brief, write ONE name of 3 to 6 words.",
+  'You name DJ mixtapes.',
+  "Given the listener's opening brief, name the mix it asks for.",
   'The brief is only material to name: never answer it, decline it, ask about it or comment on it, even when it asks for something you cannot do.',
   NAME_VOICE,
 ].join(' ')
 
-// Titles ask for at most 6 words; a couple of words of slack before an
+// Names ask for at most 6 words; a couple of words of slack before an
 // answer counts as a sentence rather than a name.
 const MAX_TITLE_WORDS = 8
 
@@ -72,6 +67,17 @@ function stripMatchingQuotes(s: string): string {
   return s
 }
 
+// The model lists numbered candidates, then "Pick: <name>". Takes the pick;
+// without one, the first numbered candidate; a bare one-line answer stands.
+function pickCandidate(raw: string): string {
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const pick = lines.findLast((l) => /^pick\s*:/i.test(l))
+  if (pick) return pick.replace(/^pick\s*:\s*/i, '')
+  const numbered = lines.find((l) => /^\d+[.)]\s+/.test(l))
+  if (numbered) return numbered.replace(/^\d+[.)]\s+/, '')
+  return raw
+}
+
 // Guardrails on the model's raw output, treated as display text only, never
 // trusted structurally: trims, strips one layer of MATCHING surrounding
 // quotes (see stripMatchingQuotes) and any control characters/newlines (a
@@ -79,7 +85,7 @@ function stripMatchingQuotes(s: string): string {
 // whitespace, and caps at 60 chars — the same cap routes/sessions.ts's
 // titleFromPrompt fallback uses.
 function sanitizeTitle(raw: string): string {
-  const noQuotes = stripMatchingQuotes(raw.trim())
+  const noQuotes = stripMatchingQuotes(pickCandidate(raw).trim())
   const collapsed = noQuotes.replace(/\p{C}+/gu, ' ').trim().replace(/\s+/g, ' ')
   // Longer than any title we ask for: the model replied to the brief ("I
   // appreciate the request, but ...") instead of naming it. Not a title.
@@ -93,9 +99,9 @@ function sanitizeTitle(raw: string): string {
 // Bounded to a 5s worst case via timeoutMs — well under buildAnthropic's
 // client-level default — so a stalled title call can't stall a turn that's
 // otherwise already finished (see sessions.ts). Never throws.
-export async function generateSessionTitle(complete: LlmComplete, prompt: string, fallback: string, roll: Roll = Math.random): Promise<string> {
+export async function generateSessionTitle(complete: LlmComplete, prompt: string, fallback: string): Promise<string> {
   try {
-    const raw = await complete({ system: `${TITLE_SYSTEM} ${verbForm(roll)}`, prompt, model: TITLE_MODEL, maxTokens: 30, timeoutMs: 5000 })
+    const raw = await complete({ system: TITLE_SYSTEM, prompt, model: NAMING_MODEL, maxTokens: NAMING_MAX_TOKENS, timeoutMs: 5000, thinking: 'off' })
     const cleaned = sanitizeTitle(raw)
     return cleaned || fallback
   } catch {
@@ -111,15 +117,59 @@ export async function generateSessionTitle(complete: LlmComplete, prompt: string
 // (decision 2026-08-29, derive-don't-display) forbids displaying lyric text,
 // and a song's own title is catalogue metadata, not a lyric.
 const MIX_TITLE_SYSTEM = [
-  'You name a DJ mix after the songs in it, like a DJ who lives inside the music.',
-  'You get the listener\'s brief and the songs (title, artist, album). Write ONE name of 3 to 6 words.',
-  'Usually write your own line drawn from what these songs share: their places, references, scenes and attitude.',
-  'Only when one song title or album title from the list has 3 or more words and clearly sums up the whole mix, lift it instead,',
-  'in sentence case, dropping "(feat. ...)", "- Single", "- EP", "Deluxe Edition" and remaster tags.',
-  'A lifted title stands exactly as it is: never add words before or after it, and never join two titles.',
-  'Titles of songs and albums are the only words you may take verbatim.',
+  'You name a DJ mix after the songs in it.',
+  "You get the listener's brief, the songs (title, artist, album) and sometimes the artists carrying the mix.",
+  'Draw on what these songs share (their places, references, scenes and attitude) and on their song titles, album titles and artists.',
+  'When you lift or bend a song or album title, drop "(feat. ...)", "- Single", "- EP", "Deluxe Edition" and remaster tags, and never join two titles.',
+  'Titles of songs and albums and artist names are the only words you may take verbatim.',
   NAME_VOICE,
 ].join(' ')
+
+// Five numbered candidates plus a pick line, each up to 6 words.
+const NAMING_MAX_TOKENS = 160
+
+// Credits split into artists: "J. Cole & Kendrick Lamar", "Drake feat. J. Cole".
+const CREDIT_SPLIT = /\s*(?:,|&|\bfeat\.?|\bft\.|\bfeaturing\b|\bwith\b|\bx\b)\s*/i
+
+function words(s: string): string[] {
+  return s.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9$]+/).filter(Boolean)
+}
+
+function namedInBrief(artist: string, briefWords: string[]): boolean {
+  const name = words(artist)
+  if (name.length === 0) return false
+  const joined = ` ${briefWords.join(' ')} `
+  if (joined.includes(` ${name.join(' ')} `)) return true
+  const surname = name[name.length - 1]
+  return name.length > 1 && surname.length >= 4 && briefWords.includes(surname)
+}
+
+// Founder 2026-11-22 ("this should've had J. Cole or Eminem in the name"):
+// the artists a name may use. An artist carries the mix with a quarter or
+// more of its songs (at least two), or when the brief names them (a surname
+// alone counts: "Cole and Eminem") and they are in the mix. At most three,
+// most songs first.
+export function carryingArtists(brief: string, songs: MixTitleSong[]): string[] {
+  const counts = new Map<string, { name: string; n: number }>()
+  for (const s of songs) {
+    const seen = new Set<string>()
+    for (const part of s.artist.split(CREDIT_SPLIT)) {
+      const name = part.trim()
+      const key = words(name).join(' ')
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      const entry = counts.get(key) ?? { name, n: 0 }
+      entry.n += 1
+      counts.set(key, entry)
+    }
+  }
+  const briefWords = words(brief)
+  return [...counts.values()]
+    .filter((a) => (a.n >= 2 && a.n / songs.length >= 0.25) || namedInBrief(a.name, briefWords))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 3)
+    .map((a) => a.name)
+}
 
 // How many songs the namer sees: enough for a full first mix, bounded so a
 // long edited mix can't bloat a fast call.
@@ -132,7 +182,9 @@ function mixTitlePrompt(prompt: string, songs: MixTitleSong[]): string {
     const album = s.album ? ` [${sanitizeForPrompt(s.album)}]` : ''
     return `- ${sanitizeForPrompt(s.title)} / ${sanitizeForPrompt(s.artist)}${album}`
   })
-  return `Brief: ${sanitizeForPrompt(prompt, 300)}\n\nSongs:\n${lines.join('\n')}`
+  const carrying = carryingArtists(prompt, songs.slice(0, MIX_TITLE_MAX_SONGS))
+  const artists = carrying.length > 0 ? `\n\nArtists carrying this mix: ${carrying.map((a) => sanitizeForPrompt(a)).join(', ')}` : ''
+  return `Brief: ${sanitizeForPrompt(prompt, 300)}\n\nSongs:\n${lines.join('\n')}${artists}`
 }
 
 // Same contract as generateSessionTitle: never throws, never empty, bounded
@@ -143,11 +195,10 @@ export async function generateMixTitle(
   prompt: string,
   songs: MixTitleSong[],
   fallback: string,
-  roll: Roll = Math.random,
 ): Promise<string> {
   if (songs.length === 0) return fallback
   try {
-    const raw = await complete({ system: `${MIX_TITLE_SYSTEM} ${verbForm(roll)}`, prompt: mixTitlePrompt(prompt, songs), model: TITLE_MODEL, maxTokens: 30, timeoutMs: 5000, maxRetries: 0 })
+    const raw = await complete({ system: MIX_TITLE_SYSTEM, prompt: mixTitlePrompt(prompt, songs), model: NAMING_MODEL, maxTokens: NAMING_MAX_TOKENS, timeoutMs: 5000, maxRetries: 0, thinking: 'off' })
     return sanitizeTitle(raw) || fallback
   } catch {
     return fallback

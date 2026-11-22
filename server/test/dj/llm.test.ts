@@ -418,6 +418,21 @@ describe('anthropicComplete', () => {
     expect(captured).not.toHaveProperty('tools')
   })
 
+  // Sonnet 5 thinks by default; a short naming call would spend its whole
+  // token budget thinking and return no text (2026-11-22).
+  it("sends thinking disabled when asked, and no thinking field otherwise", async () => {
+    const bodies: Anthropic.MessageCreateParamsNonStreaming[] = []
+    const fakeCreate = async (body: Anthropic.MessageCreateParamsNonStreaming) => {
+      bodies.push(body)
+      return { content: [{ type: 'text', text: 'ok' }] as Anthropic.ContentBlock[], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }
+    }
+    const complete = anthropicComplete({ messages: { create: fakeCreate } })
+    await complete({ system: 's', prompt: 'p', model: 'm', thinking: 'off' })
+    await complete({ system: 's', prompt: 'p', model: 'm' })
+    expect(bodies[0]).toMatchObject({ thinking: { type: 'disabled' } })
+    expect(bodies[1]).not.toHaveProperty('thinking')
+  })
+
   it('forwards timeoutMs as a per-request timeout option to the SDK call, actually bounding the upstream request', async () => {
     let capturedOptions: { timeout?: number } | undefined
     const fakeCreate = async (_body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number }) => {

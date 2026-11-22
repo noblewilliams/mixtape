@@ -47,6 +47,33 @@ brief, "extend my running playlist", drew "I appreciate the request, but
 picks (usually under 1 s); the parallel brief-only call keeps the SDK's one
 retry. Known limit: Haiku does not always lowercase a lifted title.
 
+Amended (2026-11-22, founder): names aim for wit, not a verb-first slogan.
+A J. Cole and Eminem rap-along mix came out "Chasing bars faster than
+breath"; the founder wanted puns, wordplay and the artists' names when the
+source is that clear. Supersedes the 2026-11-17 voice rules:
+
+- No forced verb form. The present-continuous roll and the imperative rule
+  are gone; names reach first for a pun or wordplay on a song, album,
+  artist or real name, a well-known phrase or a genre idiom, then a lifted
+  or bent title, then a crisp image. 2 to 6 words (puns run short).
+- Artists may be named, or punned on, when the brief names them or they
+  carry the mix. The code computes the carrying artists (a quarter or more
+  of the songs and at least two, or named in the brief, a surname alone
+  counting; at most three) and hands them to the song namer. A mix of many
+  artists names none.
+- The model writes 5 numbered candidates (at least two puns, at most one
+  unchanged lifted title, at least two using an artist when artists carry
+  the mix) and a `Pick:` line; the code takes the pick, else the first
+  candidate.
+- Both namers moved from Haiku to the curation model (Sonnet 5) with
+  thinking off (adaptive thinking spent the whole token budget and returned
+  nothing). The song namer adds about 1.3 to 2.6 s after the picks (was
+  about 0.6 s), still capped at 5 s with no retry. `TITLE_MODEL` stays Haiku
+  for the genre check and auto-pause probe.
+- Seen on sample mixes: "Till Cole collapse", "Cole miner's rap sheet",
+  "Rap God complex", "Burna supremacy", "Blue in Green beans", "Cloudy with
+  a chance of Coltrane", "Break my soul, not my pace".
+
 ## 2026-11-16 — Genre mixes stay full: genre-true suggestions, a refill floor (founder)
 
 Live G2 tests of "lofi afro house slow living great instrumentals" on the

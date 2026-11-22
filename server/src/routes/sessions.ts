@@ -378,7 +378,7 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
     // before the first turn runs — a failure below still leaves the
     // listener with a session they can reopen and retry, rather than losing
     // their prompt to an LLM hiccup. Starts with the durable
-    // truncated-prompt title; replaced below only once the Haiku-generated
+    // truncated-prompt title; replaced below only once the generated
     // name (run concurrently with the turn) resolves.
     let session
     try {

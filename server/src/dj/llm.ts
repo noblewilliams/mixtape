@@ -113,6 +113,10 @@ export type LlmComplete = (opts: {
   // and makes two fetches; a caller whose deadline must be the whole cost
   // (dj/genre-check.ts) passes 0.
   maxRetries?: number
+  // 'off' sends thinking disabled. Sonnet 5 thinks by default, and a short
+  // call (dj/title.ts) would spend its whole maxTokens thinking and return
+  // no text. Absent, the model's default stands.
+  thinking?: 'off'
 }) => Promise<string>
 
 // Final shape both SDK paths resolve to — a non-streaming create's response, or
@@ -225,6 +229,7 @@ export function anthropicComplete(client: AnthropicClient): LlmComplete {
           max_tokens: opts.maxTokens ?? 300,
           system: opts.system,
           messages: [{ role: 'user', content: opts.prompt }],
+          ...(opts.thinking === 'off' ? { thinking: { type: 'disabled' as const } } : {}),
         },
         // Actually cancels the upstream call at opts.timeoutMs rather than
         // letting it ride buildAnthropic's client-level default (60s ×
