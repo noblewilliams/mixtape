@@ -29,6 +29,7 @@ import '../../../data/auth/account_api.dart';
 import '../../../data/playback/playback_controller.dart'
     show PlaybackController;
 import '../../../data/listening/listening_models.dart';
+import '../../providers/app_version_provider.dart';
 import '../../providers/account_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/dj_providers.dart' show memoriesProvider;
@@ -200,6 +201,7 @@ class YouTab extends ConsumerWidget {
                           const _SignOutRow(),
                         ],
                       ),
+                    const _BuildLine(),
                   ],
                 ),
               ),
@@ -739,6 +741,28 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
 
 /// The identity block's round prism avatar: the one prism instance on this
 /// screen, clipped to a 48 pt circle (smoke round two, note 7).
+/// The quiet line at the very foot of You: which binary and over-the-air
+/// patch is running ("Mixtape 1.2.0 (15) · patch 2"), so a tester can tell
+/// builds apart. Left out when the binary cannot say.
+class _BuildLine extends ConsumerWidget {
+  const _BuildLine();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final label = ref.watch(appVersionLabelProvider).value;
+    if (label == null) return const SizedBox.shrink();
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: tokens.meta.copyWith(fontSize: 12.5, color: tokens.muted),
+      ),
+    );
+  }
+}
+
 class _PrismAvatar extends StatelessWidget {
   const _PrismAvatar({required this.initial});
 

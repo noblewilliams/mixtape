@@ -22,6 +22,7 @@ import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'package:mixtape/data/suggestions/suggestions_api.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart';
+import 'package:mixtape/presentation/providers/app_version_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
@@ -112,24 +113,33 @@ class _DjApi implements DjApi {
   Future<List<DjSession>> listSessions() async => const [];
 
   @override
-  Future<AlbumPickState> choosePick(String sessionId, {required String albumId, int? expectedVersion}) =>
+  Future<AlbumPickState> choosePick(
+    String sessionId, {
+    required String albumId,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<AlbumPickState> goBackToPick(
+    String sessionId, {
+    required int version,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<ListenLaterEntry>> listListenLater() =>
       throw UnimplementedError();
 
   @override
-  Future<AlbumPickState> goBackToPick(String sessionId, {required int version, int? expectedVersion}) =>
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) =>
       throw UnimplementedError();
-
-  @override
-  Future<List<ListenLaterEntry>> listListenLater() => throw UnimplementedError();
-
-  @override
-  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) => throw UnimplementedError();
 
   @override
   Future<void> unsaveForLater(String albumId) => throw UnimplementedError();
 
   @override
-  Future<ListenLaterEntry> markListened(String albumId) => throw UnimplementedError();
+  Future<ListenLaterEntry> markListened(String albumId) =>
+      throw UnimplementedError();
 
   @override
   Future<SessionDetail> createSession(
@@ -157,7 +167,8 @@ class _DjApi implements DjApi {
       throw UnimplementedError();
 
   @override
-  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
+  Future<DjSession> setCaseColor(String id, String caseColor) =>
+      throw UnimplementedError();
 
   @override
   Future<DjSession> renameSession(String id, String title) =>
@@ -261,6 +272,7 @@ ProviderContainer _container({
   List<DjMemory> memories = const [],
   String? chosenService = 'apple',
   MusicPlatformStore? destinations,
+  String? versionLabel,
 }) {
   _slot = _ApiSlot(suggestions ?? FakeSuggestionsApi());
   final opened = _opened = <Uri>[];
@@ -290,6 +302,7 @@ ProviderContainer _container({
         opened.add(uri);
         return true;
       }),
+      appVersionLabelProvider.overrideWith((ref) async => versionLabel),
     ],
   );
   addTearDown(container.dispose);
@@ -358,9 +371,7 @@ void main() {
         final avatar = tester.getSize(find.byKey(YouTab.avatarKey));
         expect(avatar, const Size(48, 48), reason: '48 pt, not 64');
         expect(
-          (tester
-                      .widget<Container>(find.byKey(YouTab.avatarKey))
-                      .decoration
+          (tester.widget<Container>(find.byKey(YouTab.avatarKey)).decoration
                   as BoxDecoration)
               .shape,
           BoxShape.circle,
@@ -394,9 +405,7 @@ void main() {
     ) async {
       await _pump(
         tester,
-        _container(
-          accounts: const AccountState(accounts: [_apple, _google]),
-        ),
+        _container(accounts: const AccountState(accounts: [_apple, _google])),
       );
 
       expect(
@@ -445,19 +454,15 @@ void main() {
         'Account',
         reason: 'unknown is not "no methods"',
       );
-      expect(
-        YouTab.identitySubtitle(const [_apple], null),
-        'Apple sign-in',
-      );
+      expect(YouTab.identitySubtitle(const [_apple], null), 'Apple sign-in');
       expect(
         YouTab.identitySubtitle(null, onboardingState(chosenService: 'apple')),
         'Apple Music',
       );
       expect(
-        YouTab.identitySubtitle(
-          const [_apple],
-          onboardingState(chosenService: 'skipped'),
-        ),
+        YouTab.identitySubtitle(const [
+          _apple,
+        ], onboardingState(chosenService: 'skipped')),
         'Apple sign-in · No service connected',
         reason: 'a skipped gate is an answer, not a service we do not know',
       );
@@ -577,10 +582,7 @@ void main() {
       final suggestions = FakeSuggestionsApi();
       await _pump(tester, _container(suggestions: suggestions));
 
-      expect(
-        _switchAt(tester, SuggestionSettings.switchKey).value,
-        isTrue,
-      );
+      expect(_switchAt(tester, SuggestionSettings.switchKey).value, isTrue);
       await tester.tap(find.byKey(SuggestionSettings.switchKey));
       await tester.pumpAndSettle();
 
@@ -599,10 +601,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text(SuggestionSettings.accountChanged), findsOneWidget);
-      expect(
-        _switchAt(tester, SuggestionSettings.switchKey).onChanged,
-        isNull,
-      );
+      expect(_switchAt(tester, SuggestionSettings.switchKey).onChanged, isNull);
       await tester.tap(
         find.byKey(SuggestionSettings.switchKey),
         warnIfMissed: false,
@@ -834,6 +833,34 @@ void main() {
       await _pump(tester, _container());
       expect(find.byKey(YouTab.keepMixesKey), findsNothing);
       expect(find.text('Sign out'), findsOneWidget);
+    });
+  });
+
+  group('build line', () {
+    for (final anonymous in [false, true]) {
+      testWidgets('the foot of You names the build and patch running'
+          '${anonymous ? ' (anonymous)' : ''}', (tester) async {
+        await _pump(
+          tester,
+          _container(
+            auth: _Auth(anonymous: anonymous),
+            versionLabel: 'Mixtape 1.2.0 (15) · patch 2',
+          ),
+        );
+
+        await tester.scrollUntilVisible(
+          find.text('Mixtape 1.2.0 (15) · patch 2'),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(find.text('Mixtape 1.2.0 (15) · patch 2'), findsOneWidget);
+      });
+    }
+
+    testWidgets('a build that cannot say leaves the line out', (tester) async {
+      await _pump(tester, _container());
+
+      expect(find.textContaining('Mixtape '), findsNothing);
     });
   });
 }
