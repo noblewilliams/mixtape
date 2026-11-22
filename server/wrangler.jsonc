@@ -82,7 +82,7 @@
     // "on" requires APNS_KEY_ID, APNS_PRIVATE_KEY, VAPID_PUBLIC_KEY,
     // VAPID_PRIVATE_KEY and VAPID_SUBJECT (every request fails without them,
     // src/index.ts buildPush), and serves VAPID_PUBLIC_KEY on /health.
-    "TURN_PUSH": "off",
+    "TURN_PUSH": "on",
     // Web push VAPID public half and contact, both public (the private half
     // is the VAPID_PRIVATE_KEY secret; `npx tsx scripts/vapid-keys.ts`).
     "VAPID_PUBLIC_KEY": "BG8yEP7KC4nwHw8X15Snot59TBatTmyFbOg3lCo_viVj4QoiqUk9AId2_xQbmhUE1pbPRxcPxfV141IrsIfMPPY",
