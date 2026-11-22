@@ -10,6 +10,7 @@ import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:mixtape/presentation/widgets/foundation/empty_state.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart' show FirstRunPill;
 import 'package:mixtape/presentation/widgets/tape_settings_dialog.dart';
 
 void main() {
@@ -71,6 +72,7 @@ void main() {
     var saves = 0;
     await tester.pumpWidget(
       MaterialApp(
+        theme: MixtapeTheme.light(),
         home: Scaffold(
           body: MixSaveDialog(
             keys: MixHandoffKeys.arrangement,
@@ -84,13 +86,13 @@ void main() {
       ),
     );
     final button = find.byKey(MixHandoffKeys.arrangement.saveConfirm);
-    expect(tester.widget<CupertinoDialogAction>(button).onPressed, isNull);
+    expect(tester.widget<FirstRunPill>(button).onPressed, isNull);
     await tester.enterText(
       find.byKey(MixHandoffKeys.arrangement.nameField),
       '   ',
     );
     await tester.pump();
-    expect(tester.widget<CupertinoDialogAction>(button).onPressed, isNull);
+    expect(tester.widget<FirstRunPill>(button).onPressed, isNull);
     await tester.enterText(
       find.byKey(MixHandoffKeys.arrangement.nameField),
       'Sunday',

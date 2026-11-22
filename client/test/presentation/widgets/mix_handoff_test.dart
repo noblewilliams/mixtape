@@ -7,7 +7,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
-    show CupertinoActivityIndicator, CupertinoDialogAction, CupertinoTextField;
+    show CupertinoActivityIndicator, CupertinoAlertDialog, CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart' show PlatformException;
@@ -26,9 +26,12 @@ import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_popup.dart';
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart' show FirstRunPill;
 import 'package:mixtape/presentation/widgets/foundation/service_marks.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/widgets/mix_popup_art.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart'
     show SpotifyHandoffSheet;
 import 'package:mixtape/presentation/widgets/tape_header.dart' show TapeBar;
@@ -145,7 +148,10 @@ Future<_HostState> _pumpHost(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(home: _Host(queue: queue, defaultName: defaultName)),
+      child: MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: _Host(queue: queue, defaultName: defaultName),
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -561,6 +567,7 @@ void main() {
       var attempts = 0;
       await tester.pumpWidget(
         MaterialApp(
+          theme: MixtapeTheme.light(),
           home: MixSaveDialog(
             keys: MixHandoffKeys.arrangement,
             defaultName: 'Late drive',
@@ -582,7 +589,7 @@ void main() {
       expect(attempts, 1);
       expect(find.byType(CupertinoActivityIndicator), findsNothing);
       expect(
-        tester.widget<CupertinoDialogAction>(find.byKey(keys.saveConfirm)).onPressed,
+        tester.widget<FirstRunPill>(find.byKey(keys.saveConfirm)).onPressed,
         isNotNull,
       );
       expect(
@@ -590,11 +597,7 @@ void main() {
         isTrue,
       );
       expect(
-        tester
-            .widget<CupertinoDialogAction>(
-              find.widgetWithText(CupertinoDialogAction, 'Cancel'),
-            )
-            .onPressed,
+        tester.widget<TextButton>(find.byKey(MixSaveDialog.cancelKey)).onPressed,
         isNotNull,
       );
 
@@ -1029,6 +1032,66 @@ void main() {
     });
   });
 
+  // Founder, 2026-11-22: the app's own pop-up (the notification ask's size)
+  // with a small soft picture, and room to read the whole name.
+  group('save pop-up', () {
+    testWidgets('opens as the app pop-up with its picture, not a system alert', (
+      tester,
+    ) async {
+      await _pumpHost(tester, _container(), queue: [_track(0)]);
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(MixtapePopup.surfaceKey), findsOneWidget);
+      expect(find.byKey(MixSaveDialog.artKey), findsOneWidget);
+      expect(find.byType(CupertinoAlertDialog), findsNothing);
+      expect(find.text('Save as playlist'), findsOneWidget);
+      expect(find.byKey(MixHandoffKeys.arrangement.saveConfirm), findsOneWidget);
+
+      await tester.tap(find.byKey(MixSaveDialog.cancelKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(MixtapePopup.surfaceKey), findsNothing);
+    });
+
+    testWidgets('while the keyboard is up the picture shrinks but stays', (tester) async {
+      await _pumpHost(tester, _container(), queue: [_track(0)]);
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(MixSaveDialog.artKey), findsOneWidget);
+
+      tester.view.viewInsets = const FakeViewPadding(bottom: 336);
+      addTearDown(tester.view.reset);
+      await tester.pumpAndSettle();
+      expect(find.byKey(MixSaveDialog.artKey), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(MixSaveDialog.artKey)).height,
+        MixPopupArt.compactHeight,
+      );
+      expect(find.byKey(MixHandoffKeys.arrangement.saveConfirm), findsOneWidget);
+    });
+
+    testWidgets('a long name wraps onto more lines instead of scrolling out of sight', (
+      tester,
+    ) async {
+      const long = 'Dust slowly while the light pours in through the kitchen window';
+      await _pumpHost(tester, _container(), queue: [_track(0)], defaultName: long);
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+
+      final field = tester.widget<CupertinoTextField>(
+        find.byKey(MixHandoffKeys.arrangement.nameField),
+      );
+      expect(field.minLines, 1);
+      expect(field.maxLines, 3);
+      expect(
+        tester.getSize(find.byKey(MixHandoffKeys.arrangement.nameField)).height,
+        greaterThan(
+          tester.getSize(find.byKey(MixHandoffKeys.arrangement.authorField)).height,
+        ),
+      );
+    });
+  });
+
   group('save alert, new to you', () {
     const helper = 'Shown under the playlist in Apple Music';
     const one =
@@ -1038,6 +1101,7 @@ void main() {
 
     Future<void> pumpDialog(WidgetTester tester, int count) => tester.pumpWidget(
       MaterialApp(
+        theme: MixtapeTheme.light(),
         home: MixSaveDialog(
           keys: MixHandoffKeys.arrangement,
           defaultName: 'Late drive',

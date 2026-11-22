@@ -206,64 +206,72 @@ class _MixtapePopupFrame extends StatelessWidget {
             ),
           ),
         ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: MixtapePopup.sideInset,
-              vertical: MixtapePopup.edgeInset,
-            ),
-            child: Center(
-              child: FadeTransition(
-                opacity: eased,
-                child: ScaleTransition(
-                  scale: reduced
-                      ? const AlwaysStoppedAnimation<double>(1)
-                      : Tween<double>(
-                          begin: MixtapePopup.startScale,
-                          end: 1,
-                        ).animate(eased),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minWidth: double.infinity,
-                      maxHeight: maxHeight,
-                    ),
-                    child: Semantics(
-                      scopesRoute: true,
-                      namesRoute: true,
-                      explicitChildNodes: true,
-                      label: label,
-                      child: DecoratedBox(
-                        key: MixtapePopup.surfaceKey,
-                        decoration: BoxDecoration(
-                          color: MixtapeSheet.surfaceColorOf(context),
-                          borderRadius: BorderRadius.circular(
-                            MixtapePopup.radius,
-                          ),
-                          boxShadow: MixtapePopup.shadowOf(brightness),
-                        ),
-                        position: DecorationPosition.background,
+        // Above the keyboard when a field is up (Save as playlist): centred in
+        // the room left, not behind it.
+        AnimatedPadding(
+          duration: MixtapePopup.transition,
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+          child: SafeArea(
+            bottom: media.viewInsets.bottom == 0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: MixtapePopup.sideInset,
+                vertical: MixtapePopup.edgeInset,
+              ),
+              child: Center(
+                child: FadeTransition(
+                  opacity: eased,
+                  child: ScaleTransition(
+                    scale: reduced
+                        ? const AlwaysStoppedAnimation<double>(1)
+                        : Tween<double>(
+                            begin: MixtapePopup.startScale,
+                            end: 1,
+                          ).animate(eased),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: double.infinity,
+                        maxHeight: maxHeight,
+                      ),
+                      child: Semantics(
+                        scopesRoute: true,
+                        namesRoute: true,
+                        explicitChildNodes: true,
+                        label: label,
                         child: DecoratedBox(
-                          position: DecorationPosition.foreground,
+                          key: MixtapePopup.surfaceKey,
                           decoration: BoxDecoration(
+                            color: MixtapeSheet.surfaceColorOf(context),
                             borderRadius: BorderRadius.circular(
                               MixtapePopup.radius,
                             ),
-                            border: Border.all(
-                              color: MixtapePopup.edgeOf(brightness),
-                              width: 0.5,
-                            ),
+                            boxShadow: MixtapePopup.shadowOf(brightness),
                           ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(
-                              MixtapePopup.radius,
+                          position: DecorationPosition.background,
+                          child: DecoratedBox(
+                            position: DecorationPosition.foreground,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(
+                                MixtapePopup.radius,
+                              ),
+                              border: Border.all(
+                                color: MixtapePopup.edgeOf(brightness),
+                                width: 0.5,
+                              ),
                             ),
-                            child: Material(
-                              type: MaterialType.transparency,
-                              child: DefaultTextStyle.merge(
-                                style: TextStyle(
-                                  color: MixtapeSheet.tokensOf(context).text,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                MixtapePopup.radius,
+                              ),
+                              child: Material(
+                                type: MaterialType.transparency,
+                                child: DefaultTextStyle.merge(
+                                  style: TextStyle(
+                                    color: MixtapeSheet.tokensOf(context).text,
+                                  ),
+                                  child: child,
                                 ),
-                                child: child,
                               ),
                             ),
                           ),

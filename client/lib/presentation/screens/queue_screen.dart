@@ -26,16 +26,9 @@ library;
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart'
-    show
-        CupertinoIcons,
-        CupertinoAlertDialog,
-        CupertinoDialogAction,
-        CupertinoTextField,
-        showCupertinoDialog;
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
-import '../widgets/foundation/alert_field_box.dart';
 import '../widgets/open_tape_settings.dart';
 import '../widgets/mix_share.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -63,6 +56,7 @@ import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/mix_quote.dart';
 import '../widgets/mix_turn_sender.dart';
+import '../widgets/mix_rename_popup.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/music_door.dart';
 import '../widgets/push_permission_popup.dart';
@@ -516,44 +510,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   Future<void> _openRenameDialog() async {
     final current =
         ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
-    final controller = TextEditingController(text: current);
-    final name = await showCupertinoDialog<String>(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('Rename mix'),
-        content: Padding(
-          padding: const EdgeInsets.only(top: 14),
-          child: AlertFieldBox(
-            child: CupertinoTextField(
-              key: const Key('rename-field'),
-              controller: controller,
-              autofocus: true,
-              placeholder: 'Mix name',
-            ),
-          ),
-        ),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: Haptics.on(
-              HapticKind.dismiss,
-              () => Navigator.of(dialogContext).pop(),
-            ),
-            child: const Text('Cancel'),
-          ),
-          CupertinoDialogAction(
-            key: const Key('rename-confirm-button'),
-            isDefaultAction: true,
-            onPressed: Haptics.on(
-              HapticKind.primary,
-              () => Navigator.of(dialogContext).pop(controller.text),
-            ),
-            child: const Text('Save'),
-          ),
-        ],
+    final saved =
+        ref.read(chatProvider(widget.sessionId)).value?.session.caseColor;
+    final name = await showMixRenamePopup(
+      context,
+      title: current,
+      heading: 'Rename mix',
+      fieldKey: const Key('rename-field'),
+      confirmKey: const Key('rename-confirm-button'),
+      caseColor: resolveMixTapeColour(
+        widget.sessionId,
+        saved: currentMixTapeHex(ref, widget.sessionId, saved: saved),
       ),
     );
-    controller.dispose();
     if (!mounted || name == null || name.trim().isEmpty) return;
     await ref.read(chatProvider(widget.sessionId).notifier).rename(name);
   }
@@ -850,6 +819,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
             queue: visibleQueue,
             defaultName: state.session.title,
             keys: keys,
+            caseColor: resolveMixTapeColour(
+              widget.sessionId,
+              saved: currentMixTapeHex(
+                ref,
+                widget.sessionId,
+                saved: state.session.caseColor,
+              ),
+            ),
           ),
         ),
         onCreateSpotifyPlaylist: () =>

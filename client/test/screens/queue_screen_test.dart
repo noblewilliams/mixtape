@@ -2,7 +2,7 @@ import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
-    show CupertinoTextField, CupertinoDialogAction;
+    show CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -39,6 +39,7 @@ import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/mix_quote.dart';
 import 'package:mixtape/presentation/widgets/foundation/mini_toast.dart';
 import 'package:mixtape/presentation/widgets/foundation/swipe_action_row.dart';
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart' show FirstRunPill;
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
 import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
@@ -924,7 +925,7 @@ void main() {
     expect(bridge.createCalls, isEmpty);
     expect(
       tester
-          .widget<CupertinoDialogAction>(
+          .widget<FirstRunPill>(
             find.byKey(const Key('save-confirm-button')),
           )
           .onPressed,

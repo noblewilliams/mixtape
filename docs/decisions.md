@@ -2491,3 +2491,29 @@ read back as quotes; `web/src/lib/mix-quote.ts`):
 **Reopens if:** the DJ misreads quote lines (then send quotes as a
 structured field with track ids), or a title containing " — " splits wrong
 often enough to matter.
+
+## 2026-11-22 — Save as playlist and Rename are the app's own pop-up
+
+The native alert squeezed the playlist name into a short single-line field,
+so a long mix title was cut off. Save as playlist (and Create playlist on the
+chat and a shared mix) now opens in the app's centred pop-up, the one the Mix
+ready notifications ask uses (`showMixtapePopup`):
+
+- A small soft picture: the mix's own cassette, tilted, in front of two paper
+  cards tinted with its colour. Drawn from widgets the 1.2.0 release already
+  has, so it can ship over the air.
+- The name field is full width and wraps to three lines, so a long name reads
+  whole; "Your name" below it, then the existing helper and new-to-you lines.
+- The paper pill "Save playlist" and "Cancel", as the notification ask has.
+  The save flow under it (prefill, remembered author, the double-tap guard,
+  Apple's refusal shown inline) is unchanged.
+- While the keyboard is up the picture shrinks (it stays in sight), and every
+  app pop-up now sits above the keyboard rather than centred behind it.
+- Rename (the chat and the tape) uses the same pop-up and picture
+  (`showMixRenamePopup`, `MixPopupArt`): the cassette wears the name as it is
+  typed, the field wraps, then "Save" and "Cancel". Its content is short, so
+  the picture keeps its full size above the keyboard. The Mixes list still
+  renames in place.
+
+No state board: asked for directly by the founder with the notification ask
+as the reference, and checked in the simulator.

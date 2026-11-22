@@ -31,14 +31,7 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart'
-    show
-        CupertinoActivityIndicator,
-        CupertinoAlertDialog,
-        CupertinoTheme,
-        CupertinoDialogAction,
-        CupertinoTextField,
-        showCupertinoDialog;
+import 'package:flutter/cupertino.dart' show CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -56,8 +49,12 @@ import '../providers/onboarding_provider.dart';
 import '../providers/playback_provider.dart';
 import '../screens/playback_screen.dart';
 import '../theme/mixtape_theme.dart';
-import 'foundation/alert_field_box.dart';
 import 'foundation/haptics.dart';
+import 'foundation/mixtape_popup.dart';
+import 'foundation/mixtape_sheet.dart';
+import '../screens/first_run/step_scaffold.dart' show FirstRunPill;
+import 'tape_palette.dart' show tapeColor;
+import 'mix_popup_art.dart';
 import 'foundation/label_chip.dart';
 import 'foundation/mixtape_feedback.dart';
 import 'foundation/service_marks.dart';
@@ -434,6 +431,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     required List<QueueTrack> queue,
     required String defaultName,
     required MixHandoffKeys keys,
+    Color? caseColor,
   }) async {
     if (_savingPlaylist) return;
     setState(() => _savingPlaylist = true);
@@ -446,11 +444,12 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       }
       if (!mounted) return;
       final accountName = ref.read(accountNameProvider).value;
-      await showCupertinoDialog<void>(
-        context: context,
-        barrierDismissible: true,
+      await showMixtapePopup<void>(
+        context,
+        label: keys.saveDialogTitle,
         builder: (dialogContext) => MixSaveDialog(
           keys: keys,
+          caseColor: tapeColor(mixCaseColor) ?? caseColor,
           defaultName: defaultName,
           newToYouCount: queue.where((track) => track.newToYou).length,
           defaultAuthor:
@@ -799,7 +798,19 @@ class MixSaveDialog extends StatefulWidget {
     required this.defaultAuthor,
     required this.onConfirm,
     this.newToYouCount = 0,
+    this.caseColor,
   });
+
+  /// The pop-up, its picture and its Cancel, for tests.
+  static const Key popupKey = Key('mix-save-popup');
+  static const Key artKey = MixPopupArt.artKey;
+  static const Key cancelKey = Key('mix-save-cancel');
+
+  /// The notification ask's `.sheet` padding.
+  static const double sidePadding = 22;
+
+  /// The mix's tape colour, for the picture.
+  final Color? caseColor;
 
   final MixHandoffKeys keys;
   final String defaultName;
@@ -871,89 +882,179 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // Not `context.tokens`: this alert is pumped by hosts that build a bare
-    // `MaterialApp`, and a helper line is not worth an assertion.
-    final helper = CupertinoTheme.of(
-      context,
-    ).textTheme.tabLabelTextStyle.copyWith(fontSize: 12);
-    return CupertinoAlertDialog(
-      title: Text(widget.keys.saveDialogTitle),
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 10),
-          AlertFieldBox(
-            child: CupertinoTextField(
-              key: widget.keys.nameField,
-              controller: _name,
-              onChanged: (_) => setState(() {}),
-              autofocus: true,
-              enabled: !_submitting,
-              placeholder: 'Playlist name',
+    // Not `context.tokens`: this pop-up is pumped by hosts that build a bare
+    // `MaterialApp`; the sheet's lookup falls back to the default tokens.
+    final tokens = MixtapeSheet.tokensOf(context);
+    final helper = tokens.body.copyWith(
+      fontSize: 12,
+      height: 1.35,
+      color: tokens.muted,
+    );
+    final fieldText = tokens.body.copyWith(
+      fontSize: 15,
+      height: 1.3,
+      color: tokens.text,
+    );
+    BoxDecoration field() => BoxDecoration(
+      color: tokens.text.withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(14),
+    );
+    const fieldPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 12);
+    final canSave = !_submitting && _name.text.trim().isNotEmpty;
+    final typing = MediaQuery.viewInsetsOf(context).bottom > 0;
+
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // While the keyboard is up the picture shrinks, so the fields and
+        // Save keep the room above it and the picture stays in sight.
+        const SizedBox(height: 18),
+        ExcludeSemantics(
+          child: MixPopupArt(caseColor: widget.caseColor, compact: typing),
+        ),
+        const SizedBox(height: 14),
+        Semantics(
+          header: true,
+          child: Text(
+            widget.keys.saveDialogTitle,
+            textAlign: TextAlign.center,
+            style: tokens.body.copyWith(
+              fontSize: 17.9,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+              letterSpacing: -0.18,
+              color: tokens.text,
             ),
           ),
-          const SizedBox(height: 10),
-          AlertFieldBox(
-            child: CupertinoTextField(
-              key: widget.keys.authorField,
-              controller: _author,
-              enabled: !_submitting,
-              placeholder: 'Your name',
-            ),
-          ),
-          const SizedBox(height: 6),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Semantics(
-                liveRegion: true,
-                child: Text(
-                  _error!,
-                  style: helper.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+        ),
+        const SizedBox(height: 16),
+        // The name wraps rather than scrolling sideways, so a long one
+        // reads whole (founder, 2026-11-22).
+        CupertinoTextField(
+          key: widget.keys.nameField,
+          controller: _name,
+          onChanged: (_) => setState(() {}),
+          enabled: !_submitting,
+          placeholder: 'Playlist name',
+          minLines: 1,
+          maxLines: 3,
+          keyboardType: TextInputType.text,
+          textInputAction: TextInputAction.next,
+          textCapitalization: TextCapitalization.sentences,
+          style: fieldText.copyWith(fontWeight: FontWeight.w600),
+          padding: fieldPadding,
+          decoration: field(),
+        ),
+        const SizedBox(height: 8),
+        CupertinoTextField(
+          key: widget.keys.authorField,
+          controller: _author,
+          enabled: !_submitting,
+          placeholder: 'Your name',
+          textInputAction: TextInputAction.done,
+          textCapitalization: TextCapitalization.words,
+          onSubmitted: (_) {
+            if (canSave) unawaited(_submit());
+          },
+          style: fieldText,
+          padding: fieldPadding,
+          decoration: field(),
+        ),
+        const SizedBox(height: 8),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                _error!,
+                style: helper.copyWith(
+                  color: Theme.of(context).colorScheme.error,
                 ),
               ),
             ),
-          Text(
+          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text(
             'Shown under the playlist in Apple Music',
             textAlign: TextAlign.start,
             style: helper,
           ),
-          if (widget.newToYouCount > 0) ...[
-            const SizedBox(height: 6),
-            Text(
+        ),
+        if (widget.newToYouCount > 0) ...[
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
               mixSaveNewToYouLine(widget.newToYouCount),
               textAlign: TextAlign.start,
               style: helper,
             ),
-          ],
+          ),
         ],
-      ),
-      actions: [
-        CupertinoDialogAction(
-          onPressed: _submitting
-              ? null
-              : Haptics.on(
-                  HapticKind.dismiss,
-                  () => Navigator.of(context).pop(),
-                ),
-          child: const Text('Cancel'),
+        const SizedBox(height: 18),
+      ],
+    );
+
+    return Column(
+      key: MixSaveDialog.popupKey,
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: MixSaveDialog.sidePadding,
+            ),
+            child: body,
+          ),
         ),
-        CupertinoDialogAction(
-          key: widget.keys.saveConfirm,
-          isDefaultAction: true,
-          onPressed: _submitting || _name.text.trim().isEmpty
-              ? null
-              : Haptics.on(HapticKind.commit, _submit),
-          child: _submitting
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CupertinoActivityIndicator(radius: 8),
-                )
-              : const Text('Save'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            MixSaveDialog.sidePadding,
+            0,
+            MixSaveDialog.sidePadding,
+            14,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FirstRunPill(
+                key: widget.keys.saveConfirm,
+                label: _submitting ? 'Saving…' : 'Save playlist',
+                minHeight: 50,
+                fontSize: 15.2,
+                onPressed: canSave ? Haptics.on(HapticKind.commit, _submit) : null,
+              ),
+              const SizedBox(height: 4),
+              TextButton(
+                key: MixSaveDialog.cancelKey,
+                onPressed: _submitting
+                    ? null
+                    : Haptics.on(
+                        HapticKind.dismiss,
+                        () => Navigator.of(context).pop(),
+                      ),
+                style: TextButton.styleFrom(
+                  foregroundColor: tokens.muted,
+                  minimumSize: const Size.fromHeight(44),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: const StadiumBorder(),
+                ),
+                child: Text(
+                  'Cancel',
+                  style: tokens.body.copyWith(
+                    fontSize: 14.08,
+                    fontWeight: FontWeight.w600,
+                    color: tokens.muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );

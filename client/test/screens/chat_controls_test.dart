@@ -81,7 +81,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('Rename opens a native alert with the title preselected and keeps the draft', (
+  testWidgets('Rename opens the app pop-up with the title preselected and keeps the draft', (
     tester,
   ) async {
     await pump(tester);

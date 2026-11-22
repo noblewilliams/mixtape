@@ -14,12 +14,6 @@ import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/cupertino.dart'
-    show
-        CupertinoAlertDialog,
-        CupertinoDialogAction,
-        CupertinoTextField,
-        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import '../widgets/open_tape_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -46,7 +40,6 @@ import '../widgets/album_card.dart';
 import '../widgets/composer_plus_button.dart';
 import '../widgets/lyric_turn.dart';
 import '../widgets/energy_journey.dart';
-import '../widgets/foundation/alert_field_box.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/idea_pill.dart';
 import '../widgets/foundation/gradient_background.dart';
@@ -59,6 +52,7 @@ import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/mix_quote.dart';
 import '../widgets/mix_turn_sender.dart';
+import '../widgets/mix_rename_popup.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/music_door.dart';
 import '../widgets/playlist_inspiration.dart';
@@ -502,16 +496,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  /// The native alert, with the current title preselected.
+  /// The app's rename pop-up, with the current title preselected.
   Future<void> _rename() async {
     final session = ref.read(chatProvider(widget.sessionId)).value?.session;
     final current = session?.title ?? '';
-    final name = await showCupertinoDialog<String>(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => _RenameDialog(
-        title: current,
-        heading: session?.kind == SessionKind.album ? 'Rename' : 'Rename mix',
+    final name = await showMixRenamePopup(
+      context,
+      title: current,
+      heading: session?.kind == SessionKind.album ? 'Rename' : 'Rename mix',
+      fieldKey: const Key('chat-rename-field'),
+      confirmKey: const Key('chat-rename-confirm'),
+      caseColor: resolveMixTapeColour(
+        widget.sessionId,
+        saved: currentMixTapeHex(
+          ref,
+          widget.sessionId,
+          saved: session?.caseColor,
+        ),
       ),
     );
     if (!mounted || name == null || name.trim().isEmpty) return;
@@ -1441,6 +1442,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             queue: state.queue,
             defaultName: state.session.title,
             keys: keys,
+            caseColor: resolveMixTapeColour(
+              widget.sessionId,
+              saved: currentMixTapeHex(
+                ref,
+                widget.sessionId,
+                saved: state.session.caseColor,
+              ),
+            ),
           ),
         ),
         onCreateSpotifyPlaylist: () =>
@@ -1724,62 +1733,3 @@ class _CouldNotOpen extends StatelessWidget {
 /// caller so it outlives the route's own exit transition — a controller
 /// disposed the moment `showDialog` returns is still being read by the
 /// fading-out field.
-class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.title, required this.heading});
-
-  final String title;
-  final String heading;
-
-  @override
-  State<_RenameDialog> createState() => _RenameDialogState();
-}
-
-class _RenameDialogState extends State<_RenameDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.title)
-        ..selection = TextSelection(
-          baseOffset: 0,
-          extentOffset: widget.title.length,
-        );
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => CupertinoAlertDialog(
-    title: Text(widget.heading),
-    content: Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: AlertFieldBox(
-        child: CupertinoTextField(
-          key: const Key('chat-rename-field'),
-          controller: _controller,
-          autofocus: true,
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-          placeholder: 'Mix name',
-        ),
-      ),
-    ),
-    actions: [
-      CupertinoDialogAction(
-        onPressed: Haptics.on(
-          HapticKind.dismiss,
-          () => Navigator.of(context).pop(),
-        ),
-        child: const Text('Cancel'),
-      ),
-      CupertinoDialogAction(
-        key: const Key('chat-rename-confirm'),
-        isDefaultAction: true,
-        onPressed: Haptics.on(
-          HapticKind.primary,
-          () => Navigator.of(context).pop(_controller.text),
-        ),
-        child: const Text('Save'),
-      ),
-    ],
-  );
-}
