@@ -2380,11 +2380,20 @@ report on 2026-11-21 met the turn-steps spec's reopen clause). Spec
   (`notified_at IS NULL AND seen_at IS NULL`) before anything is sent, so two
   callers never both push; a crash after the claim loses that push rather
   than sending two. `notify_outcome` is `sent` if any device took it, else
-  `failed`. The `turn` event's `push` is `TURN_PUSH` on and a live device.
+  `failed`. The `turn` event's `push` is `TURN_PUSH` on and a live device
+  (on the request's surface; see the final review fixes).
   `TURN_PUSH=on` without the APNs key, the VAPID pair and subject throws at
   wiring; `/health` serves `vapidPublicKey` only then. An anonymous link
   moves `push_devices`, and the moved sessions' `dj_turns` rows with them
   (they cascaded with the anonymous user before).
+- **Final review fixes (2026-11-22):** the `turn` event's `push` counts
+  only a live device on the request's own surface (`ios`/`web`), so a phone
+  whose listener registered only a browser keeps its local ping. CORS allows
+  `Idempotency-Key`, and the web sends it only once the server has sent a
+  `turn` event (an older or flag-off server's preflight would refuse it and
+  fail every turn); deploy the server before the web. One turn pushes at
+  most 10 devices, newest first; the cron's lost-turn pushes share 300
+  fetches a run. A recheck the object cannot store runs at once.
 
 **Reopens if:** turn logs show `attempt > 1` or `lost` often enough that one
 re-run is the wrong number; a turn ever needs more than the alarm's 15

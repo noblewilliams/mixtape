@@ -288,7 +288,11 @@ data: {"turnId":"…","push":true}
 ```
 
 `push` is true when this device has a live push registration and
-`TURN_PUSH` is on (see "Who notifies"). Both parsers already skip event
+`TURN_PUSH` is on (see "Who notifies"). As built (2026-11-22): "this
+device" is the request's surface (`ios` from the Dart User-Agent, else
+`web`), so a live device on that platform counts. A phone whose listener
+registered only a browser keeps its local ping. Two iPhones on one account
+count as one surface. Both parsers already skip event
 names they do not know: `readTurnStream` in `turn_stream.dart` switches on
 the four known names, and `web/src/api/sse.ts` uses an if/else chain. So
 old builds ignore it.
@@ -391,6 +395,10 @@ not sure the client saw it, the server pushes.**
   - Once only: `notified_at` is claimed with a conditional UPDATE (also
     fenced on `seen_at IS NULL`) before anything is sent, so two callers
     never both push (implementation, 2026-11-22).
+  - The 8 s recheck is kept in the object's storage by turn id and shares
+    its one alarm with the last event's cleanup. A recheck pending when the
+    next turn starts runs after that turn ends (late, never lost). A
+    recheck the object cannot store runs at once.
 - **On the device.** `apns-collapse-id = turnId`, and `thread-id =
   sessionId`. If a push for the mix already on screen arrives while the app
   is in the foreground, the presentation handler hides it.
@@ -566,13 +574,23 @@ push_devices
   `dj_providers.dart` stays for old servers.
 - **Idempotency.** Every turn POST sends a fresh `Idempotency-Key`, kept
   with the pending turn. A drop before the stream opened retries the same
-  key once, so it attaches rather than duplicates.
+  key once, so it attaches rather than duplicates. As built: the retry is
+  made only once this server has sent a `turn` event (proof it honours the
+  key); an older or rolled-back server never gets a retry that could make a
+  second mix.
 
 ### Web client
 
 - It sends `Idempotency-Key` too. On load, a mix whose `turn` is running
   attaches to its stream, so a reload mid-turn resumes the caption instead
   of losing it. The Mixes list shows the same running state.
+- As built (2026-11-22): the web sends the key, and retries with it, only
+  once the server has sent a `turn` event in this page load. An older or
+  flag-off server's CORS preflight would refuse the header and fail every
+  turn; the server's CORS now allows `Idempotency-Key`. The Mixes rows show
+  no visible working state for a followed turn (the web list has none for
+  any turn); the attach still runs, and the conversation shows the working
+  line.
 - **Web push is in this change** (decided). See "Web push" below.
 
 ### Web push
@@ -614,7 +632,11 @@ The web app already ships a manifest and a service worker scoped to `/app/`
   On `413`, `429` or a 5xx, give up for this turn, as with APNs.
 
 **Fan-out across devices.** A turn notifies every live device of the user:
-iOS and web alike. `seen` from **any** device suppresses the push to all of
+iOS and web alike. As built: at most `MAX_DEVICES_PER_TURN` (10), the most
+recently registered first, since stale tokens stay live until a push to
+them is refused. The cron's lost-turn pushes share one budget of
+`SWEEP_PUSH_FETCH_BUDGET` (300) fetches a run, beside the rest of
+maintenance's 1,000 subrequests. `seen` from **any** device suppresses the push to all of
 them, so a listener watching on the laptop does not get buzzed on the
 phone. `notify_outcome` records the best outcome across devices.
 

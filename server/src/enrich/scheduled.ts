@@ -198,7 +198,9 @@ async function runMaintenance(
   }
 
   // A push per lost turn's device (push/notify.ts), at most
-  // LOST_TURN_SWEEP_LIMIT turns a run; nothing else leaves the database.
+  // LOST_TURN_SWEEP_LIMIT turns a run and MAX_DEVICES_PER_TURN devices a
+  // turn, all of them within SWEEP_PUSH_FETCH_BUDGET fetches (index.ts);
+  // nothing else leaves the database.
   if (deps.turns) {
     try {
       result.lostTurns = await (runners.lostTurns ?? sweepLostTurns)(db, deps.turns)

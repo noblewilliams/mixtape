@@ -24,13 +24,16 @@ export type DurableTurnsWiring = {
 }
 
 // Whether the server will push this turn's end (the `turn` event's `push`):
-// TURN_PUSH on and the user has a live device. The client then stays quiet
-// in the background rather than post its local notification too (spec,
-// "Who notifies"). A failed read says false: the local one then covers it.
-export async function computePush(db: Db, userId: string, env: { TURN_PUSH?: string } | undefined): Promise<boolean> {
+// TURN_PUSH on and the user has a live device on the surface the turn came
+// from (spec: "this device has a live push registration"). The client then
+// stays quiet in the background rather than post its local notification too
+// (spec, "Who notifies"). A phone whose listener registered only a laptop
+// keeps its local ping, since the push goes to the laptop. A failed read
+// says false: the local one then covers it.
+export async function computePush(db: Db, userId: string, env: { TURN_PUSH?: string } | undefined, surface?: 'ios' | 'web'): Promise<boolean> {
   if (!turnPushEnabled(env)) return false
   try {
-    return await hasLiveDevice(db, userId)
+    return await hasLiveDevice(db, userId, surface)
   } catch {
     return false
   }
@@ -127,7 +130,7 @@ export async function startDurableTurn(
     kind: turn.kind,
     userMessageSeq: turn.userMessageSeq,
     options: turn.options,
-    push: await computePush(db, turn.userId, durable.push),
+    push: await computePush(db, turn.userId, durable.push, turn.options.surface),
   }
   let answer
   try {

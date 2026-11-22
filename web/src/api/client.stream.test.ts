@@ -83,9 +83,8 @@ describe('streamed mix turns', () => {
       body: JSON.stringify(body),
       credentials: 'include',
       headers: {
+        // No Idempotency-Key until the server has sent a `turn` event: an older server's CORS would refuse it.
         accept, authorization: 'Bearer token', 'content-type': 'application/json',
-        // A streamed turn carries its Idempotency-Key (durable turns); the JSON path stays as it was.
-        ...(accept === 'text/event-stream' ? { 'idempotency-key': expect.stringMatching(UUID) } : {}),
       },
     })
 
@@ -380,8 +379,8 @@ describe('durable mix turns', () => {
     ])
   })
 
-  it('sends a fresh Idempotency-Key with every streamed mix turn, and none on the JSON or album paths', async () => {
-    fetchMock.mockImplementation(async (input) => (String(input).endsWith('/messages') ? stream([frame('result', reply)]) : stream([frame('result', created)])))
+  it('sends a fresh Idempotency-Key with every streamed mix turn once the server sent a turn event, and none on the JSON or album paths', async () => {
+    fetchMock.mockImplementation(async (input) => (String(input).endsWith('/messages') ? stream([turnFrame, frame('result', reply)]) : stream([turnFrame, frame('result', created)])))
     vi.stubGlobal('fetch', fetchMock)
     const api = createMixtapeApi(BASE)
     const onProgress = () => {}
@@ -389,14 +388,28 @@ describe('durable mix turns', () => {
     await api.createSession('Rainy commute', undefined, undefined, undefined, { onProgress })
     await api.sendMessage('session-9', 'Slower', undefined, { onProgress })
     await api.sendMessage('session-9', 'Remake this with my music', undefined, { remake: true, onProgress })
+    await api.createSession('Rainy commute', undefined, undefined, undefined, { onProgress })
     fetchMock.mockImplementation(async () => json(created))
     await api.createSession('Rainy commute')
     await api.createSession('An album', undefined, undefined, 'album', { onProgress })
 
-    const keys = [0, 1, 2].map(keyOf)
+    // The first turn is before any `turn` event: no key (a retry needs that proof anyway).
+    expect(keyOf(0)).toBeNull()
+    const keys = [1, 2, 3].map(keyOf)
     keys.forEach((key) => expect(key).toMatch(UUID))
     expect(new Set(keys).size).toBe(3)
-    expect([keyOf(3), keyOf(4)]).toEqual([null, null])
+    expect([keyOf(4), keyOf(5)]).toEqual([null, null])
+  })
+
+  it('sends no Idempotency-Key to a server that never sent a turn event (an older server, or DURABLE_TURNS off)', async () => {
+    fetchMock.mockImplementation(async () => stream([frame('result', reply)]))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi(BASE)
+
+    await api.sendMessage('session-9', 'Slower', undefined, { onProgress: () => {} })
+    await api.sendMessage('session-9', 'Faster', undefined, { onProgress: () => {} })
+
+    expect([keyOf(0), keyOf(1)]).toEqual([null, null])
   })
 
   it('never retries a failure before the stream opened against a server that has not sent a turn event', async () => {

@@ -139,6 +139,27 @@ describe('TurnRunnerCore: notify', () => {
     expect(calls).toHaveLength(2)
   })
 
+  // A recheck the object cannot keep would leave a watched result never
+  // pushed: it is run at once instead (no 8 s grace, but never lost).
+  it('a recheck that cannot be stored runs at once', async () => {
+    const { db, sessionId } = await listener()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const job = await queueMessageTurn(db, sessionId, 'one')
+    const calls: boolean[] = []
+    const runner = fakeRunner(db, dj(), async (_db, _turnId, { recheck, scheduleRecheck }) => {
+      calls.push(recheck)
+      if (!recheck) scheduleRecheck(NOTIFY_RECHECK_MS)
+    })
+    await runner.core.start(job)
+    const put = runner.storage.put
+    runner.storage.put = async (key, value) => {
+      if (key === 'rechecks') throw new Error('storage down')
+      return put(key, value)
+    }
+    await runner.core.alarm()
+    expect(calls).toEqual([false, true])
+  })
+
   it('a recheck pending when the next turn starts runs after that turn, and is not lost', async () => {
     const { db, sessionId } = await listener()
     const first = await queueMessageTurn(db, sessionId, 'one')

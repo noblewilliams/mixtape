@@ -224,6 +224,9 @@ export class TurnRunnerCore {
       await this.shell.storage.put<Recheck[]>(RECHECKS_KEY, [...rechecks.filter((r) => r.turnId !== turnId), { turnId, at: this.now() + later }])
     } catch {
       console.error('turn runner storage failed')
+      // A recheck that cannot be kept would never run, and the result would
+      // never be pushed: it runs now instead, without the window for `seen`.
+      if (!recheck) await this.notify(db, turnId, true)
     }
   }
 

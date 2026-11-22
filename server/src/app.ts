@@ -153,7 +153,9 @@ export function createApp({
       '*',
       cors({
         origin: allowedOrigins,
-        allowHeaders: ['Authorization', 'Content-Type'],
+        // Idempotency-Key: a mix turn's retry key (durable turns, spec
+        // 2026-11-21); without it the web's turn preflight fails.
+        allowHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
         allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         credentials: true,
         maxAge: 600,

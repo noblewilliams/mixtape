@@ -4,7 +4,7 @@ import { createTestDb, forkTestDb, type TestDb } from '../helpers/db'
 import { createApp } from '../../src/app'
 import { CONFLICT_APOLOGY, INTERNAL_APOLOGY, type DjDeps } from '../../src/dj/loop'
 import { LlmError, type LlmClient, type LlmComplete } from '../../src/dj/llm'
-import { djMessages, djSessions, djTurns, user } from '../../src/db/schema'
+import { djMessages, djSessions, djTurns, pushDevices, user } from '../../src/db/schema'
 import { eventsOnly, readEvents, readSse } from '../helpers/sse'
 import { embed, FAST, generate, mixSession, normalized, queueMessageTurn, scriptedLlm, seedLibrary, seedUser, turnRow } from '../helpers/turn-job'
 import { authedAs, durableApp, fakeTurnRunners, type FakeRunners } from '../helpers/turn-runners'
@@ -146,6 +146,24 @@ describe('DURABLE_TURNS on: the answer is today\'s', () => {
     expect(error.data).toEqual({ status: 502, body: JSON.parse(todayText) })
     const [turn] = await b.select().from(djTurns)
     expect(turn).toMatchObject({ status: 'failed', errorKind: 'llm' })
+  })
+
+  // "Who notifies": `push` says this device gets the push. A listener with
+  // only a browser registered still gets the phone's local ping.
+  it('says push: true only to the surface that has a live device', async () => {
+    const db = await listener()
+    await db.insert(pushDevices).values({ userId: 'u1', provider: 'webpush', platform: 'web', token: 'https://push.example.com/a', keys: { p256dh: 'a', auth: 'b' } })
+    const deps = { embed, llm: scriptedLlm([{ text: 'ready.' }, { text: 'ready.' }]) }
+    const runners = fakeTurnRunners(db, deps)
+    const app = createApp({ auth: authedAs('u1', false), db, dj: { deps }, durableTurns: { runner: runners.namespace, push: { TURN_PUSH: 'on' } } })
+    const pushFor = async (userAgent: string) => {
+      const res = await post(app, '/sessions', { prompt: 'hello' }, { ...STREAM, 'user-agent': userAgent })
+      const turn = eventsOnly(await readSse(res)).find((e) => e.event === 'turn')!
+      await runners.settled()
+      return (turn.data as { push: boolean }).push
+    }
+    expect(await pushFor('Dart/3.9 (dart:io)')).toBe(false)
+    expect(await pushFor('Mozilla/5.0')).toBe(true)
   })
 
   it('carries the CORS headers on the object\'s stream', async () => {

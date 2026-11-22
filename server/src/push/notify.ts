@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { djSessions, djTurns, pushDevices } from '../db/schema'
 import { buildApnsPayload, sendApns, type ApnsOutcome, type FetchLike, type PushKind } from './apns'
@@ -15,6 +15,30 @@ import { buildWebPushPayload, sendWebPush, vapidHeaders, type VapidCache, type V
 
 // How long a watched result waits for the client's `seen` before pushing.
 export const NOTIFY_RECHECK_MS = 8_000
+
+// A turn pushes at most this many of the user's live devices, the most
+// recently registered first. A rotated APNs token or an old browser stays
+// live until a push to it is refused, so the list can only grow between
+// pushes; the cap keeps one turn's fetches (and the cron's) bounded.
+export const MAX_DEVICES_PER_TURN = 10
+
+// The cron's lost-turn sweep shares one invocation's 1,000 subrequests with
+// the rest of maintenance (enrich/scheduled.ts): its pushes stop here. An
+// APNs device can take two fetches (a re-sign retry).
+export const SWEEP_PUSH_FETCH_BUDGET = 300
+
+/**
+ * `inner` until `limit` calls have gone, then a fetch that throws (each
+ * sender reads that as a give-up for the device). One per cron run.
+ */
+export function budgetedFetch(limit: number, inner: FetchLike = (input, init) => fetch(input, init)): FetchLike {
+  let spent = 0
+  return (input, init) => {
+    if (spent >= limit) return Promise.reject(new Error('push fetch budget spent'))
+    spent += 1
+    return inner(input, init)
+  }
+}
 
 export type PushConfig = {
   // TURN_PUSH exact "on".
@@ -47,12 +71,16 @@ export function turnPushEnabled(env: { TURN_PUSH?: string } | undefined): boolea
   return env?.TURN_PUSH === 'on'
 }
 
-/** True when the user has a device that is not disabled. */
-export async function hasLiveDevice(db: Db, userId: string): Promise<boolean> {
+/** True when the user has a device that is not disabled (on `platform`, when given). */
+export async function hasLiveDevice(db: Db, userId: string, platform?: 'ios' | 'web'): Promise<boolean> {
   const [row] = await db
     .select({ id: pushDevices.id })
     .from(pushDevices)
-    .where(and(eq(pushDevices.userId, userId), isNull(pushDevices.disabledAt)))
+    .where(and(
+      eq(pushDevices.userId, userId),
+      isNull(pushDevices.disabledAt),
+      ...(platform ? [eq(pushDevices.platform, platform)] : []),
+    ))
     .limit(1)
   return row !== undefined
 }
@@ -103,6 +131,8 @@ export async function notifyTurn(deps: NotifyDeps, turnId: string, { recheck = f
     })
     .from(pushDevices)
     .where(and(eq(pushDevices.userId, turn.userId), isNull(pushDevices.disabledAt)))
+    .orderBy(desc(pushDevices.lastSeenAt))
+    .limit(MAX_DEVICES_PER_TURN)
   if (devices.length === 0) return record('no_device')
 
   // `seen` from any device suppresses the push to all of them.

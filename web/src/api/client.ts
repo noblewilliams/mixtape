@@ -883,18 +883,22 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
    * body and `error` the ApiError the JSON path would give, and a stream that
    * drops before either is the TypeError a failed fetch is.
    *
-   * Durable turns (spec 2026-11-21): it carries a fresh `Idempotency-Key`. A
-   * request that fails before its stream opens is sent once more with the same
-   * key, but only once this server has sent a `turn` event (an older or
-   * rolled-back server ignores the key, and a retry there could make a second
-   * mix). A stream that drops after its `turn` event attaches to the turn
+   * Durable turns (spec 2026-11-21): once this server has sent a `turn` event,
+   * it carries a fresh `Idempotency-Key` (before that, none: an older server's
+   * CORS would refuse the header). A request that fails before its stream
+   * opens is sent once more with the same key, again only once this server
+   * has sent a `turn` event (an older or rolled-back server ignores the key,
+   * and a retry there could make a second mix). A stream that drops after its `turn` event attaches to the turn
    * (`sessionId`: the message turn's; a create learns it from `session`) and
    * answers as the turn ends; when the attach fails or finds nothing running,
    * the drop's TypeError stands.
    */
   async function turn<T>(path: string, init: RequestInit, onProgress?: TurnProgressListener, sessionId?: string): Promise<T> {
     if (!onProgress) return request<T>(path, init)
-    const keyed: RequestInit = { ...init, headers: { 'idempotency-key': crypto.randomUUID() } }
+    // Only once this server has shown it runs durable turns: a retry needs
+    // that proof anyway, and an older server's CORS preflight refuses the
+    // header, which would fail every turn.
+    const keyed: RequestInit = honoursTurnKeys ? { ...init, headers: { 'idempotency-key': crypto.randomUUID() } } : init
     let turnId: string | undefined
     let session = sessionId
     const listen: TurnProgressListener = (progress) => {
@@ -909,7 +913,9 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     try {
       response = await send(path, keyed, 'text/event-stream')
     } catch (error) {
-      if (!(error instanceof TypeError) || !honoursTurnKeys || init.signal?.aborted) throw error
+      // Keyed only: an unkeyed request (sent before the proof came in from
+      // another turn) has nothing to attach a retry to.
+      if (!(error instanceof TypeError) || keyed === init || init.signal?.aborted) throw error
       response = await send(path, keyed, 'text/event-stream')
     }
     if (response.status === 204) throw new TurnAnswerGoneError()

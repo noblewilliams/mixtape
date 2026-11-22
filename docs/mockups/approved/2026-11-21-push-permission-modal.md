@@ -102,6 +102,20 @@ Spec: `docs/superpowers/specs/2026-11-21-durable-mix-turns-design.md`
   notification permission another way, this pop-up replaces that ask once
   both are in one build.
 
+**Resolved in the build (2026-11-22, `da9ad3f`, `2fb81a8`):**
+
+- **Blur:** a Flutter `BackdropFilter` (16 pt, light tint) over the tab
+  navigator. The native Liquid Glass dock is a hosted UIKit view and is not
+  blurred under it. Web: the blurred overlay variant of `ControlModal`.
+- **Motion:** a 200 ms fade and scale from 0.96; a fade only under reduced
+  motion (`MixtapePopup.transition`).
+- **The quick fix's ask:** removed. The quick fix's local "Your mix is
+  ready" now only reads the permission, so this pop-up is the single ask
+  (the same OS permission covers the local ping and the push).
+- **"Once":** the `push_ask_shown` flag lives in the Keychain, so it
+  survives a reinstall: once per device, not per install. Web keeps it in
+  `localStorage` (`mixtape.pushAsked.v1`), once per browser.
+
 ## Expected owners
 
 - iOS:

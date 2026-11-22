@@ -1,6 +1,31 @@
 # Durable mix turns and mix-ready notifications: plan
 
-**Status:** draft 2026-11-22, awaiting the founder's go.
+**Status:** built 2026-11-22 on branch `claude/durable-mix-spec-1b08b0`,
+not deployed. G (rollout) is the founder's.
+
+| Task | Commit |
+|---|---|
+| S1 schema | `2ce3b3b` |
+| S2 resumable turn | `93211af` |
+| S3 + S4 turn job and TurnRunner object | `990d990` |
+| S5 routes over the object | `bf1c6ab`, review fixes `11f4ee1` |
+| APNs and web push senders (S6/S7 halves) | `14df890` |
+| S6/S7 integration: notify, device routes, `/health` key | `084349e` |
+| C1 + C4 data layer, coming back to a running turn | `7f9199d` |
+| C2 native push | `12d7b92` |
+| C3 approved pop-up | `da9ad3f` |
+| W1 data and resume | `716f845` |
+| W2 web push | `2fb81a8` |
+| Final review fixes (below) | uncommitted at the time of writing |
+
+Final review fixes: CORS allows `Idempotency-Key` (the web's turn
+preflight failed without it); the web sends the key only once the server
+has sent a `turn` event, so an older or flag-off server's CORS never sees
+it; the `turn` event's `push` counts only a device on the request's own
+surface (`ios`/`web`); one turn pushes at most `MAX_DEVICES_PER_TURN` (10)
+devices, newest first; the cron's lost-turn pushes share one
+`SWEEP_PUSH_FETCH_BUDGET` (300 fetches) a run; a recheck the object cannot
+store runs at once instead of being lost.
 
 - Spec: `../specs/2026-11-21-durable-mix-turns-design.md`. Its decisions
   were answered on 2026-11-21, and gate 0 passed on 2026-11-22.

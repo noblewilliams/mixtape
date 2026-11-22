@@ -122,6 +122,23 @@ describe('auth mounting', () => {
     expect(rejected.headers.get('access-control-allow-origin')).toBeNull()
   })
 
+  // The web sends a mix turn's Idempotency-Key cross-origin (durable turns,
+  // spec 2026-11-21): a preflight that does not allow it fails the turn.
+  it('allows the Idempotency-Key request header in a preflight', async () => {
+    const auth = createAuth(await createTestDb(), testEnv)
+    const app = createApp({ auth, allowedOrigins: parseWebOrigins(testEnv.WEB_ORIGINS) })
+    const res = await app.request('http://localhost:8787/sessions', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://localhost:4176',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization,content-type,idempotency-key',
+      },
+    })
+    const allowed = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase().split(/\s*,\s*/)
+    expect(allowed).toEqual(expect.arrayContaining(['authorization', 'content-type', 'idempotency-key']))
+  })
+
   it('drizzle adapter round-trips the user table', async () => {
     const auth = createAuth(await createTestDb(), testEnv)
     const ctx = await auth.$context

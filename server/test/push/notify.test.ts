@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { djMessages, djSessions, djTurns, pushDevices, user } from '../../src/db/schema'
-import { notifyTurn, NOTIFY_RECHECK_MS, type NotifyDeps, type PushConfig } from '../../src/push/notify'
+import { budgetedFetch, MAX_DEVICES_PER_TURN, notifyTurn, NOTIFY_RECHECK_MS, type NotifyDeps, type PushConfig } from '../../src/push/notify'
 import { FAILED_LINES } from '../../src/push/copy'
 import { computePush } from '../../src/routes/turns'
 import type { VapidCache } from '../../src/push/webpush'
@@ -342,6 +342,39 @@ describe('notifyTurn: fan-out', () => {
   })
 })
 
+describe('notifyTurn: bounded fan-out', () => {
+  // Rotated APNs tokens and old browsers stay live until a push disables
+  // them: the fan-out is capped, newest registrations first.
+  it(`pushes at most MAX_DEVICES_PER_TURN devices, the most recently seen`, async () => {
+    const db = await createTestDb()
+    const { turnId } = await seed(db)
+    const total = MAX_DEVICES_PER_TURN + 3
+    for (let i = 0; i < total; i += 1) {
+      await db.insert(pushDevices).values({
+        userId: 'u1', provider: 'webpush', platform: 'web', token: `https://fcm.googleapis.com/fcm/send/d${i}`, keys: SUBSCRIPTION,
+        lastSeenAt: new Date(NOW.getTime() - (total - i) * 60_000),
+      })
+    }
+    const { fetch, calls } = fakeFetch()
+    expect(await notifyTurn(deps(db, fetch), turnId)).toBe('sent')
+    expect(calls).toHaveLength(MAX_DEVICES_PER_TURN)
+    expect(calls.map((c) => c.url)).not.toContain('https://fcm.googleapis.com/fcm/send/d0')
+    expect(calls.map((c) => c.url)).toContain(`https://fcm.googleapis.com/fcm/send/d${total - 1}`)
+  })
+
+  it('a spent fetch budget sends nothing more (the cron run\'s subrequests)', async () => {
+    const inner = fakeFetch()
+    const fetch = budgetedFetch(1, inner.fetch)
+    const db = await createTestDb()
+    const first = await seed(db)
+    const second = await seed(db)
+    await addPhone(db)
+    expect(await notifyTurn(deps(db, fetch), first.turnId)).toBe('sent')
+    expect(await notifyTurn(deps(db, fetch), second.turnId)).toBe('failed')
+    expect(inner.calls).toHaveLength(1)
+  })
+})
+
 describe('notifyTurn: what the push says', () => {
   async function apnsPayload(db: TestDb, turnId: string) {
     const { fetch, calls } = fakeFetch()
@@ -398,14 +431,27 @@ describe('computePush', () => {
   it('is true only with TURN_PUSH on and a live device', async () => {
     const db = await createTestDb()
     await seed(db)
-    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' })).toBe(false)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' }, 'ios')).toBe(false)
     await addPhone(db)
-    expect(await computePush(db, 'u1', { TURN_PUSH: 'off' })).toBe(false)
-    expect(await computePush(db, 'u1', { TURN_PUSH: 'ON' })).toBe(false)
-    expect(await computePush(db, 'u1', undefined)).toBe(false)
-    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' })).toBe(true)
-    expect(await computePush(db, 'u2', { TURN_PUSH: 'on' })).toBe(false)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'off' }, 'ios')).toBe(false)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'ON' }, 'ios')).toBe(false)
+    expect(await computePush(db, 'u1', undefined, 'ios')).toBe(false)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' }, 'ios')).toBe(true)
+    expect(await computePush(db, 'u2', { TURN_PUSH: 'on' }, 'ios')).toBe(false)
     await db.update(pushDevices).set({ disabledAt: NOW })
-    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' })).toBe(false)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' }, 'ios')).toBe(false)
+  })
+
+  // "push is true when this device has a live push registration": a phone
+  // whose listener registered only a laptop must keep its own local ping,
+  // since the push reaches the laptop, not the phone.
+  it('counts only a device on the surface the turn came from', async () => {
+    const db = await createTestDb()
+    await seed(db)
+    await addLaptop(db)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' }, 'ios')).toBe(false)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' }, 'web')).toBe(true)
+    await addPhone(db)
+    expect(await computePush(db, 'u1', { TURN_PUSH: 'on' }, 'ios')).toBe(true)
   })
 })

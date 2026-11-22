@@ -39,7 +39,8 @@ import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 import type { AlbumDeps } from './albums/loop'
 import { TurnRunnerCore, type TurnRunnerNamespace } from './dj/turn-runner'
 import type { TurnJob } from './dj/turn-job'
-import { notifyTurn, turnPushEnabled, type PushConfig } from './push/notify'
+import { budgetedFetch, notifyTurn, SWEEP_PUSH_FETCH_BUDGET, turnPushEnabled, type PushConfig } from './push/notify'
+import type { FetchLike as PushFetchLike } from './push/apns'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -390,9 +391,14 @@ export function buildPush(env: {
 }
 
 // notifyTurn as the object and the cron call it, over their database.
-export function pushNotifier(env: Parameters<typeof buildPush>[0]) {
+// `fetch`: the cron's budgeted one (SWEEP_PUSH_FETCH_BUDGET a run).
+export function pushNotifier(env: Parameters<typeof buildPush>[0], { fetch }: { fetch?: PushFetchLike } = {}) {
   return (db: Db, turnId: string, opts: { recheck?: boolean; scheduleRecheck?: (ms: number) => void } = {}) =>
-    notifyTurn({ db, config: buildPush(env), ...(opts.scheduleRecheck ? { scheduleRecheck: opts.scheduleRecheck } : {}) }, turnId, { recheck: opts.recheck === true })
+    notifyTurn(
+      { db, config: buildPush(env), ...(fetch ? { fetch } : {}), ...(opts.scheduleRecheck ? { scheduleRecheck: opts.scheduleRecheck } : {}) },
+      turnId,
+      { recheck: opts.recheck === true },
+    )
 }
 
 // Plan 2026-11-02 account deletion: the same Sign in with Apple key that signs
@@ -578,7 +584,11 @@ export default {
         // Lost durable turns (dj/turn-sweep.ts): swept whatever DURABLE_TURNS
         // says, so a turn left behind by a flip back to off still ends.
         // A lost turn's watched_result is false, so it pushes at once.
-        turns: { notify: async (turnDb, turn) => void (await pushNotifier(env)(turnDb, turn.turnId)) },
+        // Its pushes share this run's subrequests: one budget for all of them.
+        turns: (() => {
+          const notify = pushNotifier(env, { fetch: budgetedFetch(SWEEP_PUSH_FETCH_BUDGET) })
+          return { notify: async (turnDb: Db, turn: { turnId: string }) => void (await notify(turnDb, turn.turnId)) }
+        })(),
       }) }))
       // While the DJ is paused for billing, one tiny call per run checks
       // whether credits are back and reopens it (dj/auto-pause.ts).
