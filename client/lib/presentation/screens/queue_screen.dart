@@ -54,6 +54,7 @@ import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/mini_toast.dart';
+import '../widgets/foundation/quote_glyph.dart';
 import '../widgets/foundation/swipe_action_row.dart';
 import '../widgets/lyric_turn.dart' show LyricTurn, WorkingCassette;
 import '../widgets/mix_handoff.dart';
@@ -176,8 +177,18 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   final _toast = MiniToastController();
 
   /// The quote and remove glyphs, shared by the capsules and their toasts.
-  static const IconData quoteIcon = CupertinoIcons.quote_bubble_fill;
-  static const IconData removeIcon = CupertinoIcons.eject_fill;
+  /// The quote glyph is drawn in code (the release's icon font lacks it);
+  /// eject is from the font, which the release already carries.
+  static const Widget quoteIcon = QuoteGlyph(
+    size: 18,
+    color: Color(0xFFFFFFFF),
+    filled: true,
+  );
+  static const Widget removeIcon = Icon(
+    CupertinoIcons.eject_fill,
+    size: 17,
+    color: Color(0xFFFFFFFF),
+  );
 
   /// The capsules' colours: the tape's deep plum for quote, a rose red for
   /// remove, both carrying white glyphs in either theme.

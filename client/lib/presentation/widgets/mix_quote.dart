@@ -13,12 +13,12 @@
 /// is lost by moving to the other.
 library;
 
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/quote_glyph.dart';
 
 /// One quoted song.
 @immutable
@@ -269,7 +269,7 @@ class _QuoteChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(width: 10),
-          Icon(CupertinoIcons.quote_bubble, size: 14, color: tokens.plum),
+          QuoteGlyph(size: 14, color: tokens.plum),
           const SizedBox(width: 6),
           Flexible(
             child: Text(
@@ -297,11 +297,8 @@ class _QuoteChip extends StatelessWidget {
                 child: SizedBox(
                   width: height,
                   height: height,
-                  child: Icon(
-                    CupertinoIcons.xmark,
-                    size: 12,
-                    color: tokens.plum,
-                  ),
+                  // Material's close: the release already carries that glyph.
+                  child: Icon(Icons.close, size: 14, color: tokens.plum),
                 ),
               ),
             )
@@ -345,11 +342,7 @@ class QuotedSongLines extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  CupertinoIcons.quote_bubble,
-                  size: 13,
-                  color: tokens.muted,
-                ),
+                QuoteGlyph(size: 13, color: tokens.muted),
                 const SizedBox(width: 5),
                 Flexible(
                   child: Text(

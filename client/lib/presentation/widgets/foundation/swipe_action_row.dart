@@ -34,7 +34,8 @@ class SwipeAction {
     this.removes = false,
   });
 
-  final IconData icon;
+  /// The glyph, drawn white at about 17 pt.
+  final Widget icon;
 
   /// What VoiceOver calls it.
   final String label;
@@ -314,11 +315,7 @@ class _SwipeActionRowState extends State<SwipeActionRow>
                     scale: scale,
                     duration: const Duration(milliseconds: 160),
                     curve: armed ? Curves.easeOutBack : Curves.easeOut,
-                    child: Icon(
-                      action.icon,
-                      size: 17,
-                      color: const Color(0xFFFFFFFF),
-                    ),
+                    child: action.icon,
                   ),
                 ),
               ),

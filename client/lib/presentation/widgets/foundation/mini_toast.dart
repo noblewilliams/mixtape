@@ -21,7 +21,8 @@ class MiniToastData {
     this.duration = MiniToast.shortDuration,
   });
 
-  final IconData icon;
+  /// The glyph, drawn white at about 18 pt.
+  final Widget icon;
   final String message;
   final String? actionLabel;
   final VoidCallback? onAction;
@@ -139,7 +140,7 @@ class _Capsule extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(toast.icon, size: 18, color: ink),
+                    toast.icon,
                     const SizedBox(width: 10),
                     Flexible(
                       child: Text(
