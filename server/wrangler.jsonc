@@ -76,7 +76,7 @@
     // their streams carry the `turn` event. Anything else is today's
     // in-request turn. Off: flip back the same way; turns already in an
     // object still finish there.
-    "DURABLE_TURNS": "off",
+    "DURABLE_TURNS": "on",
     // Mix-ready push (spec 2026-11-21): "on" pushes a turn's end to the
     // listener's devices when no client saw it. Anything else sends none.
     // "on" requires APNS_KEY_ID, APNS_PRIVATE_KEY, VAPID_PUBLIC_KEY,
