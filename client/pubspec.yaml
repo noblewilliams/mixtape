@@ -55,6 +55,7 @@ dependencies:
   app_links: ^7.2.2
   shorebird_code_push: ^2.0.7
   flutter_svg: ^2.5.0
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:

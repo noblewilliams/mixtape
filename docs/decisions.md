@@ -2517,3 +2517,26 @@ ready notifications ask uses (`showMixtapePopup`):
 
 No state board: asked for directly by the founder with the notification ask
 as the reference, and checked in the simulator.
+
+## 2026-11-23 — The notifications pop-up's flags live with the install
+
+iOS forgets an app's notification permission when it is deleted but keeps its
+Keychain. The pop-up's "already shown" flag was in the Keychain, so a
+reinstalled Mixtape thought it had asked, never asked again, and (with iOS
+permission never granted) never registered for pushes: the server sent, Apple
+accepted, and the phone dropped every push. Found on the founder's phone,
+where Settings → Mixtape had no Notifications row at all.
+
+- Both flags (pop-up shown, "Mix ready notifications" off in You) now live in
+  `push_flags.json` in Application Support, which goes with the app
+  (`FilePushAskStore`; `path_provider` was already in the binary as a
+  transitive dependency, so this ships over the air).
+- On the first launch of this build the Keychain flags are moved out and
+  deleted. The listener's own off carries over. "Shown" does not: a Keychain
+  flag cannot tell this install's pop-up from an earlier one's, so someone who
+  tapped Not now sees it once more, and phones already reinstalled get it back.
+- The rule is unchanged otherwise: shown once per install, never after an iOS
+  decision, never on a denied phone.
+
+**Reopens if:** an ask once per install proves too often (then key it to the
+account on the server instead).

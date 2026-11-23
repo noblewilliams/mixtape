@@ -50,7 +50,7 @@ final pushServiceProvider = Provider<PushService>((ref) {
 
 /// The device's notification flags: the pop-up's once, and You's off.
 final pushAskStoreProvider = Provider<PushAskStore>(
-  (ref) => SecurePushAskStore(),
+  (ref) => FilePushAskStore(),
 );
 
 /// Whether this build can receive pushes at all (iOS). Off it, You shows no
