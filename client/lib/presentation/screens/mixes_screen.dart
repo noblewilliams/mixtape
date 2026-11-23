@@ -44,7 +44,7 @@ import '../widgets/foundation/mixtape_menu.dart' show MixMenuIcons;
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/section_word.dart';
 import '../widgets/foundation/segmented_toggle.dart';
-import '../widgets/foundation/swipe_actions.dart';
+import '../widgets/foundation/swipe_action_row.dart';
 import '../widgets/foundation/tape_button.dart';
 import 'queue_screen.dart' show QueueScreen;
 import '../widgets/listen_later_row.dart';
@@ -160,10 +160,29 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
   /// animating shut out of sight while the list is moved to cover it.
   int _archivedEpoch = 0;
 
+  /// The row sliding or resting open, if any: the hairline under it (the
+  /// next row's) steps aside meanwhile, as in the queue.
+  Key? _slidingKey;
+
+  void _onSliding(Key key, bool active) => setState(() {
+    if (active) {
+      _slidingKey = key;
+    } else if (_slidingKey == key) {
+      _slidingKey = null;
+    }
+  });
+
   @override
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// A list scrolling closes any row resting open (the queue's rule); the
+  /// notification carries on up.
+  bool _closeSwipes(ScrollStartNotification notification) {
+    if (notification.metrics.axis == Axis.vertical) SwipeActionRow.closeAll();
+    return false;
   }
 
   bool _onScroll(ScrollNotification notification) {
@@ -390,7 +409,9 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
             body: Stack(
               fit: StackFit.expand,
               children: [
-                SwipeActionsGroup(
+                NotificationListener<ScrollStartNotification>(
+                  // A row resting open closes once the list scrolls.
+                  onNotification: _closeSwipes,
                   child: LargeTitleScaffold(
                     controller: _scroll,
                     title: 'Mixes',
@@ -602,8 +623,10 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
             // Lazily built rows have no FlushList above them, so the first
             // row has to be told it opens the list or it draws a hairline
             // there. Under the Archived row it draws one.
-            final first = index == 0 && !showArchived && !pendingRow;
             final entry = entries[index];
+            final first =
+                (index == 0 && !showArchived && !pendingRow) ||
+                (index > 0 && _entryKey(entries[index - 1]) == _slidingKey);
             if (entry is SharedMixEntry) {
               final mix = entry.mix;
               final row = SharedMixHomeRow(
@@ -612,6 +635,8 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
                 isFirst: first,
                 onOpen: () => _openShared(mix.token),
                 onRemove: () => _removeShared(mix.token),
+                onSlidingChanged: (active) =>
+                    _onSliding(_entryKey(entry), active),
               );
               // Shared mixes are the sender's: dimmed, no circle (board S2).
               return selecting
@@ -646,6 +671,8 @@ class _MixesScreenState extends ConsumerState<MixesScreen>
               selected: isSelected(session.id),
               fading: isDeleting(session.id),
               onToggleSelected: () => toggleSelected(session.id),
+              onSlidingChanged: (active) =>
+                  _onSliding(_entryKey(entry), active),
             );
           },
         ),

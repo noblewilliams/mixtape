@@ -18,44 +18,45 @@ void main() {
     queueVersion: 1,
     updatedAt: DateTime(2026),
   );
-  testWidgets('a tap outside ends an unchanged rename (device smoke 2026-11-13)', (
-    tester,
-  ) async {
-    final names = <String>[];
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Column(
-            children: [
-              MixHomeRow(
-                session: session,
-                showActionsButton: true,
-                onOpen: () {},
-                onRename: (name) async {
-                  names.add(name);
-                  return true;
-                },
-                onArchive: () async => true,
-                onRestore: () async => true,
-              ),
-              const Expanded(child: SizedBox.expand(key: Key('outside'))),
-            ],
+  testWidgets(
+    'a tap outside ends an unchanged rename (device smoke 2026-11-13)',
+    (tester) async {
+      final names = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                MixHomeRow(
+                  session: session,
+                  showActionsButton: true,
+                  onOpen: () {},
+                  onRename: (name) async {
+                    names.add(name);
+                    return true;
+                  },
+                  onArchive: () async => true,
+                  onRestore: () async => true,
+                ),
+                const Expanded(child: SizedBox.expand(key: Key('outside'))),
+              ],
+            ),
           ),
         ),
-      ),
-    );
-    await tester.tap(find.byTooltip('Mix actions'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Rename'));
-    await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsOneWidget);
+      );
+      await tester.tap(find.byTooltip('Mix actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rename'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
 
-    await tester.tapAt(tester.getCenter(find.byKey(const Key('outside'))));
-    await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsNothing);
-    expect(find.text('Sunday'), findsOneWidget);
-    expect(names, isEmpty, reason: 'nothing changed, nothing saved');
-  });
+      await tester.tapAt(tester.getCenter(find.byKey(const Key('outside'))));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('Sunday'), findsOneWidget);
+      expect(names, isEmpty, reason: 'nothing changed, nothing saved');
+    },
+  );
 
   testWidgets('a tap outside keeps a changed name, as renaming in Files does', (
     tester,
@@ -142,7 +143,10 @@ void main() {
       final handle = tester.ensureSemantics();
       await pump(tester, ready: true);
       expect(find.byKey(MixHomeRow.readyKey('one')), findsOneWidget);
-      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isFalse);
+      expect(
+        tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning,
+        isFalse,
+      );
       expect(find.bySemanticsLabel(RegExp('Ready')), findsWidgets);
       handle.dispose();
     });
@@ -349,8 +353,8 @@ void main() {
       ),
     );
 
-    testWidgets('a swipe opens More and Archive and waits; nothing is '
-        'archived until Archive is tapped', (tester) async {
+    testWidgets('a swipe left rests open on Archive and waits; nothing is '
+        'archived until the capsule is tapped', (tester) async {
       var archives = 0;
       await pumpSwipeRow(
         tester,
@@ -361,7 +365,8 @@ void main() {
       );
       await tester.drag(find.text('Sunday'), const Offset(-140, 0));
       await tester.pumpAndSettle();
-      expect(find.byKey(MixHomeRow.moreActionKey('one')), findsOneWidget);
+      // One capsule per side, as a song's: More is behind the other edge.
+      expect(find.byKey(MixHomeRow.moreActionKey('one')), findsNothing);
       expect(find.byKey(MixHomeRow.archiveActionKey('one')), findsOneWidget);
       expect(archives, 0);
 
@@ -371,9 +376,11 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('More opens the row menu', (tester) async {
+    testWidgets('a swipe right rests open on More, which opens the row menu', (
+      tester,
+    ) async {
       await pumpSwipeRow(tester, onArchive: () async => true);
-      await tester.drag(find.text('Sunday'), const Offset(-140, 0));
+      await tester.drag(find.text('Sunday'), const Offset(140, 0));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(MixHomeRow.moreActionKey('one')));
@@ -381,6 +388,16 @@ void main() {
       expect(find.byKey(mixtapeMenuKey), findsOneWidget);
       expect(find.text('Rename'), findsOneWidget);
       expect(find.text('Archive'), findsWidgets);
+    });
+
+    testWidgets('an archive that fails brings the row back', (tester) async {
+      await pumpSwipeRow(tester, onArchive: () async => false);
+      await tester.drag(find.text('Sunday'), const Offset(-700, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Sunday'), findsOneWidget);
+      expect(tester.getSize(find.byType(MixHomeRow)).height, greaterThan(40));
+      expect(tester.getTopLeft(find.text('Sunday')).dx, lessThan(400));
+      expect(tester.getTopLeft(find.text('Sunday')).dx, greaterThan(0));
     });
 
     testWidgets('a full swipe archives on its own', (tester) async {
@@ -417,7 +434,7 @@ void main() {
       );
       await tester.drag(find.text('Sunday'), const Offset(-140, 0));
       await tester.pumpAndSettle();
-      expect(find.text('Unarchive'), findsOneWidget);
+      expect(find.bySemanticsLabel('Unarchive'), findsOneWidget);
 
       await tester.tap(find.byKey(MixHomeRow.archiveActionKey('one')));
       await tester.pumpAndSettle();

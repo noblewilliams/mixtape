@@ -13,7 +13,10 @@
 ///
 /// A [SwipeAction.removes] action carries the row off the edge and folds the
 /// gap closed before it runs (the caller then drops the row); any other
-/// springs the row back.
+/// springs the row back. A removing action that returns a Future and leaves
+/// the row in place once it completes (a failed request) unfolds it again.
+///
+/// Mixes' rows use it too (founder, 2026-11-23: a mix swipes as a song does).
 library;
 
 import 'dart:async';
@@ -32,6 +35,7 @@ class SwipeAction {
     required this.color,
     required this.onTrigger,
     this.removes = false,
+    this.key,
   });
 
   /// The glyph, drawn white at about 17 pt.
@@ -40,10 +44,13 @@ class SwipeAction {
   /// What VoiceOver calls it.
   final String label;
   final Color color;
-  final VoidCallback onTrigger;
+  final FutureOr<void> Function() onTrigger;
 
   /// Whether the action takes the row away.
   final bool removes;
+
+  /// The capsule's own key, for tests; [SwipeActionRow.capsuleKey] otherwise.
+  final Key? key;
 }
 
 class SwipeActionRow extends StatefulWidget {
@@ -55,6 +62,8 @@ class SwipeActionRow extends StatefulWidget {
     this.liftColor,
     this.reducedMotion = false,
     this.onActiveChanged,
+    this.enabled = true,
+    this.bleed = 0,
   });
 
   final Widget child;
@@ -73,6 +82,15 @@ class SwipeActionRow extends StatefulWidget {
   /// Told true when the row starts to slide (or rests open) and false once
   /// it is back in place: the list hides the hairlines around it meanwhile.
   final ValueChanged<bool>? onActiveChanged;
+
+  /// False while the row is busy or being edited: no swipe, and an open row
+  /// closes.
+  final bool enabled;
+
+  /// How far past its own edges the card and capsules draw: a row inset by
+  /// the screen's side padding still lifts edge to edge, with its capsules
+  /// [edgeInset] from the screen edge, as a full-width row's do.
+  final double bleed;
 
   /// The capsule's width when the row rests open.
   static const double buttonWidth = 72;
@@ -134,6 +152,12 @@ class _SwipeActionRowState extends State<SwipeActionRow>
   bool _armed = false;
   bool _busy = false;
   bool _active = false;
+
+  @override
+  void didUpdateWidget(SwipeActionRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.enabled && oldWidget.enabled && !_busy) _close();
+  }
 
   @override
   void dispose() {
@@ -228,14 +252,16 @@ class _SwipeActionRowState extends State<SwipeActionRow>
   Future<void> _run(SwipeAction action, [double velocity = 0]) async {
     if (_busy) return;
     if (!action.removes) {
-      action.onTrigger();
       _settleTo(0, velocity);
+      unawaited(Future.sync(action.onTrigger));
       return;
     }
     _busy = true;
     unawaited(Haptics.play(HapticKind.destructive));
     SwipeActionRow._open.remove(this);
-    final out = (_offset.value == 0 ? -1 : _offset.value.sign) * (_width + 40);
+    final out =
+        (_offset.value == 0 ? -1 : _offset.value.sign) *
+        (_width + widget.bleed + 40);
     if (widget.reducedMotion) {
       _offset.value = out;
       _fold.value = 1;
@@ -249,7 +275,24 @@ class _SwipeActionRowState extends State<SwipeActionRow>
       await _fold.forward();
     }
     if (!mounted) return;
-    action.onTrigger();
+    try {
+      final result = action.onTrigger();
+      if (result is Future) await result;
+    } catch (_) {
+      // The caller owns the error; the row comes back below if it stays.
+    }
+    // Still here: the caller kept the row (a request failed), so bring it
+    // back. A row the caller dropped is gone by now.
+    if (!mounted) return;
+    _busy = false;
+    _raw = 0;
+    if (widget.reducedMotion) {
+      _offset.value = 0;
+      _fold.value = 0;
+    } else {
+      _offset.value = 0;
+      await _fold.reverse();
+    }
   }
 
   void _close() => _settleTo(0, 0);
@@ -285,9 +328,10 @@ class _SwipeActionRowState extends State<SwipeActionRow>
     // The glyph grows in with the pull, and pops once letting go would run
     // the action.
     final scale = armed ? 1.18 : 0.55 + 0.45 * grown;
+    final inset = SwipeActionRow.edgeInset - widget.bleed;
     return Positioned(
-      left: leading ? SwipeActionRow.edgeInset : null,
-      right: leading ? null : SwipeActionRow.edgeInset,
+      left: leading ? inset : null,
+      right: leading ? null : inset,
       top: 4,
       bottom: 4,
       width: width,
@@ -297,7 +341,7 @@ class _SwipeActionRowState extends State<SwipeActionRow>
         excludeSemantics: true,
         onTap: () => _run(action),
         child: GestureDetector(
-          key: SwipeActionRow.capsuleKey(leading),
+          key: action.key ?? SwipeActionRow.capsuleKey(leading),
           behavior: HitTestBehavior.opaque,
           onTap: () => _run(action),
           child: DecoratedBox(
@@ -333,19 +377,28 @@ class _SwipeActionRowState extends State<SwipeActionRow>
   @override
   Widget build(BuildContext context) {
     final lift = widget.liftColor ?? context.tokens.field;
-    return SizeTransition(
-      sizeFactor: ReverseAnimation(
-        CurvedAnimation(parent: _fold, curve: Curves.easeInOut),
+    // Folds closed from the bottom, as a SizeTransition would, but clips only
+    // past the bleed: the card and capsules draw out to the screen edge.
+    final folded = CurvedAnimation(parent: _fold, curve: Curves.easeInOut);
+    return AnimatedBuilder(
+      animation: folded,
+      builder: (context, child) => ClipRect(
+        clipper: _BleedClipper(widget.bleed),
+        child: Align(
+          alignment: Alignment.topCenter,
+          heightFactor: 1 - folded.value,
+          child: child,
+        ),
       ),
-      axisAlignment: -1,
       child: LayoutBuilder(
         builder: (context, constraints) {
           _width = constraints.maxWidth;
+          final on = widget.enabled;
           return GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onHorizontalDragStart: _onStart,
-            onHorizontalDragUpdate: _onUpdate,
-            onHorizontalDragEnd: _onEnd,
+            onHorizontalDragStart: on ? _onStart : null,
+            onHorizontalDragUpdate: on ? _onUpdate : null,
+            onHorizontalDragEnd: on ? _onEnd : null,
             child: AnimatedBuilder(
               animation: _offset,
               child: widget.child,
@@ -354,14 +407,31 @@ class _SwipeActionRowState extends State<SwipeActionRow>
                 final action = _actionFor(dx);
                 // The card fades in over the first few points of the pull.
                 final t = (dx.abs() / 32).clamp(0.0, 1.0);
-                Widget card = DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Color.lerp(lift.withValues(alpha: 0), lift, t),
-                    borderRadius: BorderRadius.circular(
-                      SwipeActionRow.cardRadius * t,
-                    ),
-                  ),
-                  child: child,
+                final bleed = widget.bleed;
+                Widget card = Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    if (t > 0)
+                      Positioned(
+                        left: -bleed,
+                        right: -bleed,
+                        top: 0,
+                        bottom: 0,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Color.lerp(
+                              lift.withValues(alpha: 0),
+                              lift,
+                              t,
+                            ),
+                            borderRadius: BorderRadius.circular(
+                              SwipeActionRow.cardRadius * t,
+                            ),
+                          ),
+                        ),
+                      ),
+                    child!,
+                  ],
                 );
                 // Resting open, a tap on the row only closes it.
                 if (_isOpen) {
@@ -385,4 +455,18 @@ class _SwipeActionRowState extends State<SwipeActionRow>
       ),
     );
   }
+}
+
+/// The row's own box, widened by [bleed] on each side.
+class _BleedClipper extends CustomClipper<Rect> {
+  const _BleedClipper(this.bleed);
+
+  final double bleed;
+
+  @override
+  Rect getClip(Size size) =>
+      Rect.fromLTRB(-bleed, 0, size.width + bleed, size.height);
+
+  @override
+  bool shouldReclip(_BleedClipper oldClipper) => oldClipper.bleed != bleed;
 }

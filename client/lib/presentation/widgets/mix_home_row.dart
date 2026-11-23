@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import 'package:flutter/material.dart';
 import 'mix_name_editor.dart';
 
@@ -10,10 +11,11 @@ import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
 import 'foundation/haptics.dart';
 import 'foundation/mixtape_menu.dart';
-import 'foundation/swipe_actions.dart';
+import 'foundation/swipe_action_row.dart';
 import 'mix_select_mode.dart';
 import 'tape_palette.dart';
 import 'tape_settings_dialog.dart';
+import 'track_row.dart' show TrackRow;
 import 'foundation/shimmer.dart';
 
 /// Home owns canonical session state; this row only owns an unsaved name.
@@ -36,7 +38,12 @@ class MixHomeRow extends StatefulWidget {
     this.selected = false,
     this.onToggleSelected,
     this.fading = false,
+    this.onSlidingChanged,
   });
+
+  /// Told true while the row slides or rests open and false once it is back:
+  /// the list hides the hairline under it meanwhile, as the queue does.
+  final ValueChanged<bool>? onSlidingChanged;
 
   /// The row menu's Select: opens select mode with this row ticked (select
   /// and delete mixes, approved 2026-11-16). Absent, the menu has no Select.
@@ -119,9 +126,25 @@ class MixHomeRow extends StatefulWidget {
   /// The row's padding above and below the tape.
   static const double verticalPadding = 16;
 
-  /// The swipe panels, for tests.
+  /// The swipe capsules, for tests.
   static Key moreActionKey(String id) => ValueKey('mix-swipe-more-$id');
   static Key archiveActionKey(String id) => ValueKey('mix-swipe-archive-$id');
+
+  /// The capsules: the tape's deep plum for More (the queue's quote colour)
+  /// and the app's violet glow for Archive, both with white glyphs in either
+  /// theme.
+  static const Color moreColor = Color(0xFF5A4957);
+  static const Color archiveColor = Color(0xFF6E5C8F);
+  static const Widget moreIcon = Icon(
+    CupertinoIcons.ellipsis,
+    size: 17,
+    color: Color(0xFFFFFFFF),
+  );
+  static const Widget archiveIcon = Icon(
+    MixMenuIcons.archive,
+    size: 17,
+    color: Color(0xFFFFFFFF),
+  );
 
   /// The row's actions, in menu order.
   static const String renameAction = 'rename';
@@ -137,6 +160,9 @@ class MixHomeRow extends StatefulWidget {
 class _MixHomeRowState extends State<MixHomeRow> {
   bool _editing = false;
   bool _busy = false;
+
+  /// Sliding or resting open: the row's own hairline rides away with it.
+  bool _sliding = false;
 
   void _rename() => setState(() => _editing = true);
 
@@ -295,50 +321,58 @@ class _MixHomeRowState extends State<MixHomeRow> {
   @override
   Widget build(BuildContext context) {
     final archived = widget.session.status == 'archived';
-    final dark = Theme.of(context).brightness == Brightness.dark;
+    final brightness = Theme.of(context).brightness;
     final id = widget.session.id;
+    final statusLabel = archived ? 'Unarchive' : 'Archive';
     return _TokenScope(
+      // Swipe right for the row's menu, left to archive, as a song swipes
+      // right to quote and left to remove (founder, 2026-11-23).
+      // The row's box at rest, under the token scope: the menu anchors to it.
       child: Builder(
-        builder: (context) => SwipeActions(
+        builder: (context) => SwipeActionRow(
           key: ValueKey('mix-swipe-$id'),
           enabled: !_editing && !_busy && !widget.selecting,
-          // The list sits inside the screen's side padding; the row still
-          // slides out to the screen edge, as WhatsApp's does.
+          reducedMotion: MediaQuery.disableAnimationsOf(context),
+          liftColor: TrackRow.liftColorFor(brightness),
+          // The list sits inside the screen's side padding; the card still
+          // lifts edge to edge.
           bleed: MixtapeMetrics.screenSidePadding,
-          actions: [
-            SwipeAction(
-              key: MixHomeRow.moreActionKey(id),
-              label: 'More',
-              icon: CupertinoIcons.ellipsis,
-              color: dark ? _moreFillDark : _moreFillLight,
-              // The swipe's own box, which stays put while the row slides: the
-              // menu anchors to the row at rest and lifts a copy of it, as a
-              // long-press does.
-              onPressed: () => _openActionsMenu(context, archived),
-            ),
-            SwipeAction(
-              key: MixHomeRow.archiveActionKey(id),
-              label: archived ? 'Unarchive' : 'Archive',
-              icon: MixMenuIcons.archive,
-              color: dark ? _archiveFillDark : _archiveFillLight,
-              commits: true,
-              onPressed: _changeStatus,
-            ),
-          ],
-          child: Builder(builder: _buildRow),
+          onActiveChanged: (active) {
+            setState(() => _sliding = active);
+            widget.onSlidingChanged?.call(active);
+          },
+          leading: SwipeAction(
+            key: MixHomeRow.moreActionKey(id),
+            label: 'More',
+            icon: MixHomeRow.moreIcon,
+            color: MixHomeRow.moreColor,
+            // This row's own box, which stays put while the card slides: the
+            // menu anchors to the row at rest and lifts a copy of it, as a
+            // long-press does.
+            onTrigger: () => _openActionsMenu(context, archived),
+          ),
+          trailing: SwipeAction(
+            key: MixHomeRow.archiveActionKey(id),
+            label: statusLabel,
+            icon: MixHomeRow.archiveIcon,
+            color: MixHomeRow.archiveColor,
+            removes: true,
+            onTrigger: _changeStatus,
+          ),
+          child: Semantics(
+            customSemanticsActions: _editing || widget.selecting
+                ? null
+                : {
+                    const CustomSemanticsAction(label: 'More'): () =>
+                        _openActionsMenu(context, archived),
+                    CustomSemanticsAction(label: statusLabel): _changeStatus,
+                  },
+            child: Builder(builder: _buildRow),
+          ),
         ),
       ),
     );
   }
-
-  /// The swipe panels: a neutral grey More beside a violet Archive, as
-  /// WhatsApp's grey sits beside its green. The violet is the app's own glow
-  /// (the background's violet tint, the prism's last stripe), so the one
-  /// coloured panel is still the brand's colour.
-  static const Color _moreFillLight = Color(0xFF8E8A93);
-  static const Color _moreFillDark = Color(0xFF48464E);
-  static const Color _archiveFillLight = Color(0xFF6E5C8F);
-  static const Color _archiveFillDark = Color(0xFF604EAA);
 
   Widget _buildRow(BuildContext context) {
     final archived = widget.session.status == 'archived';
@@ -385,7 +419,7 @@ class _MixHomeRowState extends State<MixHomeRow> {
         title: widget.session.title,
         subtitle: _subtitle,
         subtitleWidget: widget.working ? MixHomeRow.workingLine(context) : null,
-        isFirst: widget.isFirst,
+        isFirst: _sliding ? true : widget.isFirst,
         onTap: _busy ? null : widget.onOpen,
         trailing: widget.ready && !widget.working
             ? _readyDot(context)

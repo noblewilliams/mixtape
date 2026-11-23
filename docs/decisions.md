@@ -2540,3 +2540,17 @@ where Settings → Mixtape had no Notifications row at all.
 
 **Reopens if:** an ask once per install proves too often (then key it to the
 account on the server instead).
+
+## 2026-11-23 — Mix rows swipe as songs do
+
+Mix rows (and shared-mix rows) now use the queue's `SwipeActionRow` instead of
+the WhatsApp-style `SwipeActions` panels (2026-11-09 entry above): the row
+lifts into a rounded card and one capsule shows in the gap behind it, a
+deep-plum More on a swipe right (opens the row menu, the row springs back)
+and a violet Archive / Unarchive on a swipe left (a shared mix: a rose
+Remove). Part way rests open and waits for a tap; all the way runs the
+action. The founder asked for the mix row to match the redesigned song row.
+`SwipeActionRow` gained `bleed` (the card and capsules reach the screen edge
+from inside the list's side padding), `enabled`, and an unfold when a
+removing action's Future leaves the row in place (a failed archive).
+`SwipeActions` now has no callers in the app.

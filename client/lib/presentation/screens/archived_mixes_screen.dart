@@ -19,7 +19,7 @@ import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
-import '../widgets/foundation/swipe_actions.dart';
+import '../widgets/foundation/swipe_action_row.dart';
 import '../widgets/mix_home_row.dart';
 import 'chat_screen.dart';
 import 'mix_archive_feedback.dart';
@@ -40,6 +40,13 @@ class ArchivedMixesScreen extends ConsumerStatefulWidget {
 
 class _ArchivedMixesScreenState extends ConsumerState<ArchivedMixesScreen>
     with MixSelectFlow<ArchivedMixesScreen> {
+  /// A list scrolling closes any row resting open (the queue's rule); the
+  /// notification carries on up.
+  bool _closeSwipes(ScrollStartNotification notification) {
+    if (notification.metrics.axis == Axis.vertical) SwipeActionRow.closeAll();
+    return false;
+  }
+
   @override
   List<DjSession> get selectableSessions =>
       archivedSessions(ref.read(sessionsProvider).value ?? const []);
@@ -89,7 +96,9 @@ class _ArchivedMixesScreenState extends ConsumerState<ArchivedMixesScreen>
             body: Stack(
               fit: StackFit.expand,
               children: [
-                SwipeActionsGroup(
+                NotificationListener<ScrollStartNotification>(
+                  // A row resting open closes once the list scrolls.
+                  onNotification: _closeSwipes,
                   child: LargeTitleScaffold(
                     title: 'Archived',
                     leading: selecting

@@ -33,7 +33,7 @@ import 'package:mixtape/presentation/screens/queue_screen.dart'
 import 'package:mixtape/presentation/widgets/foundation/large_title_scaffold.dart';
 import 'package:mixtape/presentation/widgets/mix_select_mode.dart';
 import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
-import 'package:mixtape/presentation/widgets/foundation/swipe_actions.dart';
+import 'package:mixtape/presentation/widgets/foundation/swipe_action_row.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/listen_later_row.dart';
 import 'package:mixtape/presentation/widgets/mix_home_row.dart';
@@ -687,7 +687,7 @@ void main() {
       final api = FakeDjApi()..onListSessions = () async => sessions;
       final container = _makeContainer(api);
       await _pump(tester, container);
-      final before = tester.state(find.byType(SwipeActions).last);
+      final before = tester.state(find.byType(SwipeActionRow).last);
 
       // A mix lands above both, so the second moves down a place.
       sessions = [_session(id: 's0', title: 'Newest'), ...sessions];
@@ -697,7 +697,7 @@ void main() {
         tester.state(
           find.descendant(
             of: find.byKey(const Key('session-s2')),
-            matching: find.byType(SwipeActions),
+            matching: find.byType(SwipeActionRow),
           ),
         ),
         same(before),
@@ -844,7 +844,7 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       // A full swipe archives on its own.
-      await tester.drag(find.byType(SwipeActions), const Offset(-700, 0));
+      await tester.drag(find.byType(SwipeActionRow), const Offset(-700, 0));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('session-s1')), findsOneWidget);
       expect(find.text("couldn't archive — try again"), findsOneWidget);
@@ -892,7 +892,7 @@ void main() {
 
       await tester.drag(find.text('Old One'), const Offset(-140, 0));
       await tester.pumpAndSettle();
-      expect(find.text('Unarchive'), findsOneWidget);
+      expect(find.bySemanticsLabel('Unarchive'), findsOneWidget);
       await tester.tap(find.byKey(MixHomeRow.archiveActionKey('s1')));
       await tester.pumpAndSettle();
       expect(writes, ['active']);
@@ -1667,9 +1667,24 @@ void main() {
         find.byKey(SharedMixHomeRow.removeActionKey(token)),
         findsOneWidget,
       );
-      expect(find.text('Remove'), findsOneWidget);
-      expect(find.text('Archive'), findsNothing);
-      expect(find.text('More'), findsNothing);
+      // One capsule, and none behind the other edge.
+      final row = find.byKey(SharedMixHomeRow.rowKey(token));
+      Finder inRow(String label) =>
+          find.descendant(of: row, matching: find.bySemanticsLabel(label));
+      expect(inRow('Remove'), findsOneWidget);
+      expect(inRow('Archive'), findsNothing);
+      expect(inRow('More'), findsNothing);
+      await tester.drag(
+        find.text('Late drive, windows down'),
+        const Offset(280, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(inRow('More'), findsNothing);
+      await tester.drag(
+        find.text('Late drive, windows down'),
+        const Offset(-140, 0),
+      );
+      await tester.pumpAndSettle();
       expect(api.removedShares, isEmpty);
 
       await tester.tap(find.byKey(SharedMixHomeRow.removeActionKey(token)));

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 
 import '../../data/dj/dj_models.dart';
 import '../format/relative_time.dart';
@@ -8,9 +9,10 @@ import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
 import 'foundation/haptics.dart';
 import 'foundation/mixtape_menu.dart';
-import 'foundation/swipe_actions.dart';
+import 'foundation/swipe_action_row.dart';
 import 'mix_home_row.dart';
 import 'tape_palette.dart';
+import 'track_row.dart' show TrackRow;
 
 /// A shared mix the listener saved, in Mixes (spec 2026-11-13 shared-mixes;
 /// board M1–M3): the mix row's tape, size and padding, the cassette in the
@@ -24,7 +26,11 @@ class SharedMixHomeRow extends StatelessWidget {
     required this.onOpen,
     required this.onRemove,
     this.isFirst,
+    this.onSlidingChanged,
   });
+
+  /// As [MixHomeRow.onSlidingChanged].
+  final ValueChanged<bool>? onSlidingChanged;
 
   final SharedMixRow mix;
   final VoidCallback onOpen;
@@ -43,10 +49,14 @@ class SharedMixHomeRow extends StatelessWidget {
   static Key removeActionKey(String token) =>
       ValueKey('shared-swipe-remove-$token');
 
-  /// The Remove panel: the menu's destructive red, darkened in dark mode so
-  /// the white label keeps its contrast.
-  static const Color _removeFillLight = MixtapeMenuItem.destructiveLight;
-  static const Color _removeFillDark = Color(0xFFB0362A);
+  /// The Remove capsule: the queue's rose red and eject, as a song's remove
+  /// (founder, 2026-11-23: a mix swipes as a song does).
+  static const Color _removeColor = Color(0xFFC4566F);
+  static const Widget _removeIcon = Icon(
+    MixMenuIcons.eject,
+    size: 17,
+    color: Color(0xFFFFFFFF),
+  );
 
   String get _byline => sharedMixByline(mix.sharerName);
   String get _when => relativeTime(mix.savedAt);
@@ -80,14 +90,18 @@ class SharedMixHomeRow extends StatelessWidget {
     );
   }
 
-  Widget _row(BuildContext context, {required bool lifted}) => FlushRow(
+  Widget _row(
+    BuildContext context, {
+    required bool lifted,
+    bool sliding = false,
+  }) => FlushRow(
     leading: _tile,
     leadingSize: MixHomeRow.artSize,
     verticalPadding: MixHomeRow.verticalPadding,
     showChevron: false,
     title: mix.title,
     subtitleWidget: _subtitle(context),
-    isFirst: lifted ? true : isFirst,
+    isFirst: lifted || sliding ? true : isFirst,
     onTap: lifted ? () {} : onOpen,
   );
 
@@ -108,28 +122,59 @@ class SharedMixHomeRow extends StatelessWidget {
   }
 
   @override
+  Widget build(BuildContext context) => _SlidingRow(row: this);
+}
+
+/// Holds whether the row is sliding, so its own hairline rides away with it.
+class _SlidingRow extends StatefulWidget {
+  const _SlidingRow({required this.row});
+
+  final SharedMixHomeRow row;
+
+  @override
+  State<_SlidingRow> createState() => _SlidingRowState();
+}
+
+class _SlidingRowState extends State<_SlidingRow> {
+  bool _sliding = false;
+
+  @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return SwipeActions(
+    final row = widget.row;
+    final mix = row.mix;
+    return SwipeActionRow(
       key: ValueKey('shared-swipe-${mix.token}'),
-      // As the mix rows: the row slides out to the screen edge.
+      reducedMotion: MediaQuery.disableAnimationsOf(context),
+      liftColor: TrackRow.liftColorFor(Theme.of(context).brightness),
+      // As the mix rows: the card lifts edge to edge.
       bleed: MixtapeMetrics.screenSidePadding,
-      actions: [
-        SwipeAction(
-          key: removeActionKey(mix.token),
-          label: removeLabel,
-          icon: MixMenuIcons.eject,
-          color: dark ? _removeFillDark : _removeFillLight,
-          commits: true,
-          onPressed: onRemove,
-        ),
-      ],
-      child: Builder(
-        builder: (context) => GestureDetector(
-          // The row lifts before its menu shows; the menu's open is
-          // debounced into this one.
-          onLongPress: Haptics.on(HapticKind.lift, () => _openMenu(context)),
-          child: _row(context, lifted: false),
+      onActiveChanged: (active) {
+        setState(() => _sliding = active);
+        row.onSlidingChanged?.call(active);
+      },
+      trailing: SwipeAction(
+        key: SharedMixHomeRow.removeActionKey(mix.token),
+        label: SharedMixHomeRow.removeLabel,
+        icon: SharedMixHomeRow._removeIcon,
+        color: SharedMixHomeRow._removeColor,
+        removes: true,
+        onTrigger: row.onRemove,
+      ),
+      child: Semantics(
+        customSemanticsActions: {
+          const CustomSemanticsAction(label: SharedMixHomeRow.removeLabel):
+              row.onRemove,
+        },
+        child: Builder(
+          builder: (context) => GestureDetector(
+            // The row lifts before its menu shows; the menu's open is
+            // debounced into this one.
+            onLongPress: Haptics.on(
+              HapticKind.lift,
+              () => row._openMenu(context),
+            ),
+            child: row._row(context, lifted: false, sliding: _sliding),
+          ),
         ),
       ),
     );
