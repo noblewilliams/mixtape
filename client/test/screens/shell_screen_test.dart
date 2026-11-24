@@ -51,7 +51,7 @@ import '../helpers/fake_listening_api.dart';
 import '../helpers/fake_push_channel.dart';
 import '../data/playback/playback_controller_test.dart' show FakeApi, song;
 import '../presentation/providers/app_update_provider_test.dart'
-    show FakeAppUpdater;
+    show FakeAppUpdater, FakeReopenNotice;
 
 TestDefaultBinaryMessenger get messenger =>
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -528,8 +528,8 @@ void main() {
       expect(callsTo('show'), isNotEmpty);
     });
 
-    iosWidgets('the native dock stays up while the app closes for an update '
-        '(update note board, 2026-11-20)', (tester) async {
+    iosWidgets('the native dock stays up while the app counts down and closes '
+        'for an update (restart countdown board, 2026-11-24)', (tester) async {
       final updater = FakeAppUpdater(waiting: 3);
       final container = shellContainer(
         extra: [
@@ -537,6 +537,8 @@ void main() {
           pendingPatchStoreProvider.overrideWithValue(
             InMemoryPendingPatchStore(),
           ),
+          updateReopenNoticeProvider.overrideWithValue(FakeReopenNotice()),
+          updateQuietBlockedProvider.overrideWithValue(() => false),
         ],
       );
       await pumpShell(tester, container);
@@ -546,7 +548,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       calls.clear();
 
-      unawaited(container.read(appUpdateProvider.notifier).restart());
+      container.read(appUpdateProvider.notifier).startCountdown();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(callsTo('hide'), isEmpty);
+      container.read(appUpdateProvider.notifier).restartNow();
       await tester.pump();
       expect(callsTo('hide'), isEmpty);
       await tester.pump(updateCloseDelay);

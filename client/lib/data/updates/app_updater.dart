@@ -1,14 +1,17 @@
 // Over-the-air patches (Shorebird code push). A patch downloads in the
 // background and only runs from the next process start, so the app tells the
 // listener when one is ready and offers to close so it can apply (decision
-// 2026-11-20, OTA updates). Auto-update is off in shorebird.yaml: this file
+// 2026-11-20, OTA updates; the countdown, reopen notice and quiet apply are
+// decision 2026-11-24). Auto-update is off in shorebird.yaml: this file
 // owns every check and download, so the UI always knows where things stand.
 import 'dart:io' show exit;
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shorebird_code_push/shorebird_code_push.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 /// The device side of code push, faked in tests.
 abstract class AppUpdater {
@@ -75,6 +78,77 @@ class ShorebirdAppUpdater implements AppUpdater {
 
   @override
   Future<void> close() async => exit(0);
+}
+
+/// The "tap to reopen" banner the app leaves behind when it closes to update
+/// (approval docs/mockups/approved/2026-11-24-ota-restart-countdown.md).
+abstract class UpdateReopenNotice {
+  /// Schedules the banner [after] from now, but only when notifications are
+  /// already allowed: the app never asks for permission for this.
+  Future<void> schedule({required Duration after});
+
+  /// Drops a banner still waiting (a launch before it went off).
+  Future<void> cancel();
+}
+
+/// [UpdateReopenNotice] over `flutter_local_notifications`. Fixed copy only.
+class LocalUpdateReopenNotice implements UpdateReopenNotice {
+  LocalUpdateReopenNotice({FlutterLocalNotificationsPlugin? plugin})
+    : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+
+  /// The Spotify request reminder is 1, the mix-ready alert 2.
+  static const int id = 3;
+  static const String title = 'mixtape is up to date';
+  static const String body = 'Tap to jump back in.';
+
+  final FlutterLocalNotificationsPlugin _plugin;
+  bool _initialized = false;
+
+  Future<IOSFlutterLocalNotificationsPlugin?> _ios() async {
+    if (!_initialized) {
+      await _plugin.initialize(
+        settings: const InitializationSettings(
+          iOS: DarwinInitializationSettings(
+            requestAlertPermission: false,
+            requestBadgePermission: false,
+            requestSoundPermission: false,
+          ),
+        ),
+      );
+      _initialized = true;
+    }
+    return _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >();
+  }
+
+  @override
+  Future<void> schedule({required Duration after}) async {
+    final ios = await _ios();
+    if (ios == null) return;
+    final allowed = await ios.checkPermissions();
+    if (allowed == null || !allowed.isEnabled || !allowed.isAlertEnabled) {
+      return;
+    }
+    // A UTC instant needs no time-zone database (as the request reminder).
+    await _plugin.zonedSchedule(
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: tz.TZDateTime.now(tz.UTC).add(after),
+      notificationDetails: const NotificationDetails(
+        iOS: DarwinNotificationDetails(),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+    );
+  }
+
+  @override
+  Future<void> cancel() async {
+    await _ios();
+    await _plugin.cancel(id: id);
+  }
 }
 
 /// The patch the app last told the listener it was closing (or would next

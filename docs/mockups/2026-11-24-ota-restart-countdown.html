@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Restart countdown</title>
+<style>
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1320px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:56px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+p{max-width:860px}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:860px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:860px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.rec,.gone{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;margin-left:6px;vertical-align:1px}
+.rec{color:#a7d8b4;border:1px solid rgba(112,151,120,.6)}
+.gone{color:#e7a3b2;border:1px solid rgba(201,104,127,.6)}
+.frames{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+figure{margin:0}
+figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+figcaption b{color:#fff;font-weight:600;display:block}
+.ctl{display:flex;gap:8px;margin:10px 0 0}
+.ctl button{font:600 12px -apple-system,sans-serif;color:#eee9ed;background:#2b2830;border:1px solid #47434c;border-radius:8px;padding:6px 10px;cursor:pointer}
+
+/* ---------- Product language (shell r3) ---------- */
+.phone{width:390px;max-width:100%;height:600px;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);--ok:#4f7a5a;
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue),var(--violet));
+  --glass:rgba(255,255,255,.72);--glassline:rgba(50,44,50,.12);--field:rgba(255,255,255,.75);--onplum:#fff;
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);--ok:#9fcba9;
+  --glass:rgba(48,42,66,.72);--glassline:rgba(255,255,255,.12);--field:rgba(255,255,255,.1);--onplum:#1c1a1e;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif}
+.titlerow{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:30px 20px 8px;min-height:72px}
+.titlerow h1{margin:0;font:800 28px/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em}
+.large .titlerow h1{font-size:40px}
+.rows{padding:6px 20px}
+.row{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--hair)}
+.tile{width:44px;height:44px;border-radius:8px;flex:none;background:linear-gradient(135deg,#c9687f,#6e5c8f)}
+.row:nth-child(2) .tile{background:linear-gradient(135deg,#d18a65,#d2c76f)}
+.row:nth-child(3) .tile{background:linear-gradient(135deg,#688fa8,#709778)}
+.row b{font-weight:600;font-size:15px;display:block}.row small{color:var(--muted);font-size:12.5px}
+.dock{position:absolute;left:24px;right:24px;bottom:22px;height:58px;border-radius:29px;background:rgba(255,255,255,.72);box-shadow:0 6px 20px rgba(23,22,26,.12);display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font:600 11px -apple-system,sans-serif;color:#1c1a1e}
+.dark .dock{background:rgba(80,70,120,.55);color:#f2eef1}
+.dock span.on{background:rgba(127,120,130,.16);margin:5px;border-radius:24px;padding:14px 0}
+
+/* The existing note (r3): "Update" + "(restart required)" + flat green dot */
+.n3{position:relative;display:inline-flex;align-items:center;gap:7px;height:26px;color:var(--text)}
+.n3 .w{font:600 13px/1 -apple-system,sans-serif;letter-spacing:-.01em}
+.n3 .sub{position:absolute;left:0;top:23px;white-space:nowrap;color:var(--smoke);font:italic 400 7px/1 -apple-system,sans-serif}
+.dot{width:8px;height:8px;border-radius:4px;background:#34c759;margin:0 3px}
+.dark .dot{background:#4cd07a}
+.n3.gone{opacity:0;transition:opacity .2s}
+
+/* Level bars (approved loader) */
+.bars{display:inline-flex;align-items:center;gap:2px;height:12px;color:var(--plum)}
+.bars i{width:2.5px;border-radius:1.25px;background:currentColor}
+.bars i:nth-child(1){height:7px}.bars i:nth-child(2){height:12px}.bars i:nth-child(3){height:9px}
+.move .bars i{animation:lv .9s ease-in-out infinite}
+.move .bars i:nth-child(2){animation-delay:-.3s}.move .bars i:nth-child(3){animation-delay:-.6s}
+@keyframes lv{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+.still .bars i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.bars i{animation:none!important}}
+
+/* ---------- The countdown card (shared by both variants) ---------- */
+.cd{background:var(--glass);-webkit-backdrop-filter:blur(28px) saturate(1.6);backdrop-filter:blur(28px) saturate(1.6);
+  box-shadow:0 0 0 .5px var(--glassline),0 14px 40px rgba(23,22,26,.22);color:var(--text)}
+.cd .head{display:flex;align-items:center;gap:9px}
+.cd .t{font:600 17px/1.2 -apple-system,"SF Pro Text",sans-serif;letter-spacing:-.01em;white-space:nowrap}
+.cd .num{display:inline-block;min-width:.62em;text-align:center;font-variant-numeric:tabular-nums}
+.cd .num.flip{animation:flip .28s cubic-bezier(.4,0,.2,1)}
+@keyframes flip{from{transform:translateY(6px);opacity:0;filter:blur(3px)}to{transform:none;opacity:1;filter:none}}
+.cd .why{font-size:13px;line-height:1.35;color:var(--smoke);margin-top:5px}
+.cd .why b{color:var(--text);font-weight:600}
+.cd .track{height:2px;border-radius:1px;background:var(--hair);margin:12px 0 2px;overflow:hidden}
+.cd .track i{display:block;height:100%;width:100%;background:var(--plum);transform-origin:left;transform:scaleX(1)}
+.cd .acts{display:flex;gap:8px;margin-top:12px}
+.cd button{flex:1;height:36px;border-radius:18px;border:0;font:600 15px -apple-system,sans-serif;cursor:pointer}
+.cd .cancel{background:rgba(127,120,130,.16);color:var(--text)}
+.cd .now{background:var(--plum);color:var(--onplum)}
+.tg{position:relative}
+.tg.target::after{content:"";position:absolute;left:0;right:0;top:-4px;bottom:-4px;border:1px dashed rgba(201,104,127,.8);border-radius:22px;pointer-events:none}
+
+/* A: anchored popover, grows out of the note */
+.pop{position:absolute;right:14px;top:120px;width:262px;border-radius:24px;padding:14px 14px 14px 16px;transform-origin:calc(100% - 22px) -10px;transition:transform .32s cubic-bezier(.3,1.3,.5,1),opacity .2s}
+.pop.hide{transform:scale(.3);opacity:0;pointer-events:none}
+.pop::before{content:"";position:absolute;right:24px;top:-6px;width:12px;height:12px;background:inherit;transform:rotate(45deg);border-radius:2px;box-shadow:-.5px -.5px 0 var(--glassline)}
+.large .pop{width:330px;top:132px}
+.large .cd .t{font-size:24px}.large .cd .why{font-size:18px}.large .cd button{height:48px;font-size:20px;border-radius:24px}
+.large .cd .acts{flex-direction:column}
+
+/* B: centred modal over a dimmed screen */
+.scrim{position:absolute;inset:0;background:rgba(20,16,24,.28);transition:opacity .2s}
+.modal{position:absolute;left:50%;top:44%;width:290px;margin-left:-145px;transform:translateY(-50%);border-radius:30px;padding:22px 18px 16px;text-align:center}
+.modal .head{flex-direction:column;gap:10px}
+.modal .t{font-size:19px}
+.modal .acts{flex-direction:column}
+.modal .acts button,.large .cd .acts button{flex:none}
+.modal .bars{transform:scale(1.6);margin:6px 0 4px}
+.hidden{display:none}
+
+/* Notification (lock-screen style banner) */
+.lock .screen{background:linear-gradient(180deg,#2d2440 0%,#59436a 55%,#c9687f 130%);color:#fff}
+.clock{text-align:center;margin-top:30px}
+.clock .d{font:600 17px -apple-system,sans-serif;opacity:.9}
+.clock .h{font:700 84px/1 -apple-system,"SF Pro Rounded",sans-serif;letter-spacing:-.02em}
+.notif{margin:30px 12px 0;padding:12px 14px;border-radius:22px;background:rgba(245,240,245,.62);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);color:#1c1a1e;display:grid;grid-template-columns:38px 1fr auto;gap:10px;align-items:center}
+.notif .app{width:38px;height:38px;border-radius:9px;background:#1c1a1e;display:grid;place-items:center}
+.notif .app span{width:22px;height:14px;border-radius:3px;border:2px solid #f1eeee;position:relative}
+.notif b{font-size:15px;font-weight:600;display:block;line-height:1.2}
+.notif small{font-size:14px;line-height:1.25;display:block}
+.notif time{font-size:12px;color:#5a535b;align-self:start}
+
+/* Timeline */
+.timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;max-width:1100px;margin-top:14px}
+.step{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:14px;font-size:13px;color:#cfc5d1}
+.step b{color:#fff;font-size:13.5px;display:block;margin-bottom:4px}
+table{border-collapse:collapse;max-width:960px;font-size:13.5px;margin-top:12px}
+td,th{border-bottom:1px solid #3b393f;padding:8px 12px 8px 0;text-align:left;vertical-align:top}
+th{color:#fff;font-weight:600}
+td{color:#cfc5d1}
+</style>
+<main>
+<p class="kicker">Mixtape · iOS · state board · 24 November 2026</p>
+<h1>Restart countdown: a heads-up before the app closes to update</h1>
+<p class="note">On device, tapping "Update" shows the bars for 1.8 seconds and then the app is just gone, which feels like a crash. iOS has no way for an app to restart itself, so it still has to close. This board makes the close something the listener can see coming and stay in control of.</p>
+<div class="callout"><strong>Decisions for you:</strong>
+<ul class="tight">
+<li><b>Where the countdown shows:</b> A, a glass popover that grows out of the Update note (recommended), or B, a modal in the middle of the screen.</li>
+<li><b>Copy</b> on the card and in the reopen notification (section 3).</li>
+<li><b>Quiet update when leaving the app</b>, and the cases where it holds off (section 4).</li>
+</ul></div>
+
+<h2>1 · A: popover from the note <span class="rec">recommended</span></h2>
+<p class="note">Tap "Update" in the frames below. The note gives way to a glass popover anchored where it sat: "Restarting in 5", counting down to 1, with Cancel and Restart now. Cancel puts the note back. At 0 the bars play for a moment and the app closes. Popovers anchored to their control are how menus already work across the app (2026-11-03), so this is a pattern listeners already know.</p>
+<div class="frames">
+ <figure><div class="phone" id="a1"></div><div class="ctl"><button data-reset="a1">Reset</button></div><figcaption><b>Light, nothing playing</b>The plum line under the text drains over the 5 seconds, so time passing is visible as well as counted.</figcaption></figure>
+ <figure><div class="phone" id="a2"></div><div class="ctl"><button data-reset="a2">Reset</button></div><figcaption><b>Music playing</b>Closing stops playback (the app plays through its own player), so the card says so in a second, bolded line. Nothing else changes.</figcaption></figure>
+ <figure><div class="phone dark" id="a3"></div><div class="ctl"><button data-reset="a3">Reset</button></div><figcaption><b>Dark</b>Dark glass, and Restart now in the light ink.</figcaption></figure>
+</div>
+
+<h2>2 · B: centred modal</h2>
+<p class="note">The same card and words in the middle of the screen, over a light scrim. It's harder to miss, but it blocks the app for 5 seconds and makes a quiet update feel like an alert. It doesn't grow out of anything, so the link between tapping "Update" and the card is weaker.</p>
+<div class="frames">
+ <figure><div class="phone" id="b1"></div><div class="ctl"><button data-reset="b1">Reset</button></div><figcaption><b>Light</b>Stacked buttons, so Restart now is the wider, more obvious target.</figcaption></figure>
+ <figure><div class="phone dark" id="b2"></div><div class="ctl"><button data-reset="b2">Reset</button></div><figcaption><b>Dark, music playing</b></figcaption></figure>
+</div>
+
+<h2>3 · After the close: the reopen notification</h2>
+<p class="note">Just before closing, the app schedules a local notification for one second later. The app is closed when it arrives, so iOS shows it as a normal banner. Tapping it opens mixtape, which plays the "Updated" tick that already ships. The plugin that sends it is already in the 1.2.0 binary, so this can go out as a patch.</p>
+<div class="frames">
+ <figure><div class="phone lock" id="n1"></div><figcaption><b>The banner</b>Only shown if the listener has allowed notifications. The app never asks for permission just for this. Without it, the countdown is all they get.</figcaption></figure>
+ <figure><div class="phone" id="n2"></div><figcaption><b>Tapping it</b>This is the next start that already ships: the bars gather and "Updated" draws in with the check. Nothing new here.</figcaption></figure>
+</div>
+<table>
+<tr><th>Option</th><th>Title</th><th>Body</th></tr>
+<tr><td>N1 <span class="rec">recommended</span></td><td>mixtape is up to date</td><td>Tap to jump back in.</td></tr>
+<tr><td>N2</td><td>Update finished</td><td>Open mixtape to pick up where you left off.</td></tr>
+<tr><td>N3</td><td>mixtape updated</td><td>Tap to reopen.</td></tr>
+</table>
+<p class="note">The notification doesn't say "where you left off" unless that's true. A mix being made keeps going on the server, but playback has stopped. N2 is only fair if Home reopens on what they were looking at, which it doesn't today.</p>
+
+<h2>4 · Quiet update when leaving the app (no UI)</h2>
+<p class="note">Once a patch is waiting and the listener leaves mixtape, the app closes itself in the background. They never see it happen. Next time they open it, it's a fresh start with the patch, and the "Updated" tick plays as usual.</p>
+<div class="timeline">
+ <div class="step"><b>1 · Patch downloaded</b>The note shows "Update". Nothing else happens yet.</div>
+ <div class="step"><b>2 · Listener leaves the app</b>Home button, app switcher or locking the phone. The app waits 3 s in the background so a quick glance at another app doesn't cost them anything.</div>
+ <div class="step"><b>3 · Holds off if…</b>music is playing from mixtape, a voice note is recording, an import is running, or a mix is mid-send. It tries again on the next trip to the background.</div>
+ <div class="step"><b>4 · Closes quietly</b>No notification for this path. Nothing seen to close, so nothing to reopen.</div>
+ <div class="step"><b>5 · Next open</b>A cold start with the patch: "Updated" plays in the note.</div>
+</div>
+<p class="note"><b>The tradeoff:</b> iOS usually keeps an app in memory for a while, and returning to it normally lands exactly where you were. On this one return after an update, the listener lands on Home instead. That happens once per patch.</p>
+
+<h2>5 · Accessibility and edge cases</h2>
+<div class="frames">
+ <figure><div class="phone large" id="l1"></div><div class="ctl"><button data-reset="l1">Reset</button></div><figcaption><b>Largest text (A)</b>The popover widens to 330 pt and the buttons stack. They're 48 pt tall at this size, and never under 44 pt.</figcaption></figure>
+ <figure><div class="phone still" id="r1"></div><div class="ctl"><button data-reset="r1">Reset</button></div><figcaption><b>Reduced motion</b>The popover fades in instead of growing, the number swaps without a slide, the line steps down once a second instead of draining smoothly, and the bars hold still.</figcaption></figure>
+</div>
+<ul class="tight note">
+<li><b>VoiceOver:</b> when the card opens, focus moves to it and VoiceOver hears "Restarting mixtape in 5 seconds to finish the update. Restart now, or Cancel." It doesn't read every second. <b>With VoiceOver on, the countdown doesn't run by itself.</b> The card waits for Restart now, because a 5-second deadline is too short to hear the card and find the button.</li>
+<li><b>Haptics:</b> the light click on the tap (as now), and none per second. A tick every second would feel like an alarm.</li>
+<li><b>Leaving during the countdown</b> (home swipe) cancels it, and the quiet background update from section 4 takes over.</li>
+<li><b>Tapping outside the popover</b> does nothing. It's a 5-second decision, and a stray tap shouldn't decide it. Cancel is the only way out.</li>
+<li><b>Two tabs:</b> the popover belongs to the note the listener tapped (Home or You). The countdown lives in the shared update state, so switching tabs mid-count doesn't start a second one.</li>
+<li>Restart, Cancel and the state are all words. The draining line only adds to the number.</li>
+</ul>
+</main>
+<script>
+const status=`<div class="statusbar"><span>9:41</span><span></span></div>`;
+const bars=`<span class="bars"><i></i><i></i><i></i></span>`;
+const note=`<span class="n3 tg"><span class="w">Update</span><span class="sub">(restart required)</span><span class="dot"></span></span>`;
+const rows=`<div class="rows">
+<div class="row"><span class="tile"></span><div><b>Sunday reset</b><small>Slow soul, then lighter as it goes · 24 songs</small></div></div>
+<div class="row"><span class="tile"></span><div><b>Late train home</b><small>Low-key, nothing with a drop · 18 songs</small></div></div>
+<div class="row"><span class="tile"></span><div><b>Kitchen, Friday</b><small>Disco edits and boogie · 31 songs</small></div></div></div>`;
+const dock=`<div class="dock"><span class="on">Home</span><span>Mixes</span><span>Library</span><span>You</span></div>`;
+function card(kind,playing){
+  const why=`mixtape closes to finish updating.${playing?' <b>Your music will stop.</b>':''}`;
+  return `<div class="cd ${kind}"><div class="head">${bars}<span class="t">Restarting in <span class="num">5</span></span></div>
+<div class="why">${why}</div><div class="track"><i></i></div>
+<div class="acts"><button class="cancel">Cancel</button><button class="now">Restart now</button></div></div>`;
+}
+const cfg={a1:['pop',0],a2:['pop',1],a3:['pop',0],b1:['modal',0],b2:['modal',1],l1:['pop',0],r1:['pop',0]};
+const timers={};
+function build(id){
+  clearInterval(timers[id]);
+  const [kind,playing]=cfg[id];
+  const el=document.getElementById(id);
+  const scrim=kind==='modal'?`<div class="scrim hidden"></div>`:'';
+  el.innerHTML=`<div class="screen">${status}<div class="titlerow"><h1>Home</h1>${note}</div>${rows}${dock}${scrim}${card(kind+(kind==='pop'?' hide':' hidden'),playing)}</div>`;
+  el.querySelector('.n3').onclick=()=>start(id);
+  el.querySelector('.cancel').onclick=()=>build(id);
+  el.querySelector('.now').onclick=()=>finish(id);
+}
+function start(id){
+  const el=document.getElementById(id), kind=cfg[id][0], still=el.classList.contains('still');
+  const c=el.querySelector('.cd'); el.querySelector('.n3').classList.add('gone');
+  if(kind==='pop'){ if(still){c.style.transition='opacity .2s';c.style.transform='none';} c.classList.remove('hide'); }
+  else{ c.classList.remove('hidden'); el.querySelector('.scrim').classList.remove('hidden'); }
+  if(!still) c.classList.add('move');
+  const track=c.querySelector('.track i'), num=c.querySelector('.num');
+  if(!still){ requestAnimationFrame(()=>{track.style.transition='transform 5s linear';track.style.transform='scaleX(0)';}); }
+  let n=5;
+  timers[id]=setInterval(()=>{
+    n--; if(still){track.style.transform=`scaleX(${n/5})`;}
+    if(n<=0){finish(id);return;}
+    num.textContent=n; if(!still){num.classList.remove('flip');void num.offsetWidth;num.classList.add('flip');}
+  },1000);
+}
+function finish(id){
+  clearInterval(timers[id]);
+  const el=document.getElementById(id), c=el.querySelector('.cd');
+  c.querySelector('.t').textContent='Restarting';
+  const sc=el.querySelector('.screen');
+  setTimeout(()=>{sc.style.transition='opacity .3s';sc.style.opacity='0';
+    setTimeout(()=>{sc.innerHTML=`<div style="flex:1;display:grid;place-items:center;color:#857e86;font-size:13px;text-align:center;padding:40px">The app has closed.<br>(Reset to replay.)</div>`;sc.style.opacity='1';},350);},700);
+}
+Object.keys(cfg).forEach(build);
+document.querySelectorAll('[data-reset]').forEach(b=>b.onclick=()=>build(b.dataset.reset));
+// Notification frames
+document.getElementById('n1').innerHTML=`<div class="screen">${status}<div class="clock"><div class="d">Tuesday 24 November</div><div class="h">9:41</div></div>
+<div class="notif"><span class="app"><span></span></span><div><b>mixtape is up to date</b><small>Tap to jump back in.</small></div><time>now</time></div></div>`;
+const check=`<svg viewBox="0 0 14 14" width="14" height="14" style="color:var(--ok)"><path d="M3 7.4 5.9 10.2 11 4.2" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+document.getElementById('n2').innerHTML=`<div class="screen">${status}<div class="titlerow"><h1>Home</h1><span class="n3"><span class="w" style="color:var(--ok)">Updated</span>${check}</span></div>${rows}${dock}</div>`;
+</script>
+</html>

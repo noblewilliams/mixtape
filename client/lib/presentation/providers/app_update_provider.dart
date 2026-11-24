@@ -1,21 +1,81 @@
 // Over-the-air updates as the app sees them (decision 2026-11-20; board
-// docs/mockups/approved/2026-11-20-ota-update-states.md). A patch downloads
-// quietly; once it is waiting, the title note says "Update available". The
-// tap shows "Updating" and closes the app (iOS cannot relaunch itself). The
-// next start finds the patch it recorded running and plays "Updating", then
-// "Updated", in the same note.
+// docs/mockups/approved/2026-11-20-ota-update-states.md, revised by
+// docs/mockups/approved/2026-11-24-ota-restart-countdown.md). A patch
+// downloads quietly; once it is waiting, the title note says "Update". The
+// tap counts down from 5 in a capsule the listener can cancel or skip, then
+// the app closes (iOS cannot relaunch itself) and leaves a "tap to reopen"
+// banner. Leaving the app with a patch waiting applies it quietly. The next
+// start finds the patch it recorded running and plays "Updating", then
+// "Updated", in the note.
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/updates/app_updater.dart';
+import 'library_sync_provider.dart';
+import 'listening_import_provider.dart';
+import 'mix_activity_provider.dart';
+import 'playback_provider.dart';
+import 'voice_providers.dart';
 
 final appUpdaterProvider = Provider<AppUpdater>((ref) => ShorebirdAppUpdater());
 
 final pendingPatchStoreProvider = Provider<PendingPatchStore>(
   (ref) => SecurePendingPatchStore(),
 );
+
+final updateReopenNoticeProvider = Provider<UpdateReopenNotice>(
+  (ref) => LocalUpdateReopenNotice(),
+);
+
+/// The wall clock, for telling a quiet-apply timer that fired on time from
+/// one that fired late because iOS suspended the app.
+final updateClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+
+/// Whether mixtape's own player is playing: closing would stop it.
+final updateMusicPlayingProvider = Provider<bool Function()>(
+  (ref) =>
+      () =>
+          ref.read(playbackProvider.exists) &&
+          ref.read(playbackProvider).sample.status == 'playing',
+);
+
+/// Whether closing now would cut something off, so a quiet apply waits for
+/// the next trip to the background: music playing, a voice note recording
+/// or transcribing, an import or library sync running, or a mix send not yet
+/// handed to the server (a durable turn carries on without the app).
+/// Providers nobody has built are idle by definition, so none is built here.
+final updateQuietBlockedProvider = Provider<bool Function()>((ref) {
+  final playing = ref.watch(updateMusicPlayingProvider);
+  return () {
+    if (playing()) return true;
+    if (ref.read(voiceComposerControllerProvider.exists) &&
+        ref.read(voiceComposerControllerProvider).busy) {
+      return true;
+    }
+    if (ref.read(listeningImportProvider.exists) &&
+        ref.read(listeningImportProvider).inProgress) {
+      return true;
+    }
+    if (ref.read(librarySyncProvider.exists) &&
+        ref.read(librarySyncProvider) is SyncRunning) {
+      return true;
+    }
+    if (ref.read(mixActivityProvider.exists)) {
+      final activity = ref.read(mixActivityProvider);
+      if (activity.pending != null && activity.pendingTurn == null) {
+        return true;
+      }
+      if (activity.working.keys.any((id) => activity.turns[id] == null)) {
+        return true;
+      }
+    }
+    return false;
+  };
+});
 
 enum AppUpdatePhase {
   /// The first moments of a launch with the updater present, while the app
@@ -35,23 +95,58 @@ enum AppUpdatePhase {
   /// A newer patch is downloaded and runs from the next start.
   ready,
 
-  /// The listener tapped "Update available": "Updating" shows and the app is
-  /// about to close.
+  /// The listener tapped "Update": "Restarting in [AppUpdateState.secondsLeft]"
+  /// counts down with Cancel and Now.
+  countdown,
+
+  /// The countdown ran out or the listener tapped Now: "Restarting" shows and
+  /// the app is about to close.
   closing,
 }
 
 @immutable
 class AppUpdateState {
-  const AppUpdateState(this.phase, {this.patch});
+  const AppUpdateState(
+    this.phase, {
+    this.patch,
+    this.secondsLeft,
+    this.holding = false,
+  });
   final AppUpdatePhase phase;
 
-  /// The patch waiting ([AppUpdatePhase.ready], [AppUpdatePhase.closing]) or
-  /// just applied ([AppUpdatePhase.applied], [AppUpdatePhase.updated]).
+  /// The patch waiting ([AppUpdatePhase.ready], [AppUpdatePhase.countdown],
+  /// [AppUpdatePhase.closing]) or just applied ([AppUpdatePhase.applied],
+  /// [AppUpdatePhase.updated]).
   final int? patch;
+
+  /// The seconds the countdown shows; only while counting down.
+  final int? secondsLeft;
+
+  /// The countdown waits for Now or Cancel instead of running itself (with
+  /// VoiceOver, where 5 seconds is too short to hear it and find the button).
+  final bool holding;
 }
 
-/// How long "Updating" holds before the app closes.
-const Duration updateCloseDelay = Duration(milliseconds: 1800);
+/// Where the countdown starts.
+const int updateCountdownSeconds = 5;
+
+/// One step of the countdown.
+const Duration updateCountdownStep = Duration(seconds: 1);
+
+/// How long "Restarting" holds before the app closes.
+const Duration updateCloseDelay = Duration(milliseconds: 700);
+
+/// The reopen banner goes off this long after it is scheduled, by when the
+/// app has closed (iOS shows no banner for an app in front).
+const Duration updateReopenAfter = Duration(seconds: 1);
+
+/// How long the app waits in the background before applying quietly, so a
+/// glance at another app costs nothing.
+const Duration updateQuietDelay = Duration(seconds: 3);
+
+/// A quiet-apply timer firing later than this past its time means iOS
+/// suspended the app in between; it has just come back, so it stays open.
+const Duration updateQuietLateBy = Duration(seconds: 2);
 
 /// How long "Updating" shows on the start that boots the patch.
 const Duration updateAppliedFor = Duration(milliseconds: 1400);
@@ -65,10 +160,17 @@ const Duration updateLaunchReadLimit = Duration(seconds: 2);
 class AppUpdateNotifier extends Notifier<AppUpdateState> {
   bool _checking = false;
   Timer? _step;
+  Timer? _countdown;
+  Timer? _quiet;
+  bool _inBackground = false;
 
   @override
   AppUpdateState build() {
-    ref.onDispose(() => _step?.cancel());
+    ref.onDispose(() {
+      _step?.cancel();
+      _countdown?.cancel();
+      _quiet?.cancel();
+    });
     final updater = ref.read(appUpdaterProvider);
     if (!updater.isAvailable) {
       return const AppUpdateState(AppUpdatePhase.current);
@@ -78,6 +180,10 @@ class AppUpdateNotifier extends Notifier<AppUpdateState> {
   }
 
   Future<void> _readLaunch() async {
+    // A reopen banner still waiting is stale once the app is open again.
+    unawaited(
+      ref.read(updateReopenNoticeProvider).cancel().catchError((Object _) {}),
+    );
     final store = ref.read(pendingPatchStoreProvider);
     final updater = ref.read(appUpdaterProvider);
     int? applied;
@@ -135,13 +241,86 @@ class AppUpdateNotifier extends Notifier<AppUpdateState> {
     }
   }
 
-  /// The tap on "Update available": show "Updating", then close.
-  Future<void> restart() async {
+  /// The tap on "Update": count down from [updateCountdownSeconds], then
+  /// close. With [hold] (VoiceOver) the count waits for Now or Cancel.
+  void startCountdown({bool hold = false}) {
     if (state.phase != AppUpdatePhase.ready) return;
+    _quiet?.cancel();
+    state = AppUpdateState(
+      AppUpdatePhase.countdown,
+      patch: state.patch,
+      secondsLeft: updateCountdownSeconds,
+      holding: hold,
+    );
+    if (hold) return;
+    _countdown = Timer.periodic(updateCountdownStep, (_) {
+      if (!ref.mounted || state.phase != AppUpdatePhase.countdown) return;
+      final left = (state.secondsLeft ?? 1) - 1;
+      if (left <= 0) {
+        unawaited(_close());
+        return;
+      }
+      state = AppUpdateState(
+        AppUpdatePhase.countdown,
+        patch: state.patch,
+        secondsLeft: left,
+      );
+    });
+  }
+
+  /// Cancel: back to "Update".
+  void cancelCountdown() {
+    if (state.phase != AppUpdatePhase.countdown) return;
+    _countdown?.cancel();
+    state = AppUpdateState(AppUpdatePhase.ready, patch: state.patch);
+  }
+
+  /// Now: skip the rest of the countdown.
+  void restartNow() {
+    if (state.phase != AppUpdatePhase.countdown) return;
+    unawaited(_close());
+  }
+
+  /// "Restarting", the reopen banner, then the close. A banner that fails to
+  /// schedule never holds the close up.
+  Future<void> _close() async {
+    _countdown?.cancel();
     state = AppUpdateState(AppUpdatePhase.closing, patch: state.patch);
-    await Future<void>.delayed(updateCloseDelay);
+    final notice = ref.read(updateReopenNoticeProvider);
+    await Future.wait([
+      Future<void>.delayed(updateCloseDelay),
+      notice
+          .schedule(after: updateReopenAfter)
+          .timeout(updateCloseDelay)
+          .catchError((Object _) {}),
+    ]);
     if (!ref.mounted) return;
     await ref.read(appUpdaterProvider).close();
+  }
+
+  /// The app went to the background. A countdown stops (nobody is watching
+  /// it); a waiting patch applies quietly after [updateQuietDelay].
+  void onBackground() {
+    _inBackground = true;
+    cancelCountdown();
+    if (state.phase != AppUpdatePhase.ready) return;
+    _quiet?.cancel();
+    final clock = ref.read(updateClockProvider);
+    final due = clock().add(updateQuietDelay);
+    _quiet = Timer(updateQuietDelay, () {
+      if (!ref.mounted || !_inBackground) return;
+      if (state.phase != AppUpdatePhase.ready) return;
+      if (clock().difference(due) > updateQuietLateBy) return;
+      if (ref.read(updateQuietBlockedProvider)()) return;
+      unawaited(ref.read(appUpdaterProvider).close());
+    });
+  }
+
+  /// The app is in front again: a quiet apply not yet done waits for the
+  /// next trip to the background.
+  void onForeground() {
+    _inBackground = false;
+    _quiet?.cancel();
   }
 }
 
@@ -166,7 +345,13 @@ final appUpdateMonitorProvider = Provider<void>((ref) {
     }
   });
   final timer = Timer.periodic(updateCheckInterval, (_) => check());
-  final lifecycle = AppLifecycleListener(onResume: check);
+  final lifecycle = AppLifecycleListener(
+    onResume: () {
+      notifier.onForeground();
+      check();
+    },
+    onPause: notifier.onBackground,
+  );
   ref.onDispose(() {
     timer.cancel();
     lifecycle.dispose();

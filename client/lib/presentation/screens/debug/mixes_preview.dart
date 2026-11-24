@@ -69,6 +69,7 @@ class MixesPreview extends StatefulWidget {
       String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell' ||
       String.fromEnvironment('MIXTAPE_PREVIEW') == 'push-ask' ||
       String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell-update' ||
+      String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell-update-music' ||
       String.fromEnvironment('MIXTAPE_PREVIEW') == 'shell-update-applied';
 
   /// `--dart-define=MIXTAPE_PREVIEW=push-ask`: the shell with nothing in

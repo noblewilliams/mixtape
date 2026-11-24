@@ -1,8 +1,10 @@
 // The update note (approval docs/mockups/approved/2026-11-20-ota-update-states.md,
 // revised 2026-11-21 by board 2026-11-21-ota-restart-orb-r3.html): "Update" with
 // "(restart required)" under it and a flat green dot once a patch is downloaded;
-// the tap leaves only the loader (the dot becomes the bars) and closes the app;
 // the start that boots the patch plays the bars, then the tick with "Updated".
+// The tap (approval docs/mockups/approved/2026-11-24-ota-restart-countdown.md)
+// opens a glass capsule, "Restarting in 5 | Cancel  Now", over a shortening
+// prism stripe, and closes the app when it runs out.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,7 +15,11 @@ import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/large_title_scaffold.dart';
 import 'package:mixtape/presentation/widgets/update_status_note.dart';
 
-import '../providers/app_update_provider_test.dart' show FakeAppUpdater;
+import 'package:mixtape/presentation/widgets/foundation/haptics.dart';
+
+import '../../helpers/haptic_recorder.dart';
+import '../providers/app_update_provider_test.dart'
+    show FakeAppUpdater, FakeReopenNotice;
 
 Future<ProviderContainer> _pump(
   WidgetTester tester, {
@@ -21,6 +27,8 @@ Future<ProviderContainer> _pump(
   InMemoryPendingPatchStore? store,
   Size size = const Size(390, 844),
   double textScale = 1,
+  bool musicPlaying = false,
+  bool voiceOver = false,
 }) async {
   tester.view.physicalSize = size * tester.view.devicePixelRatio;
   addTearDown(tester.view.reset);
@@ -30,6 +38,9 @@ Future<ProviderContainer> _pump(
       pendingPatchStoreProvider.overrideWithValue(
         store ?? InMemoryPendingPatchStore(),
       ),
+      updateReopenNoticeProvider.overrideWithValue(FakeReopenNotice()),
+      updateMusicPlayingProvider.overrideWithValue(() => musicPlaying),
+      updateQuietBlockedProvider.overrideWithValue(() => false),
     ],
   );
   addTearDown(container.dispose);
@@ -39,9 +50,10 @@ Future<ProviderContainer> _pump(
       child: MaterialApp(
         theme: MixtapeTheme.light(),
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: TextScaler.linear(textScale)),
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(textScale),
+            accessibleNavigation: voiceOver,
+          ),
           child: child!,
         ),
         home: Scaffold(
@@ -137,34 +149,198 @@ void main() {
     },
   );
 
-  testWidgets('the tap leaves only the loader, then closes the app', (
-    tester,
-  ) async {
+  // The test font draws every glyph a full em wide, so the capsule (about
+  // 250 pt in SF) needs a wide screen to fit beside the title here.
+  testWidgets('the tap opens the countdown capsule on the title line, which '
+      'counts down and closes the app', (tester) async {
     final updater = FakeAppUpdater(waiting: 7);
-    final container = await _pump(tester, updater: updater);
+    final container = await _pump(
+      tester,
+      updater: updater,
+      size: const Size(900, 900),
+    );
     await _ready(tester, container);
-
     final handle = tester.ensureSemantics();
+    final noteRect = tester.getRect(find.byKey(UpdateStatusNote.noteKey));
+
     await tester.tap(find.byKey(UpdateStatusNote.noteKey));
-    // The words' slide-out runs a frame behind the tap, so wait it out.
-    await tester.pump(UpdateStatusNote.swapFor);
-    await tester.pump(UpdateStatusNote.swapFor * 2);
-    expect(container.read(appUpdateProvider).phase, AppUpdatePhase.closing);
-    // No words on screen: only the bars the dot became.
-    expect(find.text(UpdateStatusNote.availableLabel), findsNothing);
-    expect(find.text(UpdateStatusNote.restartLabel), findsNothing);
-    expect(find.byKey(UpdateStatusNote.barsKey), findsOneWidget);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(container.read(appUpdateProvider).phase, AppUpdatePhase.countdown);
+    expect(find.text(UpdateStatusNote.countdownLabel(5)), findsOneWidget);
+    expect(find.text(UpdateStatusNote.cancelLabel), findsOneWidget);
+    expect(find.text(UpdateStatusNote.nowLabel), findsOneWidget);
+    expect(find.byKey(UpdateStatusNote.musicKey), findsNothing);
+
+    // Anchored where the note sat: right edges together, centred on the
+    // title's line.
+    final capsule = tester.getRect(find.byKey(UpdateStatusNote.capsuleKey));
+    final title = tester.getRect(find.text('Home'));
+    expect(capsule.right, closeTo(noteRect.right, 0.5));
+    expect(capsule.center.dy, closeTo(title.center.dy, 2));
+    // Each word taps like a 44 pt button.
     expect(
-      tester.getSemantics(find.byKey(UpdateStatusNote.noteKey)),
+      tester.getSize(find.byKey(UpdateStatusNote.cancelKey)).height,
+      greaterThanOrEqualTo(44),
+    );
+    expect(
+      tester.getSemantics(find.byKey(UpdateStatusNote.capsuleKey)),
       matchesSemantics(
-        label: UpdateStatusNote.closingSemantics,
+        label: UpdateStatusNote.countdownSemantics,
         isLiveRegion: true,
+        children: [
+          matchesSemantics(
+            label: UpdateStatusNote.cancelLabel,
+            isButton: true,
+            isEnabled: true,
+            hasEnabledState: true,
+            hasTapAction: true,
+          ),
+          matchesSemantics(
+            label: UpdateStatusNote.nowSemantics,
+            isButton: true,
+            isEnabled: true,
+            hasEnabledState: true,
+            hasTapAction: true,
+          ),
+        ],
       ),
     );
     handle.dispose();
+
+    await tester.pump(updateCountdownStep);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(UpdateStatusNote.countdownLabel(4)), findsOneWidget);
+    // 1.7 s in: the fifth second ends at 5 s, then "Restarting" holds.
+    await tester.pump(const Duration(milliseconds: 3300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(container.read(appUpdateProvider).phase, AppUpdatePhase.closing);
+    expect(find.text(UpdateStatusNote.closingLabel), findsOneWidget);
     expect(updater.closes, 0);
     await tester.pump(updateCloseDelay);
     expect(updater.closes, 1);
+  });
+
+  testWidgets('the prism stripe shortens from the right as the seconds go', (
+    tester,
+  ) async {
+    final container = await _pump(tester, updater: FakeAppUpdater(waiting: 7));
+    await _ready(tester, container);
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final full = tester.getRect(find.byKey(UpdateStatusNote.stripeKey));
+    await tester.pump(
+      updateCountdownStep * 2 - const Duration(milliseconds: 400),
+    );
+    final later = tester.getRect(find.byKey(UpdateStatusNote.stripeKey));
+    // The stripe's box stays put.
+    expect(later.left, full.left);
+    // What is drawn is cut from the right: 3 s left of 5.
+    final fill = tester.getRect(find.byKey(UpdateStatusNote.stripeFillKey));
+    expect(fill.left, closeTo(later.left, 0.5));
+    expect(fill.width / later.width, closeTo(0.6, 0.05));
+    expect(full.width, later.width);
+    container.read(appUpdateProvider.notifier).cancelCountdown();
+    // The note's dot breathes forever, so settle by time, not by quiet.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('Cancel puts the note back', (tester) async {
+    final updater = FakeAppUpdater(waiting: 7);
+    final container = await _pump(tester, updater: updater);
+    await _ready(tester, container);
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(UpdateStatusNote.cancelKey));
+    await tester.pump();
+    expect(container.read(appUpdateProvider).phase, AppUpdatePhase.ready);
+    expect(find.byKey(UpdateStatusNote.capsuleKey), findsNothing);
+    expect(find.text(UpdateStatusNote.availableLabel), findsOneWidget);
+    await tester.pump(updateCountdownStep * 8);
+    expect(updater.closes, 0);
+  });
+
+  testWidgets('Now closes straight away', (tester) async {
+    final updater = FakeAppUpdater(waiting: 7);
+    final container = await _pump(tester, updater: updater);
+    await _ready(tester, container);
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(UpdateStatusNote.nowKey));
+    await tester.pump();
+    expect(container.read(appUpdateProvider).phase, AppUpdatePhase.closing);
+    await tester.pump(updateCloseDelay);
+    expect(updater.closes, 1);
+  });
+
+  testWidgets('music playing adds "Music will stop" under the capsule', (
+    tester,
+  ) async {
+    final container = await _pump(
+      tester,
+      updater: FakeAppUpdater(waiting: 7),
+      musicPlaying: true,
+    );
+    await _ready(tester, container);
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text(UpdateStatusNote.musicLabel), findsOneWidget);
+    final tag = tester.getRect(find.byKey(UpdateStatusNote.musicKey));
+    final cancel = tester.getRect(find.byKey(UpdateStatusNote.cancelKey));
+    expect(tag.top, greaterThanOrEqualTo(cancel.bottom - 0.5));
+    container.read(appUpdateProvider.notifier).cancelCountdown();
+    // The note's dot breathes forever, so settle by time, not by quiet.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('with VoiceOver the capsule waits for Now or Cancel', (
+    tester,
+  ) async {
+    final updater = FakeAppUpdater(waiting: 7);
+    final container = await _pump(tester, updater: updater, voiceOver: true);
+    await _ready(tester, container);
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(updateCountdownStep * 10);
+    expect(container.read(appUpdateProvider).holding, isTrue);
+    expect(find.text(UpdateStatusNote.countdownLabel(5)), findsOneWidget);
+    expect(updater.closes, 0);
+    final handle = tester.ensureSemantics();
+    expect(
+      tester.getSemantics(find.byKey(UpdateStatusNote.capsuleKey)).label,
+      UpdateStatusNote.holdingSemantics,
+    );
+    handle.dispose();
+    container.read(appUpdateProvider.notifier).cancelCountdown();
+    // The note's dot breathes forever, so settle by time, not by quiet.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('when the title leaves too little room the capsule sits just '
+      'under the note, right-aligned', (tester) async {
+    final container = await _pump(
+      tester,
+      updater: FakeAppUpdater(waiting: 7),
+      size: const Size(320, 640),
+    );
+    await _ready(tester, container);
+    final note = tester.getRect(find.byKey(UpdateStatusNote.noteKey));
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final capsule = tester.getRect(find.byKey(UpdateStatusNote.capsuleKey));
+    final title = tester.getRect(find.text('Home'));
+    expect(capsule.top, greaterThanOrEqualTo(title.bottom - 0.5));
+    expect(capsule.right, closeTo(note.right, 0.5));
+    expect(capsule.left, greaterThanOrEqualTo(20 - 0.5));
+    expect(tester.takeException(), isNull);
+    container.read(appUpdateProvider.notifier).cancelCountdown();
+    // The note's dot breathes forever, so settle by time, not by quiet.
+    await tester.pump(const Duration(seconds: 1));
   });
 
   testWidgets('the start after an update plays the bars, the tick with '
@@ -241,22 +417,50 @@ void main() {
     await tester.tap(find.byKey(UpdateStatusNote.noteKey));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    // Nothing keeps scheduling frames while the bars hold still.
+    // Nothing keeps scheduling frames while the bars and stripe hold still.
     expect(tester.binding.hasScheduledFrame, isFalse);
-    await tester.pump(updateCloseDelay);
+    // The stripe steps down once a second instead.
+    await tester.pump(updateCountdownStep);
+    await tester.pump();
+    final stripe = tester.getRect(find.byKey(UpdateStatusNote.stripeKey));
+    final fill = tester.getRect(find.byKey(UpdateStatusNote.stripeFillKey));
+    expect(fill.width / stripe.width, closeTo(0.8, 0.001));
+    container.read(appUpdateProvider.notifier).cancelCountdown();
+    await tester.pump();
   });
 
-  testWidgets('the tap gives one soft click as the dot becomes the bars', (
-    tester,
-  ) async {
+  testWidgets('the tap gives one soft click as the capsule opens, and none '
+      'per second', (tester) async {
     final updater = FakeAppUpdater(waiting: 7);
     final container = await _pump(tester, updater: updater);
     await _ready(tester, container);
     final haptics = _recordHaptics(tester);
+    final kinds = recordHaptics(tester);
     await tester.tap(find.byKey(UpdateStatusNote.noteKey));
     await tester.pump();
-    await tester.pump(UpdateStatusNote.morphFor);
+    await tester.pump(updateCountdownStep * 3);
     expect(haptics, ['HapticFeedbackType.selectionClick']);
+    expect(kinds, isEmpty);
+    // Cancel plays the app's dismiss feel.
+    await tester.tap(find.byKey(UpdateStatusNote.cancelKey));
+    await tester.pump();
+    expect(kinds, [HapticKind.dismiss]);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('Now plays the call-to-action feel', (tester) async {
+    final updater = FakeAppUpdater(waiting: 7);
+    final container = await _pump(tester, updater: updater);
+    await _ready(tester, container);
+    final haptics = _recordHaptics(tester);
+    final kinds = recordHaptics(tester);
+    await tester.tap(find.byKey(UpdateStatusNote.noteKey));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(UpdateStatusNote.nowKey));
+    await tester.pump();
+    expect(haptics, ['HapticFeedbackType.selectionClick']);
+    expect(kinds, [HapticKind.primary]);
     await tester.pump(updateCloseDelay);
   });
 

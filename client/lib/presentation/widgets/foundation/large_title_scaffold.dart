@@ -144,6 +144,22 @@ class LargeTitleScaffold extends StatefulWidget {
   State<LargeTitleScaffold> createState() => _LargeTitleScaffoldState();
 }
 
+/// The width a [LargeTitleScaffold.titleNote] has on its line: beside the
+/// title, what the title leaves; on a line of its own, the whole row. A note
+/// that grows for a moment (the update countdown) uses it to choose between
+/// the title's line and just under it.
+class TitleNoteRoom extends InheritedWidget {
+  const TitleNoteRoom({super.key, required this.width, required super.child});
+
+  final double width;
+
+  static double? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<TitleNoteRoom>()?.width;
+
+  @override
+  bool updateShouldNotify(TitleNoteRoom oldWidget) => oldWidget.width != width;
+}
+
 class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
     with SingleTickerProviderStateMixin {
   final GlobalKey _titleRowKey = GlobalKey();
@@ -336,7 +352,12 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
               ),
               Align(
                 alignment: AlignmentDirectional.centerEnd,
-                child: widget.titleNote!(context, null),
+                child: TitleNoteRoom(
+                  width: constraints.maxWidth,
+                  child: Builder(
+                    builder: (context) => widget.titleNote!(context, null),
+                  ),
+                ),
               ),
             ],
           );
@@ -352,7 +373,15 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
             children: [
               Expanded(child: title),
               const SizedBox(width: LargeTitleScaffold.titleGap),
-              widget.titleNote!(context, lineHeight),
+              TitleNoteRoom(
+                width:
+                    constraints.maxWidth -
+                    titleWidth -
+                    LargeTitleScaffold.titleGap,
+                child: Builder(
+                  builder: (context) => widget.titleNote!(context, lineHeight),
+                ),
+              ),
             ],
           ),
         );
