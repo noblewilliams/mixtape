@@ -65,10 +65,18 @@ class _IdeaMarqueeState extends State<IdeaMarquee>
   late final Ticker _ticker = createTicker(_tick);
   final ValueNotifier<double> _offset = ValueNotifier(0);
   final GlobalKey _cycleKey = GlobalKey();
+  final GlobalKey _firstKey = GlobalKey();
   Duration _last = Duration.zero;
   double _cycle = 0;
   bool _held = false;
   Timer? _resume;
+
+  /// The first pill's width with its gap, as last laid out.
+  double? _first;
+
+  /// The first pill was swapped for another (or one was put in front): once
+  /// the new one is laid out, the offset moves by the difference.
+  ({double before, bool inserted})? _firstChanged;
 
   @override
   void dispose() {
@@ -106,10 +114,56 @@ class _IdeaMarqueeState extends State<IdeaMarquee>
 
   /// One pass of the pills, measured once laid out.
   void _measure() {
+    final first = _firstKey.currentContext?.findRenderObject() as RenderBox?;
+    if (first != null && first.hasSize) {
+      final width = first.size.width;
+      final changed = _firstChanged;
+      if (changed != null) {
+        _firstChanged = null;
+        _shift(width - (changed.inserted ? 0 : changed.before));
+      }
+      _first = width;
+    }
     final box = _cycleKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
     final width = box.size.width;
     if (width != _cycle && mounted) setState(() => _cycle = width);
+  }
+
+  /// Moves the drift by [delta] within the current pass, so the pills on
+  /// screen keep their places while the pass changes length in front of
+  /// them.
+  void _shift(double delta) {
+    if (_cycle <= 0) return;
+    _offset.value = (_offset.value % _cycle) + delta;
+  }
+
+  /// When the first pill changes (Home's routine skeleton giving way once the
+  /// routine has loaded), the pills after it would all jump by its width. The
+  /// offset takes up the change instead, so nothing on screen moves (launch
+  /// glitch, 2026-11-24).
+  @override
+  void didUpdateWidget(IdeaMarquee old) {
+    super.didUpdateWidget(old);
+    if (old.children.isEmpty || widget.children.isEmpty) return;
+    final before = old.children.first.key;
+    final now = widget.children.first.key;
+    if (before == null || before == now) return;
+    final width = _first;
+    if (width == null || _cycle <= 0) return;
+    final gone =
+        old.children.length > 1 && old.children[1].key == now && now != null;
+    if (gone) {
+      // The first pill left: the rest stay put, and the pass is shorter by
+      // exactly its width, known now.
+      _offset.value = (_offset.value % _cycle) - width;
+      _cycle -= width;
+      _first = null;
+      return;
+    }
+    final inserted =
+        widget.children.length > 1 && widget.children[1].key == before;
+    _firstChanged = (before: width, inserted: inserted);
   }
 
   /// A long routine title ellipsizes rather than running a whole screen
@@ -126,10 +180,11 @@ class _IdeaMarqueeState extends State<IdeaMarquee>
       key: key,
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (final child in widget.children)
+        for (var i = 0; i < widget.children.length; i++)
           Padding(
+            key: primary && i == 0 ? _firstKey : null,
             padding: EdgeInsets.only(right: widget.gap),
-            child: _capped(child, viewport),
+            child: _capped(widget.children[i], viewport),
           ),
       ],
     );

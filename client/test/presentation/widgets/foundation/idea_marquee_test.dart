@@ -99,4 +99,87 @@ void main() {
     expect(taps, 1);
     await tester.pumpWidget(const SizedBox());
   });
+
+  group('the first pill changing mid-drift (launch glitch, 2026-11-24)', () {
+    Widget row(List<(String, double)> pills) => MaterialApp(
+      home: MediaQuery(
+        data: const MediaQueryData(size: Size(390, 844)),
+        child: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 390,
+              child: IdeaMarquee(
+                inset: 14,
+                children: [
+                  for (final (label, width) in pills)
+                    SizedBox(
+                      key: ValueKey(label),
+                      width: width,
+                      height: 34,
+                      child: Text(label),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    /// Where each drawn copy of [label] sits: the row repeats, so a pill may
+    /// carry on in the next copy round.
+    List<double> copies(WidgetTester tester, String label) => [
+      for (final e in find.text(label).evaluate())
+        (e.renderObject! as RenderBox).localToGlobal(Offset.zero).dx -
+            tester.getTopLeft(find.byKey(IdeaMarquee.rowKey)).dx,
+    ];
+
+    Matcher near(double x, {double before = 0.5, double after = 0.5}) =>
+        contains(
+          predicate<double>((v) => v <= x + before && v >= x - after - 0.001),
+        );
+
+    Future<void> drift(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pump(const Duration(milliseconds: 700));
+    }
+
+    testWidgets('dropping it leaves the others where they are', (tester) async {
+      await tester.pumpWidget(
+        row([('skeleton', 60), ('One idea', 120), ('Another idea', 140)]),
+      );
+      await drift(tester);
+      final one = _left(tester, 'One idea');
+      final another = _left(tester, 'Another idea');
+
+      await tester.pumpWidget(row([('One idea', 120), ('Another idea', 140)]));
+      // The very frame it goes: nothing jumps.
+      expect(copies(tester, 'One idea'), near(one));
+      await tester.pump();
+      await tester.pump();
+      // Still drifting from there, never back by the dropped width.
+      expect(copies(tester, 'Another idea'), near(another, after: 5));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('swapping it for a wider one leaves the others in place', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        row([('skeleton', 60), ('One idea', 120), ('Another idea', 140)]),
+      );
+      await drift(tester);
+      final one = _left(tester, 'One idea');
+
+      await tester.pumpWidget(
+        row([('Routine', 110), ('One idea', 120), ('Another idea', 140)]),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(copies(tester, 'One idea'), near(one, after: 5));
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
 }

@@ -5,6 +5,7 @@ import 'core/config.dart';
 import 'data/api/api_client.dart' show ApiClient;
 import 'data/api/reachability.dart' show probeInternet;
 import 'presentation/providers/app_update_provider.dart';
+import 'presentation/providers/capabilities_provider.dart';
 import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/dj_status_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
@@ -82,6 +83,10 @@ class MixtapeApp extends ConsumerWidget {
     // Whether the DJ is paused (the operator's kill switch): read now, on
     // every return to the foreground and on a timer, whatever the root.
     ref.listen(djStatusMonitorProvider, (_, _) {});
+    // The last album-picks answer, read from launch so Home's composer row
+    // is drawn in its final layout before `/me` answers (2026-11-24), and
+    // kept listened so a sign-out forgets it.
+    ref.listen(rememberedAlbumPicksProvider, (_, _) {});
     // Over-the-air updates: looked for from launch, whatever the root.
     ref.listen(appUpdateMonitorProvider, (_, _) {});
     // Mix-ready pushes: the device registers from launch (and again at every
@@ -140,6 +145,7 @@ class MixtapeApp extends ConsumerWidget {
                     debugPreview == 'shell' ||
                     debugPreview == 'push-ask' ||
                     debugPreview == 'shell-update' ||
+                    debugPreview == 'shell-update-music' ||
                     debugPreview == 'shell-update-applied') &&
                 kDebugMode
           ? const MixesPreview()

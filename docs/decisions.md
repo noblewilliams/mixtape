@@ -2554,3 +2554,68 @@ action. The founder asked for the mix row to match the redesigned song row.
 from inside the list's side padding), `enabled`, and an unfold when a
 removing action's Future leaves the row in place (a failed archive).
 `SwipeActions` now has no callers in the app.
+
+## 2026-11-24 — The update tap counts down; closing leaves a reopen banner; leaving the app applies quietly (founder)
+
+On device, the tap on "Update" played the bars for 1.8 s and then the app
+was gone, which listeners read as a crash. iOS still cannot restart an app in
+place: a Shorebird patch loads only when the engine starts, and the engine
+starts once per process. So the app still closes, but no longer by surprise
+(board `docs/mockups/2026-11-24-ota-restart-countdown-r3.html`, approval
+`docs/mockups/approved/2026-11-24-ota-restart-countdown.md`, superseding the
+tap in the 2026-11-20 approval):
+
+- **Countdown capsule.** The tap swaps the note for a glass capsule anchored
+  where it sat: "Restarting in 5 | Cancel  Now". It counts 5 → 1 over the
+  composer's prism stripe, which shortens from the right. At 0 it reads
+  "Restarting" for 0.7 s, then closes. "Music will stop" hangs under it while
+  mixtape's own player is playing. With VoiceOver on, the count waits for Now
+  or Cancel. When the title leaves too little room, the capsule sits just
+  under the note. It lives in the overlay (`OverlayPortal` plus a
+  `CompositedTransformFollower`), so it never moves the title row, and sheets
+  still cover it.
+- **Haptics kept.** The same `selectionClick` fires on the tap. Cancel plays
+  `HapticKind.dismiss` and Now `HapticKind.primary`. Nothing plays per
+  second.
+- **Reopen banner.** Just before closing, the app schedules a local
+  notification for 1 s later ("mixtape is up to date" / "Tap to jump back
+  in."). It is sent only when notifications are already allowed, never
+  prompted for, and cleared at the next launch.
+- **Quiet apply.** With a patch waiting, leaving the app (a `paused`
+  lifecycle) starts a 3 s timer that then closes the app in the background
+  with no banner. It holds off while mixtape is playing music, voice input is
+  busy, an import or library sync runs, or a mix send has no durable turn yet
+  (a turn the server owns carries on and pushes). A timer that fires more
+  than 2 s late means iOS suspended the app, which has just come back, so it
+  stays open. Leaving mid-countdown cancels the countdown and hands over to
+  this.
+
+All of it is Dart (`flutter_local_notifications` and the native glass view
+are already in 1.2.0 (17)), so it ships as a patch.
+
+**Reopens if:** App Review objects to the self-close (fall back to the quiet
+apply alone), or Shorebird ships an in-process restart.
+
+## 2026-11-24 — Home draws its final layout from the first frame
+
+A founder screen recording of a cold start showed two glitches that settled
+together at about 2.1 s, when `/me` and `/suggestions` answered:
+
+- **Mix | Album appeared late.** Album picks were off until the first `/me`
+  answered, so Home drew the Mix-only row (Shape on the left) and then moved
+  Shape right as the toggle came in. The app now keeps the last answer `/me`
+  gave in `capabilities.json` (Application Support), read from launch at the
+  app root. While the first `/me` of a launch is loading,
+  `albumPicksEnabledProvider` uses it (off when there is none). Each fresh
+  `/me` answer replaces it, and signing out deletes it. A failed `/me` still
+  reads as off.
+- **The idea row jumped.** The routine skeleton is the marquee's first pill.
+  When the routine loaded with nothing to suggest, it was dropped mid-drift,
+  and every pill after it jumped left by its width. `IdeaMarquee` now takes
+  up a change of its first pill in its offset (exactly, in the same frame,
+  when the pill leaves; one frame later when it is swapped or inserted), so
+  the pills on screen keep their places.
+
+**Reopens if:** the server turns album picks off for an account and the
+toggle showing for a second at launch matters (then shorten the window, or
+re-check `/me` before showing it).
